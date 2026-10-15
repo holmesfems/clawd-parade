@@ -6,14 +6,22 @@ import type { Scene } from './game'
 import {
   ACHIEVEMENTS,
   COSMETICS,
+  DREAMS,
+  GIFT_SHOW_MS,
+  TREATS,
   UPGRADES,
   accrue,
+  affectionOf,
   buyCosmetic,
   buyUpgrade,
   formatHearts,
   formatRate,
+  giftOf,
+  giveGift,
   grant,
+  isDream,
   isFever,
+  isHappy,
   isMaxed,
   levelOf,
   liveCombo,
@@ -220,7 +228,8 @@ async function step($: EngineInterface) {
 
     // なでられている間とフィーバー中は、ハートが滑らかに動くよう毎コマ描く
     const isPetted = p.at > 0 && now - p.at < PET_SHOW_MS
-    const isLively = isMarching(m.kind, list) || m.kind === 'done' || isPetted || isFever(g, now)
+    const isHolding = g.lastGift !== null && now - g.lastGift.at < GIFT_SHOW_MS
+    const isLively = isMarching(m.kind, list) || m.kind === 'done' || isPetted || isFever(g, now) || isHolding
     if (!isLively && beat % CALM_EVERY !== 0) return
 
     const isCalm = !isMarching(m.kind, list) && !ASKING.includes(m.kind)
@@ -400,14 +409,19 @@ export const register: Register = on => {
       read($, touchDebug),
     ])
     const isPetted = petted.at > 0 && t.at - petted.at < PET_SHOW_MS
+    // 贈り物をもらった直後は、なにより先にその贈り物へのお礼を言う
+    const thanked = g.lastGift && t.at - g.lastGift.at < GIFT_SHOW_MS ? giftOf(g.lastGift.id) : undefined
     const lines = LINES[m.kind]
-    const say = isPetted
-      ? petted.kind === 'hug' ? 'なかまもよろこんでるよ♡' : PETTED_LINES[m.kind] ?? 'えへへ…♡ もっとなでて〜'
-      : lines[Math.floor(t.n / 25) % lines.length] ?? lines[0]
+    const say = thanked
+      ? thanked.thanks
+      : isPetted
+        ? petted.kind === 'hug' ? 'なかまもよろこんでるよ♡' : PETTED_LINES[m.kind] ?? 'えへへ…♡ もっとなでて〜'
+        : lines[Math.floor(t.n / 25) % lines.length] ?? lines[0]
     // 取ったばかりの実績は、しばらくなでなで回数やタイマーの行に出す
     const unlock = g.lastUnlock && t.at - g.lastUnlock.at < UNLOCK_SHOW_MS ? ACHIEVEMENTS.find(a => a.id === g.lastUnlock?.id) : undefined
     const info =
       unlock ? `🏆 実績「${unlock.name}」ゲット！` :
+      thanked ? `🎁 ${thanked.name}${isDream(thanked.id) ? ' がやってきた！' : ` · ${g.gifts[thanked.id] ?? 1} 個目`}` :
       isPetted ? `なでなで ${petted.total} 回目 ♡` :
       w.isRunning ? `⏱ ${clockText(t.at - w.startedAt)}${w.tool ? ` · ${w.tool}` : ''}` :
       w.durationMs !== null ? `⏱ ${clockText(w.durationMs)} でおわり${w.helpers ? ` · なかま ${w.helpers}匹がてつだったよ` : ''}` :
@@ -417,9 +431,10 @@ export const register: Register = on => {
     const at = sceneOf(w, list)
     const combo = liveCombo(g, t.at)
     const isFeverNow = isFever(g, t.at)
+    const happy = isHappy(g, t.at) ? ` · ごきげん ${clockText(g.happyUntil - t.at)}` : ''
     const score = isFeverNow
       ? `★ フィーバー ★ ♡×3 あと ${Math.ceil((g.feverUntil - t.at) / 1000)} 秒 · ♡ ${formatHearts(g.hearts)}`
-      : `♡ ${formatHearts(g.hearts)} · +${formatRate(perSecond(g, at))}/秒${combo >= 2 ? ` · ${combo} コンボ！` : ''}`
+      : `♡ ${formatHearts(g.hearts)} · +${formatRate(perSecond(g, at, t.at))}/秒${combo >= 2 ? ` · ${combo} コンボ！` : happy}`
     const scoreColor = isFeverNow ? '#ffb347' : '#ff9ec7'
     const look = lookOf(g, t.at)
 
@@ -451,7 +466,7 @@ export const register: Register = on => {
 
     const words = (
       <Box key="words" flexDirection="column" flexShrink={1}>
-        <Text color={isPetted ? '#ff6b9a' : TONE[m.kind]} bold wrap="truncate-end">
+        <Text color={isPetted || thanked ? '#ff6b9a' : TONE[m.kind]} bold wrap="truncate-end">
           {say}
         </Text>
         {info !== '' && (
@@ -467,7 +482,7 @@ export const register: Register = on => {
     // 夜空に重ねる版：右端に寄せ、空の高さに収まるよう仲間は色つきの名札 1 行にまとめる
     const skyWords = (
       <Box key="words" flexDirection="column" alignItems="flex-end" paddingRight={2}>
-        <Text color={isPetted ? '#ff6b9a' : TONE[m.kind]} bold wrap="truncate-end">
+        <Text color={isPetted || thanked ? '#ff6b9a' : TONE[m.kind]} bold wrap="truncate-end">
           {say}
         </Text>
         {info !== '' && (
@@ -631,11 +646,11 @@ export const register: Register = on => {
     const now = g.passiveAt
 
     // 買い物：足りなければ理由をトーストで、買えたら実績も見て、すぐ保存する
-    const shop = (label: string, deal: (one: Game) => Game | string) => async () => {
+    const shop = (label: string, deal: (one: Game, when: number) => Game | string) => async () => {
       const when = await $.clock.now()
       let refusal: string | undefined
       await update($, game, one => {
-        const dealt = deal(one)
+        const dealt = deal(one, when)
         refusal = typeof dealt === 'string' ? dealt : undefined
         return typeof dealt === 'string' ? one : dealt
       })
@@ -658,6 +673,8 @@ export const register: Register = on => {
 
     const workBoost = at.isWorking ? `（お仕事中 ×${2 + 0.5 * levelOf(g, 'coffee')}）` : ''
     const done = ACHIEVEMENTS.filter(a => g.achievements.includes(a.id)).length
+    const affection = affectionOf(g.given)
+    const lasts = (ms: number) => (ms >= 60_000 ? `${ms / 60_000} 分` : `${ms / 1000} 秒`)
 
     return (
       <Box flexDirection="column" paddingX={1}>
@@ -713,6 +730,57 @@ export const register: Register = on => {
           )
         })}
 
+        {header(`プレゼント · なかよし度「${affection.name}」`)}
+        <Text dimColor>
+          {affection.next
+            ? `あと ♡${formatHearts(affection.next.at - g.given)} 贈ると「${affection.next.name}」`
+            : 'これ以上ないくらいなかよし！'}
+          {isHappy(g, now) ? ` · ごきげん中 ♡×1.5（あと ${clockText(g.happyUntil - now)}）` : ''}
+        </Text>
+        {TREATS.map(treat => {
+          const count = g.gifts[treat.id] ?? 0
+          return (
+            <Box key={`t-${treat.id}`} columnGap={1}>
+              <Button
+                key={`gift-${treat.id}`}
+                variant={g.hearts >= treat.price ? 'primary' : 'secondary'}
+                onPress={shop(`🎁 ${treat.name} をあげたよ！`, (one, when) => giveGift(one, treat.id, when))}
+              >
+                {treat.name} <Text dimColor>{formatHearts(treat.price)}♡</Text>
+              </Button>
+              <Text dimColor wrap="truncate-end">
+                ごきげん {lasts(treat.happyMs)}
+                {count > 0 ? ` · ${count} 回あげた` : ''}
+              </Text>
+            </Box>
+          )
+        })}
+
+        {header('夢のプレゼント（ひとつごとに ♡ ずっと +10%）')}
+        {DREAMS.map(dream => {
+          const isGiven = (g.gifts[dream.id] ?? 0) > 0
+          return (
+            <Box key={`d-${dream.id}`} columnGap={1}>
+              {isGiven ? (
+                <Button key={`gift-${dream.id}`} onPress={async () => $.ui.toast(`${dream.name} はもう飾ってあるよ`)}>
+                  {dream.name} ✓
+                </Button>
+              ) : (
+                <Button
+                  key={`gift-${dream.id}`}
+                  variant={g.hearts >= dream.price ? 'primary' : 'secondary'}
+                  onPress={shop(`🎁 ${dream.name} を贈ったよ！`, (one, when) => giveGift(one, dream.id, when))}
+                >
+                  {dream.name} <Text dimColor>{formatHearts(dream.price)}♡</Text>
+                </Button>
+              )}
+              <Text dimColor wrap="truncate-end">
+                {dream.shows}
+              </Text>
+            </Box>
+          )
+        })}
+
         {header(`実績 ${done}/${ACHIEVEMENTS.length}`)}
         {ACHIEVEMENTS.map(a => {
           const isMine = g.achievements.includes(a.id)
@@ -729,7 +797,9 @@ export const register: Register = on => {
         })}
 
         {header('きろく')}
-        <Text dimColor>なでた回数 {formatHearts(p.total)} 回 · 稼いだ ♡ {formatHearts(g.earned)}</Text>
+        <Text dimColor>
+          なでた回数 {formatHearts(p.total)} 回 · 稼いだ ♡ {formatHearts(g.earned)} · 贈った ♡ {formatHearts(g.given)}
+        </Text>
         <Text dimColor>
           最高コンボ {g.maxCombo} · フィーバー {g.fevers} 回 · お仕事中のなでなで {formatHearts(g.workPets)} 回 · ぎゅっ {g.hugs} 回
         </Text>

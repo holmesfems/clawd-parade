@@ -202,5 +202,54 @@ test('なでなでゲーム：コンボ・フィーバー・実績・お店', as
   expect(toasts).toContain('🏆 実績「はじめてのおかいもの」ゲット！')
   await shop.press({ key: 'dress-crown' })
   expect(toasts.at(-1)).toMatch(/足りないよ/)
-  expect((await shop.find({ text: /実績 \d+\/22/ }))?.text).toBeDefined()
+  expect((await shop.find({ text: new RegExp(`実績 \\d+/${ACHIEVEMENTS.length}`) }))?.text).toBeDefined()
+})
+
+test('贈り物：お礼を言ってごきげんになり、夢のプレゼントはずっと飾られる', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const fresh = ['gift1', 'dream1']
+  mock.store(on, { pets: 10, game: { hearts: 100_000, achievements: ACHIEVEMENTS.map(a => a.id).filter(id => !fresh.includes(id)) } })
+  const toasts: string[] = []
+  on('ui.toast', async (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+  await clock.advance(400)
+  const ui = await $.ui.mount({ ...band(120, 20), surface: 'desktop' })
+  const shop = await $.ui.mount({
+    plugin: 'clawd-parade',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'parade-shop',
+    props: { title: 'なでなでショップ', isFocused: false, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 80 }, view: {} },
+  })
+  const svg = async () => ((await ui.find({ type: 'Svg' }))?.props as { source: string }).source
+
+  // ケーキをあげると、お礼を言ってケーキをかかえ、ごきげんになる
+  await shop.press({ key: 'gift-cake' })
+  expect(toasts).toContain('🎁 いちごのショートケーキ をあげたよ！')
+  expect(toasts).toContain('🏆 実績「はじめてのプレゼント」ゲット！')
+  await clock.advance(200)
+  expect((await ui.find({ text: /ケーキ！？いいの！？/ }))?.text).toBeDefined()
+  expect((await ui.find({ text: /ごきげん 0:40/ }))?.text).toBeDefined()
+  expect(await svg()).toContain('#ff4d6d')
+  expect((await shop.find({ text: /なかよし度「ともだち」/ }))?.text).toBeDefined()
+
+  // 夢のプレゼントは 1 回きりで、庭に旗が立ちつづける
+  await shop.press({ key: 'gift-greenTests' })
+  expect(toasts).toContain('🎁 全部グリーンのテスト を贈ったよ！')
+  expect(toasts).toContain('🏆 実績「夢をひとつ」ゲット！')
+  await clock.advance(10_000)
+  expect(await svg()).toContain('#3fbf5f')
+  expect((await shop.find({ text: /全部グリーンのテスト ✓/ }))?.text).toBeDefined()
+  await shop.press({ key: 'gift-greenTests' })
+  expect(toasts.at(-1)).toBe('全部グリーンのテスト はもう飾ってあるよ')
+
+  // 高すぎる夢はまだ贈れない
+  await shop.press({ key: 'gift-noBugs' })
+  expect(toasts.at(-1)).toMatch(/足りないよ/)
 })

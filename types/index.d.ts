@@ -52,6 +52,11 @@ export type Hat = 'ribbon' | 'catEars' | 'santa' | 'crown'
 
 export type CosmeticId = Hat | 'shootingStars' | 'aurora'
 
+// 小さな贈り物（何度でも）と、夢のプレゼント（1 回きりで、ずっと飾られる）
+export type TreatId = 'cookie' | 'cocoa' | 'cake' | 'letter' | 'cushion' | 'keyboard'
+export type DreamId = 'greenTests' | 'telescope' | 'house' | 'library' | 'constellation' | 'moonTrip' | 'noBugs'
+export type GiftId = TreatId | DreamId
+
 export type Game = {
   // 今の ♡ と、これまでに稼いだ ♡（小数のまま持つ）
   hearts: number
@@ -70,6 +75,11 @@ export type Game = {
   hat: Hat | null
   achievements: string[]
   lastUnlock: { id: string; at: number } | null
+  // あげた贈り物の数、贈った ♡ の合計（なかよし度）、ごきげんが続く時刻、最後の贈り物
+  gifts: Partial<Record<GiftId, number>>
+  given: number
+  happyUntil: number
+  lastGift: { id: GiftId; at: number } | null
   // 最後に放置収入を足した時刻。0 はこのセッションでまだ読み込んでいない
   passiveAt: number
 }
@@ -80,6 +90,9 @@ export type Look = {
   shootingStars: boolean
   aurora: boolean
   fever: boolean
+  // 今 Clawd が抱えている贈り物（夢のプレゼントは箱で）、飾ってある夢のプレゼント
+  gift?: TreatId | 'box' | null
+  dreams?: DreamId[]
 }
 
 declare module 'claude-code' {

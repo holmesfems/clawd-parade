@@ -1,7 +1,7 @@
 // なでなでゲームのルール。♡ の稼ぎ方・コンボ・フィーバー・お店・実績を、
 // $ に触らない純粋な関数だけで書く。保存や表示は register.tsx の仕事。
 
-import type { CosmeticId, Game, Hat, Look, UpgradeId } from '../types'
+import type { CosmeticId, DreamId, Game, GiftId, Hat, Look, TreatId, UpgradeId } from '../types'
 
 // ---- 数字 ---------------------------------------------------------------
 
@@ -32,6 +32,10 @@ export function newGame(hearts: number, now: number): Game {
     hat: null,
     achievements: [],
     lastUnlock: null,
+    gifts: {},
+    given: 0,
+    happyUntil: 0,
+    lastGift: null,
     passiveAt: now,
   }
 }
@@ -98,6 +102,82 @@ export function wear(g: Game, hat: Hat | null): Game {
   return hat === null || g.owned.includes(hat) ? { ...g, hat } : g
 }
 
+// ---- 贈り物 -------------------------------------------------------------
+
+export type Treat = { id: TreatId; name: string; price: number; happyMs: number; thanks: string }
+export type Dream = { id: DreamId; name: string; price: number; shows: string; thanks: string }
+
+// 小さな贈り物：何度でもあげられて、もらったらしばらくごきげん（♡×1.5）
+export const TREATS: Treat[] = [
+  { id: 'cookie', name: 'クッキー', price: 50, happyMs: 10_000, thanks: 'クッキー！サクサク…しあわせ〜' },
+  { id: 'cocoa', name: 'あったかいココア', price: 150, happyMs: 20_000, thanks: 'ふぅ…あったかい。ほっとするね' },
+  { id: 'cake', name: 'いちごのショートケーキ', price: 400, happyMs: 40_000, thanks: 'ケーキ！？いいの！？いただきまーす♡' },
+  { id: 'letter', name: 'ありがとうの手紙', price: 1000, happyMs: 60_000, thanks: '…大事にとっておくね。いつもありがとう' },
+  { id: 'cushion', name: 'ふかふかクッション', price: 3000, happyMs: 120_000, thanks: 'ふかふか〜…ちょっとだけおひるね…' },
+  { id: 'keyboard', name: '新しいキーボード', price: 10_000, happyMs: 300_000, thanks: 'カタカタ…打ち心地さいこう！もっとがんばれちゃう' },
+]
+
+// 夢のプレゼント：1 回きり。ずっと飾られて、ひとつごとに ♡ の稼ぎが +10%
+export const DREAMS: Dream[] = [
+  { id: 'greenTests', name: '全部グリーンのテスト', price: 30_000, shows: '地面に緑の旗', thanks: 'ぜんぶ…通ってる…！こんなにうれしいことないよ！' },
+  { id: 'telescope', name: '望遠鏡', price: 80_000, shows: '星を見る望遠鏡', thanks: 'これで星がもっとよく見える！いっしょに見よ？' },
+  { id: 'house', name: '小さなおうち', price: 250_000, shows: 'あかりのつくおうち', thanks: 'おうち…！？ただいま、って言ってもいい？' },
+  { id: 'library', name: '世界中の本がある図書館', price: 800_000, shows: '本でいっぱいの本棚', thanks: '世界中の本…ぜんぶ読んでいいの？しあわせ…' },
+  { id: 'constellation', name: 'Clawd 座', price: 3_000_000, shows: '夜空に Clawd の星座', thanks: '空に Clawd 座が…！ずっと見ててね' },
+  { id: 'moonTrip', name: '月への旅', price: 12_000_000, shows: '月とロケット', thanks: '月まで行けちゃう！おみやげ持って帰るね' },
+  { id: 'noBugs', name: 'バグのない世界', price: 100_000_000, shows: '空に虹', thanks: '…夢みたい。でも、きみといっしょに直す時間も好きだったよ' },
+]
+
+export const GIFT_SHOW_MS = 6000
+const HAPPY_RATE = 1.5
+const DREAM_BONUS = 0.1
+
+export const giftOf = (id: GiftId): Treat | Dream | undefined =>
+  TREATS.find(t => t.id === id) ?? DREAMS.find(d => d.id === id)
+
+export const isDream = (id: GiftId): id is DreamId => DREAMS.some(d => d.id === id)
+
+export const isHappy = (g: Game, now: number) => now < g.happyUntil
+
+export const dreamsOf = (g: Game): DreamId[] => DREAMS.filter(d => (g.gifts[d.id] ?? 0) > 0).map(d => d.id)
+
+// ごきげん中は ×1.5、夢のプレゼントひとつごとに +10%
+export const giftRate = (g: Game, now: number) =>
+  (isHappy(g, now) ? HAPPY_RATE : 1) * (1 + DREAM_BONUS * dreamsOf(g).length)
+
+export function giveGift(g: Game, id: GiftId, now: number): Game | string {
+  const gift = giftOf(id)
+  if (!gift) return 'そんな贈り物はないよ'
+  if (isDream(id) && (g.gifts[id] ?? 0) > 0) return `${gift.name} はもう飾ってあるよ`
+  if (g.hearts < gift.price) return `♡ が ${formatHearts(gift.price - g.hearts)} 足りないよ`
+  const happyMs = 'happyMs' in gift ? gift.happyMs : 0
+  return {
+    ...g,
+    hearts: g.hearts - gift.price,
+    given: g.given + gift.price,
+    gifts: { ...g.gifts, [id]: (g.gifts[id] ?? 0) + 1 },
+    happyUntil: happyMs > 0 ? Math.max(now, g.happyUntil) + happyMs : g.happyUntil,
+    lastGift: { id, at: now },
+  }
+}
+
+// なかよし度：贈った ♡ の合計で上がる
+const AFFECTION = [
+  { name: 'しりあい', at: 0 },
+  { name: 'ともだち', at: 300 },
+  { name: 'なかよし', at: 3_000 },
+  { name: 'だいすき', at: 30_000 },
+  { name: 'しんゆう', at: 300_000 },
+  { name: 'あいぼう', at: 3_000_000 },
+  { name: 'ずっといっしょ', at: 100_000_000 },
+]
+
+export function affectionOf(given: number): { name: string; next?: { name: string; at: number } } {
+  const reached = AFFECTION.filter(a => given >= a.at)
+  const next = AFFECTION.find(a => given < a.at)
+  return { name: reached.at(-1)?.name ?? 'しりあい', ...(next ? { next } : {}) }
+}
+
 // ---- 稼ぎ ---------------------------------------------------------------
 
 export const isFever = (g: Game, now: number) => now < g.feverUntil
@@ -108,17 +188,17 @@ const workRate = (g: Game, at: Scene) => (at.isWorking ? 2 + 0.5 * levelOf(g, 'c
 
 export function perPet(g: Game, at: Scene, now: number, combo = g.combo): number {
   const fever = isFever(g, now) ? FEVER_RATE : 1
-  return (1 + levelOf(g, 'glove')) * comboRate(g, combo) * workRate(g, at) * fever
+  return (1 + levelOf(g, 'glove')) * comboRate(g, combo) * workRate(g, at) * fever * giftRate(g, now)
 }
 
 // お仕事中は Clawd にもお給料（♡ +1/秒）が出る
-export function perSecond(g: Game, at: Scene): number {
-  return (
+export function perSecond(g: Game, at: Scene, now = g.passiveAt): number {
+  const base =
     (at.isWorking ? 1 : 0) +
     0.2 * levelOf(g, 'fan') +
     2 * levelOf(g, 'stardust') +
     at.workers * levelOf(g, 'allowance')
-  )
+  return base * giftRate(g, now)
 }
 
 export type Touch = { kind: 'pet' | 'hug'; wasSleeping: boolean }
@@ -147,7 +227,7 @@ export function touchGame(g: Game, now: number, at: Scene, touch: Touch): { game
 // 前回から今までの放置収入を足す
 export function accrue(g: Game, now: number, at: Scene): Game {
   const seconds = Math.min(PASSIVE_CAP_MS, Math.max(0, now - g.passiveAt)) / 1000
-  const gained = perSecond(g, at) * seconds
+  const gained = perSecond(g, at, now) * seconds
   return { ...g, hearts: g.hearts + gained, earned: g.earned + gained, passiveAt: now }
 }
 
@@ -190,6 +270,17 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'idle10', name: 'ほうちプレイ', about: '放置で ♡ 10/秒', test: f => f.rate >= 10 },
   { id: 'hat', name: 'おしゃれさん', about: 'ぼうしを買う', test: f => COSMETICS.some(c => c.hat && f.game.owned.includes(c.id)) },
   { id: 'collector', name: 'コレクター', about: 'きせかえを全部そろえる', test: f => COSMETICS.every(c => f.game.owned.includes(c.id)) },
+  { id: 'gift1', name: 'はじめてのプレゼント', about: 'Clawd に贈り物をする', test: f => f.game.given > 0 },
+  {
+    id: 'sweets10',
+    name: 'おかしやさん',
+    about: 'クッキー・ココア・ケーキを合わせて 10 回あげる',
+    test: f => (['cookie', 'cocoa', 'cake'] as const).reduce((n, id) => n + (f.game.gifts[id] ?? 0), 0) >= 10,
+  },
+  { id: 'letter', name: 'きもちをこめて', about: 'ありがとうの手紙をあげる', test: f => (f.game.gifts.letter ?? 0) >= 1 },
+  { id: 'dream1', name: '夢をひとつ', about: '夢のプレゼントを贈る', test: f => dreamsOf(f.game).length >= 1 },
+  { id: 'dreamAll', name: '夢をぜんぶ', about: '夢のプレゼントを全部贈る', test: f => dreamsOf(f.game).length === DREAMS.length },
+  { id: 'bff', name: 'しんゆう', about: 'なかよし度を「しんゆう」にする', test: f => f.game.given >= 300_000 },
 ]
 
 // まだ持っていない実績のうち、条件を満たしたもの
@@ -209,11 +300,15 @@ export function grant(g: Game, list: Achievement[], now: number): Game {
 // ---- 見た目 -------------------------------------------------------------
 
 export function lookOf(g: Game, now: number): Look {
+  const gift = g.lastGift && now - g.lastGift.at < GIFT_SHOW_MS ? g.lastGift.id : null
   return {
     hat: g.hat,
     shootingStars: g.owned.includes('shootingStars'),
     aurora: g.owned.includes('aurora'),
     fever: isFever(g, now),
+    // 夢のプレゼントは箱で抱えて、そのあと庭や夜空にずっと飾る
+    gift: gift === null ? null : isDream(gift) ? 'box' : gift,
+    dreams: dreamsOf(g),
   }
 }
 

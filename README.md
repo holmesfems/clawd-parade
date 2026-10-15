@@ -23,7 +23,10 @@ Claude Code の入力欄の上で、Clawd が行進する mod です。Claude �
 - `/parade shop` でショップ
   - 強化 8 種：やわらか手袋、ふわふわブラシ、コーヒー差し入れ、応援うちわ、ツールのおだちん、サブエージェント手当、フィーバー延長、星のかけら
   - きせかえ 6 種：リボン、ねこみみ、サンタぼうし、王冠、流れ星、オーロラ
-- 実績 22 個
+  - プレゼント：♡ で Clawd に贈り物ができる。贈った ♡ の合計で「なかよし度」が上がる（しりあい → … → ずっといっしょ）
+    - 小さな贈り物 6 種（何度でも）：クッキー、あったかいココア、いちごのショートケーキ、ありがとうの手紙、ふかふかクッション、新しいキーボード。Clawd がかかえてお礼を言い、しばらく「ごきげん」（♡×1.5）
+    - 夢のプレゼント 7 種（1 回きり）：全部グリーンのテスト、望遠鏡、小さなおうち、世界中の本がある図書館、Clawd 座、月への旅、バグのない世界。夜空と庭にずっと飾られて、ひとつごとに ♡ の稼ぎが +10%
+- 実績 28 個
 - なでなでは mod の中だけで完結し、Claude への会話には何も送りません。作業中にいくらなでても邪魔になりません
 
 ## 入れ方
@@ -65,7 +68,7 @@ claude plugin test ./clawd-parade
 
 ## English
 
-A Claude Code mod: Clawd marches above the prompt while Claude works, a friend joins for each subagent, and Clawd's face reacts to how the turn ended. Pet Clawd (click or drag) to earn ♡, chain combos into fevers, and spend ♡ in `/parade shop` on upgrades and cosmetics (hats, shooting stars, an aurora). Works in the terminal and in the desktop app's Code tab. Install it from a terminal session:
+A Claude Code mod: Clawd marches above the prompt while Claude works, a friend joins for each subagent, and Clawd's face reacts to how the turn ended. Pet Clawd (click or drag) to earn ♡, chain combos into fevers, and spend ♡ in `/parade shop` on upgrades, cosmetics (hats, shooting stars, an aurora) and gifts for Clawd, from a cookie to dream gifts (a little house, a library, a trip to the moon, a world without bugs) that stay in the scene. Works in the terminal and in the desktop app's Code tab. Install it from a terminal session:
 
 ```
 /plugin install clawd-parade --marketplace holmesfems/clawd-parade

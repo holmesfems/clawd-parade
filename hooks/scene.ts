@@ -1,7 +1,7 @@
 // パレードのドット絵。1 ピクセルを半角ブロックの上下半分で描くので、
 // 縦 14 px が端末 7 行になる。ここは $ に触らない純粋な関数だけを置く。
 
-import type { Character, Friend, Hat, Look, MoodKind } from '../types'
+import type { Character, DreamId, Friend, Hat, Look, MoodKind } from '../types'
 
 export const SCENE_ROWS = 7
 const H = SCENE_ROWS * 2
@@ -380,6 +380,12 @@ export function drawScene({
 
   if (look.aurora) drawAurora(g, tick)
 
+  // 並びを先に決めて、行進の右にあいた「庭」に夢のプレゼントを飾る
+  const spots = layout(Math.min(W, paradeColumns), friends, character)
+  const yard = { left: spots.leader.x + spots.leader.w + YARD_GAP, right: Math.min(W, paradeColumns) - 2 }
+  const dreams = yard.right - yard.left >= YARD_MIN ? look.dreams ?? [] : []
+  if (dreams.includes('noBugs')) drawRainbow(g, yard, ground)
+
   // 空の星（地面の半分の速さで流れる）。空が高いぶんだけ数も増やす。
   // 行の歩幅は空の行数と素にしないと、星が数行に固まって横一列に並ぶ
   const skyRows = 6 + sky
@@ -390,6 +396,8 @@ export function drawScene({
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
     put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? C.star : C.starDim)
   }
+  if (dreams.includes('constellation')) drawConstellation(g, yard, sky, tick)
+  if (dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
   if (look.shootingStars) drawShootingStar(g, tick)
   if (look.fever) drawHeartRain(g, tick)
 
@@ -407,8 +415,9 @@ export function drawScene({
     }
   }
 
+  drawYard(g, dreams, yard, ground, tick)
+
   // 並び：いちばん新しい仲間がリーダーのすぐ後ろ
-  const spots = layout(Math.min(W, paradeColumns), friends, character)
   const byId = new Map(friends.map(f => [f.id, f]))
 
   spots.friends.forEach(({ id, x }, i) => {
@@ -427,26 +436,35 @@ export function drawScene({
     if (isDone || isHopping) put(g, 'heart', x + 2, Math.max(0, y - 4), C.heart)
   })
 
-  // なでなで中は何をしていても、とろけた顔で手のほうへ傾く
-  const feel: MoodKind = petted ? 'done' : mood
-  const { eyes, mouth } = petted ? { eyes: 'happy' as const, mouth: 'smile' as const } : face(mood, tick)
+  // なでなで中や、贈り物をもらった直後は、何をしていてもとろけた顔になる（なでなでは手のほうへ傾く）
+  const gift = look.gift ?? null
+  const pose = petted ?? (gift !== null ? { sway: 0 } : null)
+  const feel: MoodKind = pose ? 'done' : mood
+  const { eyes, mouth } = pose ? { eyes: 'happy' as const, mouth: 'smile' as const } : face(mood, tick)
   const bob =
-    petted ? 0 :
+    pose ? 0 :
     mood === 'sleeping' ? (Math.floor(tick / 3) % 2) :
     mood === 'done' ? [0, 1, 2, 1, 0, 0, 0, 0][tick % 8]! :
     marching ? tick % 2 : 0
-  const step = marching && !petted ? 1 + (tick % 2) : 0
+  const step = marching && !pose ? 1 + (tick % 2) : 0
   // 歩く Clawd は足を伸ばして上下する。跳ねる・寝息のときは体ごと持ち上げる
   const reach = isClawd && step && mood !== 'done' ? bob : 0
   const s = isClawd
     ? clawd(feel, eyes, step, tick, reach)
     : leader(eyes, mouth, step ? tick : 0, feel === 'error' ? tick : null)
-  const leaderX = spots.leader.x + (petted ? Math.max(-2, Math.min(2, petted.sway)) : 0)
+  const leaderX = spots.leader.x + (pose ? Math.max(-2, Math.min(2, pose.sway)) : 0)
   const top = ground - s.h - (bob - reach)
   if (look.fever) glow(g, s, leaderX, top, tick % 2 ? C.spark : C.feverGlow)
   blit(g, s, leaderX, top)
   if (look.hat) drawHat(g, look.hat, isClawd, leaderX, top)
-  if (petted) return g
+  // もらった贈り物を顔の横にかかえて、ハートを飛ばす
+  if (gift !== null) {
+    const icon = GIFT_ICONS[gift]
+    const gy = top + 2 - (tick % 2)
+    stampIcon(g, icon, leaderX + s.w + 1, gy)
+    put(g, tick % 4 < 2 ? 'heart' : 'small', leaderX + s.w + 2 + (tick % 3), gy - 5, C.heart)
+  }
+  if (pose) return g
 
   // 気持ちを表す小物はリーダーの右上（上に足した空のぶんだけ下げる）
   const fx = leaderX + s.w + 1
@@ -590,6 +608,179 @@ function glow(g: Grid, s: Sprite, x: number, y: number, color: number) {
       if (filled(sx, sy)) continue
       if ([-1, 0, 1].some(dy => [-1, 0, 1].some(dx => filled(sx + dx, sy + dy)))) dot(g, x + sx, y + sy, color)
     }
+}
+
+// ---- 贈り物と夢のプレゼント ------------------------------------------------
+
+// 庭はリーダーの右、小物（！や ♡、かかえた贈り物）の場所をあけたところから。狭すぎるときは飾らない
+const YARD_GAP = 12
+const YARD_MIN = 10
+
+type Yard = { left: number; right: number }
+
+const ICON_PAL: Record<string, number> = {
+  c: 0xd9a066,
+  k: 0x5c3a1c,
+  m: 0xf2f2f2,
+  a: 0x7a4b2a,
+  s: 0xb8bcd8,
+  w: 0xfffaf0,
+  r: 0xff4d6d,
+  y: 0xf5d58a,
+  p: 0xff9ec7,
+  e: 0xfff8e7,
+  d: 0xc9b79c,
+  h: C.heart,
+  u: 0xb99cff,
+  t: 0x8a6fd6,
+  q: 0x3a3d4a,
+  x: 0xd8dbe8,
+  b: 0x6ec6ff,
+}
+
+// Clawd がかかえる贈り物（夢のプレゼントはリボンのかかった箱）
+const GIFT_ICONS: Record<NonNullable<Look['gift']>, string[]> = {
+  cookie: ['.ccc.', 'ckccc', 'cccck', 'cckcc', '.ccc.'],
+  cocoa: ['.s.s..', 'mmmmm.', 'maaamm', 'maaamm', 'mmmmm.'],
+  cake: ['..r..', '.www.', 'wwwww', 'yyyyy', 'ppppp', 'yyyyy'],
+  letter: ['eeeeeee', 'edeeede', 'eedhdee', 'eeeeeee'],
+  cushion: ['.uuuuuu.', 'utuuuutu', 'uuuuuuuu', '.uuuuuu.'],
+  keyboard: ['qqqqqqqqq', 'qxqxqxqxq', 'qqxqxqxqq', 'qqxxxxxqq', 'qqqqqqqqq'],
+  box: ['.h.h.', '..h..', 'bbhbb', 'bbhbb', 'bbhbb'],
+}
+
+function stampIcon(g: Grid, rows: string[], x: number, y: number) {
+  rows.forEach((row, dy) =>
+    [...row].forEach((ch, dx) => {
+      const color = ICON_PAL[ch]
+      if (color !== undefined) dot(g, x + dx, y + dy, color)
+    }),
+  )
+}
+
+const DECO_PAL: Record<string, number> = {
+  R: 0xb5523b,
+  W: 0xf4e3c1,
+  L: 0xffe38a,
+  D: 0x7a4b2a,
+  P: 0xd0d0d0,
+  G: 0x3fbf5f,
+  K: C.white,
+  S: 0x8a8fa8,
+  E: 0x9ec9ff,
+  O: 0x8a5a33,
+  '1': 0xe0464b,
+  '2': 0x6ec6ff,
+  '3': 0xffd166,
+  '4': 0x8fd694,
+  '5': 0xb99cff,
+  T: 0xe8e8f0,
+  B: 0x6ec6ff,
+  r: 0xe0464b,
+  F: 0xffb347,
+  f: 0xffe066,
+  M: 0xfff1a8,
+}
+
+const DECOS = {
+  flag: ['PGGGGG', 'PGGGGK', 'PKGGKG', 'PGKKGG', 'PGGGGG', 'P.....', 'P.....'],
+  telescope: ['.......E', '.....SSE', '...SSS..', '.SSS....', '...S....', '..S.S...', '.S...S..'],
+  house: [
+    '......RR......',
+    '.....RRRR.....',
+    '....RRRRRR....',
+    '...RRRRRRRR...',
+    '..RRRRRRRRRR..',
+    '.RRRRRRRRRRRR.',
+    '..WWWWWWWWWW..',
+    '..WLLWWWWDDW..',
+    '..WLLWWWWDDW..',
+    '..WWWWWWWDDW..',
+  ],
+  library: ['OOOOOOOO', 'O123451O', 'O123451O', 'OOOOOOOO', 'O345123O', 'O345123O', 'OOOOOOOO', 'O......O'],
+  rocket: ['..rr..', '.TTTT.', '.TBBT.', '.TBBT.', '.TTTT.', '.TTTT.', 'rTTTTr', 'rr..rr', '..FF..'],
+  moon: ['..MMM.', '.MM...', 'MM....', 'MM....', '.MM...', '..MMM.'],
+}
+
+function stampDeco(g: Grid, rows: string[], x: number, y: number) {
+  rows.forEach((row, dy) =>
+    [...row].forEach((ch, dx) => {
+      const color = DECO_PAL[ch]
+      if (color !== undefined) dot(g, x + dx, y + dy, color)
+    }),
+  )
+}
+
+// 地面の飾りを庭の右から順に置く。入りきらないものは左から順にあきらめる
+const GROUND_DECOS: [DreamId, keyof typeof DECOS][] = [
+  ['house', 'house'],
+  ['library', 'library'],
+  ['moonTrip', 'rocket'],
+  ['telescope', 'telescope'],
+  ['greenTests', 'flag'],
+]
+
+function drawYard(g: Grid, dreams: DreamId[], yard: Yard, ground: number, tick: number) {
+  let right = yard.right
+  for (const [dream, deco] of GROUND_DECOS) {
+    if (!dreams.includes(dream)) continue
+    const rows = deco === 'rocket' && tick % 2 ? DECOS.rocket.map(row => row.replace(/F/g, 'f')) : DECOS[deco]
+    const w = rows[0]?.length ?? 0
+    if (right - w < yard.left) break
+    stampDeco(g, rows, right - w, ground - rows.length)
+    right -= w + 1
+  }
+}
+
+// バグのない世界：庭の右（おうちの上）にかかる、少し落ち着いた色の小さな虹
+function drawRainbow(g: Grid, yard: Yard, ground: number) {
+  const colors = [0xa8454f, 0xb07a3c, 0xb8a64a, 0x4f9a5c, 0x456fa8, 0x6f55a0]
+  const cx = yard.right - 7
+  const outer = Math.min(10, ground - 2)
+  colors.forEach((color, band) => {
+    const r = outer - band
+    if (r < 2) return
+    for (let i = 0; i <= r * 4; i++) {
+      const t = (Math.PI * i) / (r * 4)
+      dot(g, cx + Math.round(r * Math.cos(t)), ground - Math.round(r * Math.sin(t)), color)
+    }
+  })
+}
+
+// Clawd 座：Clawd の形に並んだ星を、うすい線でつなぐ
+const CONSTELLATION: [number, number][] = [
+  [0, 3],
+  [3, 1],
+  [9, 1],
+  [12, 3],
+  [9, 6],
+  [3, 6],
+  [4, 8],
+  [8, 8],
+]
+const CONSTELLATION_LINES: [number, number][] = [
+  [0, 1],
+  [1, 2],
+  [2, 3],
+  [3, 4],
+  [4, 5],
+  [5, 0],
+  [5, 6],
+  [4, 7],
+]
+
+function drawConstellation(g: Grid, yard: Yard, sky: number, tick: number) {
+  const ox = Math.floor((yard.left + yard.right) / 2) - 6
+  const oy = Math.max(0, sky - 3)
+  for (const [a, b] of CONSTELLATION_LINES) {
+    const [x0, y0] = CONSTELLATION[a]!
+    const [x1, y1] = CONSTELLATION[b]!
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))
+    for (let i = 1; i < n; i++) {
+      dot(g, ox + Math.round(x0 + ((x1 - x0) * i) / n), oy + Math.round(y0 + ((y1 - y0) * i) / n), 0x3d4270)
+    }
+  }
+  CONSTELLATION.forEach(([x, y], i) => dot(g, ox + x, oy + y, (tick + i) % 5 === 0 ? C.white : C.star))
 }
 
 // ---- 端末セルへの変換 ----------------------------------------------------
