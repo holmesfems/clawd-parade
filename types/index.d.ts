@@ -93,7 +93,7 @@ declare module 'claude-code' {
       character: Character
       pets: Pets
       game: Game
-      // /neko debug：手ざわり層のふちを見えるようにする
+      // /parade debug：手ざわり層のふちを見えるようにする
       touchDebug: boolean
     }
   }

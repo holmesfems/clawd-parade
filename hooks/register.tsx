@@ -63,7 +63,7 @@ const PETS_KEY = 'pets'
 const GAME_KEY = 'game'
 const PET_SHOW_MS = 4000
 const CHARACTERS: Record<string, Character> = { clawd: 'clawd', neko: 'neko', cat: 'neko', ねこ: 'neko', 猫: 'neko' }
-const SHOP = 'neko-shop'
+const SHOP = 'parade-shop'
 const SHOP_WORDS = ['shop', 'game', 'ショップ', 'みせ', 'おみせ', 'ゲーム']
 
 const FRAME_MS = 200
@@ -239,8 +239,8 @@ async function step($: EngineInterface) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'neko',
-      description: 'パレードを表示する／隠す（/neko shop でなでなでショップ、/neko clawd・/neko cat でキャラ切り替え）',
+      name: 'parade',
+      description: 'パレードを表示する／隠す（/parade shop でなでなでショップ、/parade clawd・/parade cat でキャラ切り替え）',
     })
     const saved = CHARACTERS[String(await $.store.get(CHARACTER_KEY))]
     if (saved) await update($, character, () => saved)
@@ -265,7 +265,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'neko' }, async ($, e) => {
+  on('command.run', { command: 'parade' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     if (SHOP_WORDS.includes(arg)) {
       const opened = await $.ui.open({ id: SHOP, title: 'なでなでショップ' })
@@ -275,7 +275,7 @@ export const register: Register = on => {
     if (arg === 'debug') {
       const isOn = await update($, touchDebug, v => !v)
 
-      return { text: isOn ? 'なでなでの当たり判定を、ピンクの枠で見えるようにしたよ（/neko debug で消える）' : '当たり判定の枠を消したよ' }
+      return { text: isOn ? 'なでなでの当たり判定を、ピンクの枠で見えるようにしたよ（/parade debug で消える）' : '当たり判定の枠を消したよ' }
     }
     const picked = CHARACTERS[arg]
     if (picked) {
@@ -285,11 +285,11 @@ export const register: Register = on => {
 
       return { text: picked === 'clawd' ? 'Clawd がやってきた！' : 'ねこたちがやってきた！' }
     }
-    if (arg !== '') return { text: '使い方: /neko（表示切り替え） / /neko shop / /neko clawd / /neko cat / /neko debug' }
+    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade clawd / /parade cat / /parade debug' }
 
     const hidden = await update($, isHidden, v => !v)
 
-    return { text: hidden ? 'みんなお昼寝に行きました（/neko でまた呼べます）' : 'みんな戻ってきました！' }
+    return { text: hidden ? 'みんなお昼寝に行きました（/parade でまた呼べます）' : 'みんな戻ってきました！' }
   })
 
   on('ui.message', async ($, e, next) => {
@@ -621,7 +621,7 @@ export const register: Register = on => {
     )
   })
 
-  // ---- なでなでショップ（/neko shop で開くパネル） ----
+  // ---- なでなでショップ（/parade shop で開くパネル） ----
 
   on('ui.render', { component: 'Pane', requestId: SHOP }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)

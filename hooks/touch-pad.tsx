@@ -13,7 +13,7 @@ export type TouchProps = {
   paradeColumns: number
   // 層の高さ（行）。デスクトップは中身の高さで層の高さが決まるので、この行数ぶん空行で埋める
   rows: number
-  // /neko debug 中は、層のふちと大きさを描いて見えるようにする
+  // /parade debug 中は、層のふちと大きさを描いて見えるようにする
   isDebug: boolean
   friends: Friend[]
   character: Character

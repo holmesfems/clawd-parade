@@ -11,7 +11,7 @@ Claude Code の入力欄の上で、Clawd が行進する mod です。Claude �
 - 作業中は Clawd が行進。許可待ち・質問・プラン・完了・指示待ち・エラー・中断など、状態ごとに表情とセリフが変わる
 - サブエージェントの数だけ仲間（ミニ Clawd）が増え、種類ごとに毛色が違う
 - 3 分放っておくと寝る（なでると起きる）
-- `/neko cat` でねこのパレードに切り替え
+- `/parade cat` でねこのパレードに切り替え
 - ターミナルとデスクトップアプリ（Code タブ）の両方で動く
   - ターミナル：半角ブロックのドット絵。マウスでなでる、仲間をクリックでぎゅっ
   - デスクトップ：SVG の夜空を帯いっぱいに広げ、セリフは空の右側に。絵を直接クリック・ドラッグでなでる
@@ -20,7 +20,7 @@ Claude Code の入力欄の上で、Clawd が行進する mod です。Claude �
 
 - なでると ♡ が貯まる。手を止めずになで続けるとコンボ、30 コンボで **フィーバー**（8 秒間 ♡×3、Clawd が金色に光ってハートの雨）
 - Claude が作業中はなでなでの ♡ が 2 倍。放っておいても ♡ が入る
-- `/neko shop` でショップ
+- `/parade shop` でショップ
   - 強化 8 種：やわらか手袋、ふわふわブラシ、コーヒー差し入れ、応援うちわ、ツールのおだちん、サブエージェント手当、フィーバー延長、星のかけら
   - きせかえ 6 種：リボン、ねこみみ、サンタぼうし、王冠、流れ星、オーロラ
 - 実績 22 個
@@ -40,10 +40,10 @@ Claude Code の入力欄の上で、Clawd が行進する mod です。Claude �
 
 | コマンド | |
 | --- | --- |
-| `/neko` | パレードの表示／非表示 |
-| `/neko shop` | なでなでショップを開く |
-| `/neko clawd` ・ `/neko cat` | キャラ切り替え |
-| `/neko debug` | なでなでの当たり判定をピンクの枠で表示（もう一度打つと消える） |
+| `/parade` | パレードの表示／非表示 |
+| `/parade shop` | なでなでショップを開く |
+| `/parade clawd` ・ `/parade cat` | キャラ切り替え |
+| `/parade debug` | なでなでの当たり判定をピンクの枠で表示（もう一度打つと消える） |
 
 ## 開発
 
@@ -65,7 +65,7 @@ claude plugin test ./clawd-parade
 
 ## English
 
-A Claude Code mod: Clawd marches above the prompt while Claude works, a friend joins for each subagent, and Clawd's face reacts to how the turn ended. Pet Clawd (click or drag) to earn ♡, chain combos into fevers, and spend ♡ in `/neko shop` on upgrades and cosmetics (hats, shooting stars, an aurora). Works in the terminal and in the desktop app's Code tab. Install it from a terminal session:
+A Claude Code mod: Clawd marches above the prompt while Claude works, a friend joins for each subagent, and Clawd's face reacts to how the turn ended. Pet Clawd (click or drag) to earn ♡, chain combos into fevers, and spend ♡ in `/parade shop` on upgrades and cosmetics (hats, shooting stars, an aurora). Works in the terminal and in the desktop app's Code tab. Install it from a terminal session:
 
 ```
 /plugin install clawd-parade --marketplace holmesfems/clawd-parade

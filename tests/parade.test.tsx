@@ -142,9 +142,9 @@ test('デスクトップでは絵に重ねた手ざわり層で、直接なで�
   // デスクトップは中身の高さで層の高さが決まるので、層は自分で 7 行ぶんの空行を描く
   expect((await ui.findAll({ type: 'Text', in: 'touch' })).length).toBe(7)
 
-  // /neko debug で層のふちと大きさが見える
+  // /parade debug で層のふちと大きさが見える
   expect(await ui.find({ text: /手ざわり層/, in: 'touch' })).toBeUndefined()
-  await $.command.run({ command: 'neko', args: 'debug', origin: { kind: 'human' } } as never)
+  await $.command.run({ command: 'parade', args: 'debug', origin: { kind: 'human' } } as never)
   await clock.advance(200)
   expect((await ui.find({ text: /手ざわり層 120×7 マス/, in: 'touch' }))?.text).toBeDefined()
 })
@@ -192,7 +192,7 @@ test('なでなでゲーム：コンボ・フィーバー・実績・お店', as
     plugin: 'clawd-parade',
     surface: 'desktop',
     component: 'Pane',
-    requestId: 'neko-shop',
+    requestId: 'parade-shop',
     props: { title: 'なでなでショップ', isFocused: false, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
   })
   expect((await shop.find({ text: /やわらか手袋 Lv0/ }))?.text).toBeDefined()
