@@ -1,0 +1,12 @@
+{
+  "name": "clawd-parade",
+  "description": "Clawd が入力欄の上を行進する Claude Code の mod",
+  "owner": { "name": "holmesfems" },
+  "plugins": [
+    {
+      "name": "clawd-parade",
+      "source": "./",
+      "description": "作業中の Clawd が入力欄の上を行進する mod。なでて ♡ を貯めるなでなでゲームつき"
+    }
+  ]
+}
