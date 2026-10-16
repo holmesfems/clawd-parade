@@ -1,13 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, Friend, Game, Mood, MoodKind, Pets, Synced, Tick, Work } from '../types'
+import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, Work } from '../types'
 import type { Scene } from './game'
 import {
   ACHIEVEMENTS,
   COSMETICS,
   DREAMS,
-  GIFT_SHOW_MS,
   TREATS,
   UPGRADES,
   accrue,
@@ -19,6 +18,7 @@ import {
   giftOf,
   giveGift,
   grant,
+  heldGift,
   idleDue,
   idlePerSecond,
   isDream,
@@ -71,6 +71,7 @@ const game = atom({ plugin: 'clawd-parade', key: 'game' } as const, newGame(0, 0
 const touchDebug = atom({ plugin: 'clawd-parade', key: 'touchDebug' } as const, false)
 // 前回 store から読んだ（store に書いた）ゲームとなでた回数。次に保存するときは、ここからの差分を足し込む
 const synced = atom({ plugin: 'clawd-parade', key: 'synced' } as const, { game: newGame(0, 0), pets: 0 } as Synced)
+const holding = atom({ plugin: 'clawd-parade', key: 'holding' } as const, null as Holding)
 
 const CHARACTER_KEY = 'character'
 const PETS_KEY = 'pets'
@@ -192,6 +193,11 @@ async function saveNow($: EngineInterface, now: number) {
   await update($, synced, () => ({ game: merged, pets: total }))
   // 保存している間になでたぶんも落とさずに、ほかのセッションのぶんを取り込む
   await update($, game, one => mergeGame(merged, g, one))
+  // 別のセッションで贈った贈り物が届いたら、こちらでも今からかかえてお礼を言う
+  if (merged.lastGift && JSON.stringify(merged.lastGift) !== JSON.stringify(g.lastGift)) {
+    const { id } = merged.lastGift
+    await update($, holding, () => ({ id, from: now }))
+  }
   await update($, pets, one => ({ ...one, total: total + one.total - p.total }))
 }
 
@@ -253,7 +259,14 @@ async function step($: EngineInterface) {
   isStepping = true
   try {
     beat += 1
-    const [m, list, p, g, w] = await Promise.all([read($, mood), read($, friends), read($, pets), read($, game), read($, work)])
+    const [m, list, p, g, w, held] = await Promise.all([
+      read($, mood),
+      read($, friends),
+      read($, pets),
+      read($, game),
+      read($, work),
+      read($, holding),
+    ])
     const now = await $.clock.now()
 
     if (beat % ACCRUE_EVERY === 0 && g.passiveAt > 0) {
@@ -266,7 +279,7 @@ async function step($: EngineInterface) {
 
     // なでられている間とフィーバー中は、ハートが滑らかに動くよう毎コマ描く
     const isPetted = p.at > 0 && now - p.at < PET_SHOW_MS
-    const isHolding = g.lastGift !== null && now - g.lastGift.at < GIFT_SHOW_MS
+    const isHolding = heldGift(held, now) !== null
     const isLively = isMarching(m.kind, list) || m.kind === 'done' || isPetted || isFever(g, now) || isHolding
     if (!isLively && beat % CALM_EVERY !== 0) return
 
@@ -437,7 +450,7 @@ export const register: Register = on => {
     const draft = await $.prompt.read().catch(() => ({ text: '' }))
     if (/\[Image #\d+\]/.test(draft.text)) return next(e)
 
-    const [m, list, w, t, who, petted, g, isDebug] = await Promise.all([
+    const [m, list, w, t, who, petted, g, isDebug, held] = await Promise.all([
       read($, mood),
       read($, friends),
       read($, work),
@@ -446,10 +459,12 @@ export const register: Register = on => {
       read($, pets),
       read($, game),
       read($, touchDebug),
+      read($, holding),
     ])
     const isPetted = petted.at > 0 && t.at - petted.at < PET_SHOW_MS
     // 贈り物をもらった直後は、なにより先にその贈り物へのお礼を言う
-    const thanked = g.lastGift && t.at - g.lastGift.at < GIFT_SHOW_MS ? giftOf(g.lastGift.id) : undefined
+    const holdingId = heldGift(held, t.at)
+    const thanked = holdingId ? giftOf(holdingId) : undefined
     const lines = LINES[m.kind]
     const say = thanked
       ? thanked.thanks
@@ -475,7 +490,7 @@ export const register: Register = on => {
       ? `★ フィーバー ★ ♡×3 あと ${Math.ceil((g.feverUntil - t.at) / 1000)} 秒 · ♡ ${formatHearts(g.hearts)}`
       : `♡ ${formatHearts(g.hearts)} · +${formatRate(perSecond(g, at, t.at))}/秒${combo >= 2 ? ` · ${combo} コンボ！` : happy}`
     const scoreColor = isFeverNow ? '#ffb347' : '#ff9ec7'
-    const look = lookOf(g, t.at)
+    const look = lookOf(g, t.at, held)
 
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
@@ -688,14 +703,21 @@ export const register: Register = on => {
     const shop = (label: string, deal: (one: Game, when: number) => Game | string) => async () => {
       const when = await $.clock.now()
       let refusal: string | undefined
+      let gave: Game['lastGift'] | undefined
       await update($, game, one => {
         const dealt = deal(one, when)
         refusal = typeof dealt === 'string' ? dealt : undefined
+        gave = typeof dealt !== 'string' && dealt.lastGift !== one.lastGift ? dealt.lastGift : null
         return typeof dealt === 'string' ? one : dealt
       })
       if (refusal !== undefined) {
         $.ui.toast(refusal)
         return
+      }
+      // 贈り物なら、Clawd がかかえてお礼を言う
+      if (gave) {
+        const { id } = gave
+        await update($, holding, () => ({ id, from: when }))
       }
       $.ui.toast(label)
       await award($, when, p.total, at)
