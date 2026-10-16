@@ -329,3 +329,36 @@ test('複数のセッション：放置収入はいくつ開いていても 1 �
   expect(mine + otherPaid).toBeGreaterThan(41.9)
   expect(mine + otherPaid).toBeLessThan(42.1)
 })
+
+test('複数のセッション：別のセッションで贈った贈り物も、届いてから 6 秒かかえてお礼を言う', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const all = ACHIEVEMENTS.map(a => a.id)
+  const held = sharedStore(on, { game: { hearts: 1_000, achievements: all } })
+  on('ui.toast', async () => ({ value: undefined }))
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+  await clock.advance(400)
+  const ui = await $.ui.mount({ ...band(120, 20), surface: 'desktop' })
+  const svg = async () => ((await ui.find({ type: 'Svg' }))?.props as { source: string }).source
+  const thanks = async () => (await ui.find({ text: /ケーキ！？いいの！？/ }))?.text
+
+  // 1.4 秒のときに、別のセッションでケーキを贈った
+  const other = held.get('game') as Record<string, unknown>
+  const cake = { id: 'cake', at: 1_400 }
+  held.set('game', { ...other, hearts: 600, given: 400, gifts: { cake: 1 }, happyUntil: 41_400, lastGift: cake })
+
+  // 6 秒の保存で届き、そこから 6 秒（12 秒まで）ケーキをかかえてお礼を言う
+  await clock.advance(5_000)
+  expect(await thanks()).toBeDefined()
+  await clock.advance(4_000)
+  expect(await thanks()).toBeDefined()
+  expect(await svg()).toContain('#ff4d6d')
+  await clock.advance(2_000)
+  expect(await thanks()).toBeUndefined()
+  expect(await svg()).not.toContain('#ff4d6d')
+  // ごきげんも届いている。贈った時刻は書き換えないので、別のセッションでまたかかえだしたりしない
+  expect((await ui.find({ text: /ごきげん/ }))?.text).toBeDefined()
+  expect((held.get('game') as { lastGift: unknown }).lastGift).toEqual(cake)
+})

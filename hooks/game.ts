@@ -1,7 +1,7 @@
 // なでなでゲームのルール。♡ の稼ぎ方・コンボ・フィーバー・お店・実績を、
 // $ に触らない純粋な関数だけで書く。保存や表示は register.tsx の仕事。
 
-import type { CosmeticId, DreamId, Game, GiftId, Hat, Look, TreatId, UpgradeId } from '../types'
+import type { CosmeticId, DreamId, Game, GiftId, Hat, Holding, Look, TreatId, UpgradeId } from '../types'
 
 // ---- 数字 ---------------------------------------------------------------
 
@@ -350,8 +350,11 @@ export function grant(g: Game, list: Achievement[], now: number): Game {
 
 // ---- 見た目 -------------------------------------------------------------
 
-export function lookOf(g: Game, now: number): Look {
-  const gift = g.lastGift && now - g.lastGift.at < GIFT_SHOW_MS ? g.lastGift.id : null
+// いまかかえている贈り物（かかえはじめてから GIFT_SHOW_MS のあいだ）
+export const heldGift = (h: Holding, now: number): GiftId | null => (h && now - h.from < GIFT_SHOW_MS ? h.id : null)
+
+export function lookOf(g: Game, now: number, holding: Holding): Look {
+  const gift = heldGift(holding, now)
   return {
     hat: g.hat,
     shootingStars: g.owned.includes('shootingStars'),

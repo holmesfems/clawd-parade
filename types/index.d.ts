@@ -84,6 +84,10 @@ export type Game = {
   passiveAt: number
 }
 
+// このセッションで Clawd が贈り物をかかえはじめた時刻。
+// 自分で贈ったときと、別のセッションで贈ったものが保存から届いたときに始まる
+export type Holding = { id: GiftId; from: number } | null
+
 // 前回 store と合わせたときのゲームとなでた回数（複数のセッションで保存を分け合う）
 export type Synced = { game: Game; pets: number }
 
@@ -112,6 +116,7 @@ declare module 'claude-code' {
       // /parade debug：手ざわり層のふちを見えるようにする
       touchDebug: boolean
       synced: Synced
+      holding: Holding
     }
   }
 }
