@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, Friend, Game, Mood, MoodKind, Pets, Tick, Work } from '../types'
+import type { Character, Friend, Game, Mood, MoodKind, Pets, Synced, Tick, Work } from '../types'
 import type { Scene } from './game'
 import {
   ACHIEVEMENTS,
@@ -19,6 +19,8 @@ import {
   giftOf,
   giveGift,
   grant,
+  idleDue,
+  idlePerSecond,
   isDream,
   isFever,
   isHappy,
@@ -26,7 +28,9 @@ import {
   levelOf,
   liveCombo,
   lookOf,
+  mergeGame,
   newGame,
+  payIdle,
   perPet,
   perSecond,
   priceOf,
@@ -65,10 +69,14 @@ const pets = atom({ plugin: 'clawd-parade', key: 'pets' } as const, {
 // passiveAt が 0 のうちは、まだ保存から読み込んでいない
 const game = atom({ plugin: 'clawd-parade', key: 'game' } as const, newGame(0, 0) as Game)
 const touchDebug = atom({ plugin: 'clawd-parade', key: 'touchDebug' } as const, false)
+// 前回 store から読んだ（store に書いた）ゲームとなでた回数。次に保存するときは、ここからの差分を足し込む
+const synced = atom({ plugin: 'clawd-parade', key: 'synced' } as const, { game: newGame(0, 0), pets: 0 } as Synced)
 
 const CHARACTER_KEY = 'character'
 const PETS_KEY = 'pets'
 const GAME_KEY = 'game'
+// どのセッションかが最後に放置収入を払った時刻（放置収入を二重に払わないため）
+const IDLE_KEY = 'idlePaidAt'
 const PET_SHOW_MS = 4000
 const CHARACTERS: Record<string, Character> = { clawd: 'clawd', neko: 'neko', cat: 'neko', ねこ: 'neko', 猫: 'neko' }
 const SHOP = 'parade-shop'
@@ -161,12 +169,42 @@ const sceneOf = (w: Work, list: Friend[]): Scene => ({
 })
 
 let savedAt = 0
+let saving = Promise.resolve()
 
-async function save($: EngineInterface, now: number) {
-  const g = await read($, game)
+// 同じ差分を 2 回足さないよう、保存は 1 つずつ順番に
+function save($: EngineInterface, now: number) {
+  const run = saving.then(() => saveNow($, now))
+  saving = run.catch(() => undefined)
+  return run
+}
+
+// ほかのセッションの保存に、このセッションで増えた（減った）ぶんだけを足し込んで書く
+async function saveNow($: EngineInterface, now: number) {
+  const [g, p, base] = await Promise.all([read($, game), read($, pets), read($, synced)])
   if (g.passiveAt === 0) return
   savedAt = now
-  await $.store.set(GAME_KEY, g)
+  const stored = await $.store.get(GAME_KEY)
+  const theirs = isSaved(stored) ? restore(stored, 0, now) : base.game
+  const merged = mergeGame(theirs, base.game, g)
+  const total = (Number(await $.store.get(PETS_KEY)) || 0) + p.total - base.pets
+  await $.store.set(GAME_KEY, merged)
+  await $.store.set(PETS_KEY, total)
+  await update($, synced, () => ({ game: merged, pets: total }))
+  // 保存している間になでたぶんも落とさずに、ほかのセッションのぶんを取り込む
+  await update($, game, one => mergeGame(merged, g, one))
+  await update($, pets, one => ({ ...one, total: total + one.total - p.total }))
+}
+
+const isSaved = (v: unknown) => typeof v === 'object' && v !== null && typeof (v as Game).hearts === 'number'
+
+// 放置収入は、開いているセッションのどれか 1 つが払う。最後に払った時刻を store で分け合う
+async function payIdleIncome($: EngineInterface, now: number) {
+  if (idlePerSecond(await read($, game), now) === 0) return
+  const paidAt = Number(await $.store.get(IDLE_KEY)) || 0
+  if (paidAt >= now) return
+  await $.store.set(IDLE_KEY, now)
+  const ms = idleDue(paidAt, now)
+  if (ms > 0) await update($, game, one => payIdle(one, ms, now))
 }
 
 // 条件を満たした実績を渡して、トーストで知らせる
@@ -191,7 +229,6 @@ async function pet($: EngineInterface, kind: Pets['kind'], touch: { hand?: numbe
     hand: touch.hand ?? null,
     friend: touch.friend ?? null,
   }))
-  await $.store.set(PETS_KEY, after.total)
   const [m, w, list] = await Promise.all([read($, mood), read($, work), read($, friends)])
   const wasSleeping = m.kind === 'sleeping'
   if (wasSleeping) await update($, mood, () => ({ kind: 'idle', at: now }))
@@ -222,6 +259,7 @@ async function step($: EngineInterface) {
     if (beat % ACCRUE_EVERY === 0 && g.passiveAt > 0) {
       const at = sceneOf(w, list)
       await update($, game, one => accrue(one, now, at))
+      await payIdleIncome($, now)
       await award($, now, p.total, at)
       if (now - savedAt >= SAVE_EVERY_MS) await save($, now)
     }
@@ -253,13 +291,14 @@ export const register: Register = on => {
     })
     const saved = CHARACTERS[String(await $.store.get(CHARACTER_KEY))]
     if (saved) await update($, character, () => saved)
-    const total = Number(await $.store.get(PETS_KEY)) || 0
-    await update($, pets, p => ({ ...p, total }))
     // 読み込み直し（ホットリロード）のときは、セッションに残っている新しいほうを使う
     const now = await $.clock.now()
     if ((await read($, game)).passiveAt === 0) {
+      const total = Number(await $.store.get(PETS_KEY)) || 0
+      await update($, pets, p => ({ ...p, total }))
       const loaded = restore(await $.store.get(GAME_KEY), total, now)
       await update($, game, () => loaded)
+      await update($, synced, () => ({ game: loaded, pets: total }))
     }
     savedAt = now
     timer?.cancel()

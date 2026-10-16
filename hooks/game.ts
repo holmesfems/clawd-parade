@@ -47,6 +47,45 @@ export function restore(saved: unknown, hearts: number, now: number): Game {
   return { ...fresh, ...(saved as Partial<Game>), passiveAt: now }
 }
 
+// ---- 保存（セッションをまたいで） --------------------------------------
+
+// 別のセッションも同じ保存を書くので、丸ごと上書きせずに差分を足し込む。
+// theirs：いま保存されているもの、base：このセッションが前回読んだ（書いた）もの、mine：このセッションの今
+export function mergeGame(theirs: Game, base: Game, mine: Game): Game {
+  const add = (k: 'hearts' | 'earned' | 'given' | 'fevers' | 'workPets' | 'hugs' | 'wakes') => theirs[k] + mine[k] - base[k]
+  const addCounts = <K extends string>(t: Partial<Record<K, number>>, b: Partial<Record<K, number>>, m: Partial<Record<K, number>>) => {
+    const out: Partial<Record<K, number>> = { ...t }
+    for (const k of Object.keys(m) as K[]) {
+      const n = (t[k] ?? 0) + (m[k] ?? 0) - (b[k] ?? 0)
+      if (n > 0) out[k] = n
+      else delete out[k]
+    }
+    return out
+  }
+  const union = <T>(t: T[], m: T[]) => [...t, ...m.filter(x => !t.includes(x))]
+  // このセッションで変えたものはこちら、変えていなければ向こうの
+  const latest = <T>(t: T, b: T, m: T) => (JSON.stringify(m) !== JSON.stringify(b) ? m : t)
+  return {
+    ...mine,
+    hearts: Math.max(0, add('hearts')),
+    earned: add('earned'),
+    given: add('given'),
+    fevers: add('fevers'),
+    workPets: add('workPets'),
+    hugs: add('hugs'),
+    wakes: add('wakes'),
+    maxCombo: Math.max(theirs.maxCombo, mine.maxCombo),
+    levels: addCounts(theirs.levels, base.levels, mine.levels),
+    owned: union(theirs.owned, mine.owned),
+    achievements: union(theirs.achievements, mine.achievements),
+    gifts: addCounts(theirs.gifts, base.gifts, mine.gifts),
+    happyUntil: Math.max(theirs.happyUntil, mine.happyUntil),
+    hat: latest(theirs.hat, base.hat, mine.hat),
+    lastUnlock: latest(theirs.lastUnlock, base.lastUnlock, mine.lastUnlock),
+    lastGift: latest(theirs.lastGift, base.lastGift, mine.lastGift),
+  }
+}
+
 // ---- お店 ---------------------------------------------------------------
 
 export type Upgrade = { id: UpgradeId; name: string; about: string; base: number; growth: number; max?: number }
@@ -191,15 +230,15 @@ export function perPet(g: Game, at: Scene, now: number, combo = g.combo): number
   return (1 + levelOf(g, 'glove')) * comboRate(g, combo) * workRate(g, at) * fever * giftRate(g, now)
 }
 
-// お仕事中は Clawd にもお給料（♡ +1/秒）が出る
-export function perSecond(g: Game, at: Scene, now = g.passiveAt): number {
-  const base =
-    (at.isWorking ? 1 : 0) +
-    0.2 * levelOf(g, 'fan') +
-    2 * levelOf(g, 'stardust') +
-    at.workers * levelOf(g, 'allowance')
-  return base * giftRate(g, now)
-}
+// 放置で入る ♡/秒（応援うちわ・星のかけら）。セッションをいくつ開いていても 1 つぶん
+export const idlePerSecond = (g: Game, now = g.passiveAt) =>
+  (0.2 * levelOf(g, 'fan') + 2 * levelOf(g, 'stardust')) * giftRate(g, now)
+
+// お仕事中は Clawd にもお給料（♡ +1/秒）が出る。こちらは働いているセッションごとに入る
+const workPerSecond = (g: Game, at: Scene, now: number) =>
+  ((at.isWorking ? 1 : 0) + at.workers * levelOf(g, 'allowance')) * giftRate(g, now)
+
+export const perSecond = (g: Game, at: Scene, now = g.passiveAt) => idlePerSecond(g, now) + workPerSecond(g, at, now)
 
 export type Touch = { kind: 'pet' | 'hug'; wasSleeping: boolean }
 
@@ -224,11 +263,23 @@ export function touchGame(g: Game, now: number, at: Scene, touch: Touch): { game
   return { game: { ...next, hearts: next.hearts + gained, earned: next.earned + gained }, gained, isFeverStart }
 }
 
-// 前回から今までの放置収入を足す
+// 前回から今までのお給料を足す（放置のぶんは payIdle で、セッションをまたいで 1 回だけ払う）
 export function accrue(g: Game, now: number, at: Scene): Game {
   const seconds = Math.min(PASSIVE_CAP_MS, Math.max(0, now - g.passiveAt)) / 1000
-  const gained = perSecond(g, at, now) * seconds
+  const gained = workPerSecond(g, at, now) * seconds
   return { ...g, hearts: g.hearts + gained, earned: g.earned + gained, passiveAt: now }
+}
+
+// どのセッションかが最後に放置収入を払った時刻から、いま払うぶん（ms）。
+// 1 分以上だれも払っていなければ（どのセッションも開いていなかった）、払わずに時計だけ進める
+export function idleDue(paidAt: number, now: number): number {
+  const ms = now - paidAt
+  return paidAt > 0 && ms > 0 && ms <= PASSIVE_CAP_MS ? ms : 0
+}
+
+export function payIdle(g: Game, ms: number, now: number): Game {
+  const gained = (idlePerSecond(g, now) * ms) / 1000
+  return gained === 0 ? g : { ...g, hearts: g.hearts + gained, earned: g.earned + gained }
 }
 
 export function toolTip(g: Game): Game {

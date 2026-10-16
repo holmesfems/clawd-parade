@@ -84,6 +84,9 @@ export type Game = {
   passiveAt: number
 }
 
+// 前回 store と合わせたときのゲームとなでた回数（複数のセッションで保存を分け合う）
+export type Synced = { game: Game; pets: number }
+
 // 夜空と Clawd の飾り
 export type Look = {
   hat: Hat | null
@@ -108,6 +111,7 @@ declare module 'claude-code' {
       game: Game
       // /parade debug：手ざわり層のふちを見えるようにする
       touchDebug: boolean
+      synced: Synced
     }
   }
 }
