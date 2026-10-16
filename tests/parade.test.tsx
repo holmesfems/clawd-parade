@@ -253,3 +253,79 @@ test('贈り物：お礼を言ってごきげんになり、夢のプレゼン�
   await shop.press({ key: 'gift-noBugs' })
   expect(toasts.at(-1)).toMatch(/足りないよ/)
 })
+
+// ほかのセッションも書きこむ store。いま入っているものを外から見たり書き換えたりできる
+const sharedStore = (on: On, entries: Record<string, unknown>) => {
+  const held = new Map(Object.entries(entries))
+  on('store.get', async (_$, e) => ({ value: held.get(e.key) }))
+  on('store.set', async (_$, e) => {
+    held.set(e.key, e.value)
+    return { value: undefined }
+  })
+  return held
+}
+
+test('複数のセッション：ほかのセッションの稼ぎや買い物を上書きで消さない', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const all = ACHIEVEMENTS.map(a => a.id)
+  const held = sharedStore(on, { pets: 100, game: { hearts: 1_000, achievements: all } })
+  on('ui.toast', async () => ({ value: undefined }))
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+  await clock.advance(400)
+  const ui = await $.ui.mount({ ...band(120, 20), surface: 'desktop' })
+  await ui.resize({ columns: 120, rows: 7, in: 'touch' })
+  for (let i = 0; i < 3; i++) {
+    await ui.pointer({ in: 'touch', type: 'down', x: 8, y: 3, button: 'left' })
+    await ui.pointer({ in: 'touch', type: 'up', x: 8, y: 3, button: 'left' })
+    await clock.advance(200)
+  }
+
+  // そのあいだに、別のセッションが ♡ を 5,000 稼いで王冠を買い、50 回なでて保存した
+  const other = held.get('game') as Record<string, unknown>
+  held.set('game', { ...other, hearts: (other.hearts as number) + 5_000, owned: ['crown'], hat: 'crown' })
+  held.set('pets', 150)
+
+  // 次の保存で、どちらのぶんも残る
+  await clock.advance(5_000)
+  const saved = held.get('game') as { hearts: number; owned: string[]; hat: string }
+  expect(saved.hearts).toBeGreaterThan(6_000)
+  expect(saved.hearts).toBeLessThan(6_100)
+  expect(saved.owned).toEqual(['crown'])
+  expect(saved.hat).toBe('crown')
+  expect(held.get('pets')).toBe(153)
+  // 別のセッションのぶんがこちらの帯にも映る
+  expect((await ui.find({ text: /♡ 6,0\d\d / }))?.text).toBeDefined()
+})
+
+test('複数のセッション：放置収入はいくつ開いていても 1 つぶん', async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const all = ACHIEVEMENTS.map(a => a.id)
+  // 星のかけら Lv1 で、放置の ♡ は 2/秒
+  const held = sharedStore(on, { idlePaidAt: 1_000, game: { hearts: 0, levels: { stardust: 1 }, achievements: all } })
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))
+
+  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+  // 別のセッションも 0.7 秒ごとに、最後に払われた時刻からのぶんを払う
+  let now = 1_000
+  let otherPaid = 0
+  for (let i = 0; i < 30; i++) {
+    await clock.advance(700)
+    now += 700
+    const paidAt = held.get('idlePaidAt') as number
+    otherPaid += ((now - paidAt) / 1000) * 2
+    held.set('idlePaidAt', now)
+  }
+  await $.session.end({ sessionId: 's1', reason: 'exit' })
+
+  // 21 秒で、2 つのセッションを合わせて ♡ 42（二重に払っていれば 84 近く）
+  const mine = (held.get('game') as { hearts: number }).hearts
+  expect(mine).toBeGreaterThan(0)
+  expect(otherPaid).toBeGreaterThan(0)
+  expect(mine + otherPaid).toBeGreaterThan(41.9)
+  expect(mine + otherPaid).toBeLessThan(42.1)
+})
