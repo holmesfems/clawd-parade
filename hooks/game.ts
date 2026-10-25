@@ -143,32 +143,37 @@ export function mergeGame(theirs: Game, base: Game, mine: Game): Game {
   return settle(merged as Game, theirs, base, mine)
 }
 
-// 2 つのセッションでほぼ同時に買ったときの払いすぎを ♡ で返す。
-// - 上限のある強化：足し合わせて上限を超えたぶん（最後の Lv の値段で返す）
-// - きせかえ：両方のセッションで新しく買ったもの（持つのは 1 つ）
-// - 夢のプレゼント：2 回贈ったことになったもの（贈った ♡ の合計からも引く）
-// ♡ が足りないのに両方で買えてしまったときは、♡ が負（借金）になる。ただでは買えず、稼いだら返る
+// 2 つのセッションが base からほぼ同時に買ったとき、払った ♡ を本当の値段にそろえる。
+// - 強化：両方で上げたら、合わせた Lv（上限まで）を base から順に買った値段との差を返す・もらう。
+//   同じ Lv を両方で買うと、片方は次の Lv の値段になる（安いままでは上がらない）
+// - きせかえ：両方で新しく買ったもの（持つのは 1 つ）は、1 つぶん返す
+// - 夢のプレゼント：2 回贈ったことになったものは 1 回にして返す（贈った ♡ の合計からも引く）
+// ♡ が足りなくなったら負（借金）のまま。ただでは買えず、稼いだら返る
 function settle(g: Game, theirs: Game, base: Game, mine: Game): Game {
-  let refund = 0
-  const levels = { ...g.levels }
+  let out = g
   for (const u of UPGRADES) {
-    const level = levels[u.id] ?? 0
-    if (u.max === undefined || level <= u.max) continue
-    refund += (level - u.max) * priceOf(u, u.max - 1)
-    levels[u.id] = u.max
+    const [b, t, m] = [levelOf(base, u.id), levelOf(theirs, u.id), levelOf(mine, u.id)]
+    if (t <= b || m <= b) continue
+    const level = Math.min(t + m - b, u.max ?? Infinity)
+    const paid = costOf(u, b, t) + costOf(u, b, m)
+    out = { ...out, hearts: out.hearts + paid - costOf(u, b, level), levels: { ...out.levels, [u.id]: level } }
   }
   const isNew = (one: Game, id: CosmeticId) => one.owned.includes(id) && !base.owned.includes(id)
-  for (const c of COSMETICS) if (isNew(theirs, c.id) && isNew(mine, c.id)) refund += c.price
-  const gifts = { ...g.gifts }
-  let given = g.given
+  for (const c of COSMETICS) if (isNew(theirs, c.id) && isNew(mine, c.id)) out = { ...out, hearts: out.hearts + c.price }
   for (const d of DREAMS) {
-    const extra = (gifts[d.id] ?? 0) - 1
+    const extra = (out.gifts[d.id] ?? 0) - 1
     if (extra <= 0) continue
-    refund += extra * d.price
-    given -= extra * d.price
-    gifts[d.id] = 1
+    const refund = extra * d.price
+    out = { ...out, hearts: out.hearts + refund, given: out.given - refund, gifts: { ...out.gifts, [d.id]: 1 } }
   }
-  return refund === 0 ? g : { ...g, hearts: g.hearts + refund, levels, gifts, given }
+  return out
+}
+
+// Lv from から to まで順に上げる値段
+const costOf = (u: Upgrade, from: number, to: number) => {
+  let sum = 0
+  for (let level = from; level < to; level++) sum += priceOf(u, level)
+  return sum
 }
 
 // 項目ごとのマージの方針

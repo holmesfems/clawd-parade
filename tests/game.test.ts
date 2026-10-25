@@ -190,6 +190,26 @@ test('同時の買い物：上限のある強化は上限で止め、超えた�
   expect(merged.hearts).toBe(paid)
 })
 
+test('同時の買い物：同じ Lv を両方で買ったら、片方は次の Lv の値段になる', () => {
+  const glove = upgrade('glove')
+  const base = game({ hearts: 1_000, levels: { glove: 10 } })
+  const once = bought(buyUpgrade(base, 'glove'))
+  const merged = mergeGame(once, base, once)
+  expect(merged.levels).toEqual({ glove: 12 })
+  // Lv10→11 と Lv11→12 の値段を払ったことになる
+  expect(merged.hearts).toBe(1_000 - priceOf(glove, 10) - priceOf(glove, 11))
+})
+
+test('同時の買い物：上限まで何 Lv か上げたら、本当の値段との差だけ返す', () => {
+  const fever = upgrade('feverTime')
+  // Lv3 から、両方のセッションで Lv5 まで上げた
+  const base = game({ hearts: 0, levels: { feverTime: 3 } })
+  const both = { ...base, levels: { feverTime: 5 } }
+  const merged = mergeGame(both, base, both)
+  expect(merged.levels).toEqual({ feverTime: 5 })
+  expect(merged.hearts).toBe(priceOf(fever, 3) + priceOf(fever, 4))
+})
+
 test('同時の買い物：同じきせかえを両方で買ったら、1 つぶん返す', () => {
   const base = game({ hearts: 5_000 })
   const theirs = bought(buyCosmetic(base, 'crown'))

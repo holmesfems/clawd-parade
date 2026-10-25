@@ -117,10 +117,12 @@ async function saveNow($: EngineInterface, now: number) {
   await $.store.set(GAME_KEY, written)
   await $.store.set(PETS_KEY, writtenPets)
   // 書いてから読み直すまでに別のセッションが書いていたら、そちらを今の保存とする。
-  // そのセッションはこちらの書いたものを読んでから足し込んだはずなので、こちらのぶんをもう一度は足さない
-  // （二重に足して ♡ が増えることはない。こちらが書く前に読まれていたら、こちらの差分は落ちることがある）
+  // そのセッションはこちらの書いたものを読んでから足し込んだはずとみなし、こちらのぶんをもう一度は足さない。
+  // 二重に足して ♡ が増えることはないが、こちらが書く前に読まれていたら、こちらの差分は落ちる
+  // （compare-and-set が無いので、これは防げない。読み書きの間をせまくしているだけ）
   const merged = restore(await $.store.get(GAME_KEY), written)
-  const total = Number(await $.store.get(PETS_KEY)) || writtenPets
+  const storedPets = await $.store.get(PETS_KEY)
+  const total = typeof storedPets === 'number' && Number.isFinite(storedPets) ? storedPets : writtenPets
   await update($, synced, () => ({ game: merged, pets: total }))
   // 保存している間になでたぶんも落とさずに、ほかのセッションのぶんを取り込む
   await update($, game, one => mergeGame(merged, g, one))
@@ -138,7 +140,8 @@ async function payIdleIncome($: EngineInterface, now: number) {
   const paidAt = Number(await $.store.get(IDLE_KEY)) || 0
   if (paidAt >= now) return
   await $.store.set(IDLE_KEY, now)
-  // 同じ時刻を読んだ別のセッションが、あとから書いていたら、そちらが（こちらのぶんもまとめて）払う
+  // 同じ時刻を読んだ別のセッションが、あとから書いていたら、そちらが（こちらのぶんもまとめて）払う。
+  // 別のセッションの読み書きがこちらの読み直しより前に終わっていると気づけず、重なったぶんを二重に払うことがある
   if (Number(await $.store.get(IDLE_KEY)) !== now) return
   const ms = idleDue(paidAt, now)
   if (ms > 0) await update($, game, one => payIdle(one, ms, now))
