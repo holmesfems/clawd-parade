@@ -16,6 +16,8 @@ export type Booted = {
   // ほかのセッションも書きこむ store。いま入っているものを外から見たり書き換えたりできる
   held: Map<string, unknown>
   toasts: string[]
+  // mod が store に書いた直後に呼ぶ。別のセッションがすぐあとに書いたことにできる
+  afterSet: { run?: (key: string, value: unknown) => void }
 }
 
 // 時計と store を用意し、mod の下にいるエンジンの答えを登録する
@@ -23,8 +25,10 @@ export function boot(on: On, { now = 1_000, store = {} }: { now?: number; store?
   const clock = mock.clock(on, { now })
   const held = new Map(Object.entries(store))
   on('store.get', async (_$, e) => ({ value: held.get(e.key) }))
+  const afterSet: Booted['afterSet'] = {}
   on('store.set', async (_$, e) => {
-    held.set(e.key, e.value)
+    held.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    afterSet.run?.(e.key, held.get(e.key))
     return { value: undefined }
   })
   const toasts: string[] = []
@@ -42,7 +46,7 @@ export function boot(on: On, { now = 1_000, store = {} }: { now?: number; store?
   on('classic.PermissionRequest', async () => ({}))
   // mod が帯を描かずに下へゆずったとき（隠している、画像の下書き）は、エンジンが空の箱を描く
   on('ui.render', async () => ({ type: 'Box' as const }))
-  return { clock, held, toasts }
+  return { clock, held, toasts, afterSet }
 }
 
 export const startSession = ($: Engine, surface: Surface) => $.session.start({ cwd: 'C:/tmp', surface, isInteractive: true })
