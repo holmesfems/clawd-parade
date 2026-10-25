@@ -386,16 +386,11 @@ export function drawScene({
   const dreams = yard.right - yard.left >= YARD_MIN ? look.dreams ?? [] : []
   if (dreams.includes('noBugs')) drawRainbow(g, yard, ground)
 
-  // 空の星（地面の半分の速さで流れる）。空が高いぶんだけ数も増やす。
-  // 行の歩幅は空の行数と素にしないと、星が数行に固まって横一列に並ぶ
-  const skyRows = 6 + sky
-  const rowStep = [5, 3, 7, 11].find(n => gcd(n, skyRows) === 1) ?? 1
-  for (let i = 0; i < Math.ceil((W / 14) * (skyRows / 6)); i++) {
-    const x = (((i * 37 + 11) % W) - Math.floor(scroll / 2) + W * 8) % W
-    const y = (i * rowStep + 1) % skyRows
+  // 空の星。遠くにあるので歩いても動かさない
+  starsOf(W, 6 + sky).forEach(({ x, y }, i) => {
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
     put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? C.star : C.starDim)
-  }
+  })
   if (dreams.includes('constellation')) drawConstellation(g, yard, sky, tick)
   if (dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
   if (look.shootingStars) drawShootingStar(g, tick)
@@ -514,7 +509,25 @@ export function drawScene({
 
 // ---- きせかえ・夜空の飾り・フィーバー ----------------------------------------
 
-const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b))
+// 0 以上 1 未満の、n ごとに決まった値
+function hash(n: number): number {
+  let h = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b)
+  h ^= h >>> 13
+  h = Math.imul(h, 0xc2b2ae35)
+  h ^= h >>> 16
+  return (h >>> 0) / 2 ** 32
+}
+
+// 星の場所。幅を星の数で等分した枠に 1 つずつ置き、枠の中でずらす。
+// 歩幅を決め打ちにすると、幅によっては星が数本の列に固まって縦に並んだ
+export function starsOf(columns: number, skyRows: number): { x: number; y: number }[] {
+  const n = Math.ceil((columns / 14) * (skyRows / 6))
+  const slot = columns / n
+  return Array.from({ length: n }, (_, i) => ({
+    x: Math.floor(slot * (i + 0.15 + 0.7 * hash(i * 2))),
+    y: Math.floor(skyRows * hash(i * 2 + 1)),
+  }))
+}
 
 function dot(g: Grid, x: number, y: number, color: number) {
   const line = g[y]
