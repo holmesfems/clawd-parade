@@ -82,13 +82,14 @@ claude plugin enable clawd-parade@clawd-parade
 | `hooks/touch-pad.tsx` | デスクトップで SVG に重ねる、見えない手ざわり層の Client |
 | `types/index.d.ts` | 状態と保存（`$.store`）の型 |
 | `tests/` | `claude plugin test .` で動くテスト |
+| `.github/workflows/ci.yml` | PR と main への push で validate・test・version の確認を回す CI |
 | `CHANGELOG.md` | 変更履歴 |
 
 ## リリース
 
 入れた人の環境では、mod は version ごとのコピーで動きます。`.claude-plugin/plugin.json` の version を上げないと、push しても更新が届きません。
 
-1. `claude plugin validate .` と `claude plugin test .` が通ることを確かめる
+1. `claude plugin validate .` と `claude plugin test .` が通ることを確かめる（PR では GitHub Actions の CI が同じものを回す）
 2. `.claude-plugin/plugin.json` の version を上げる（直しただけなら 3 つめ、機能を足したら 2 つめの数）
 3. `CHANGELOG.md` に、その version で変わったことを書く
 4. PR を merge して main に push する
@@ -97,6 +98,8 @@ claude plugin enable clawd-parade@clawd-parade
 ```
 claude plugin update clawd-parade@clawd-parade
 ```
+
+CI は、`hooks/`・`types/` を変えた PR で version が上がっているか、`CHANGELOG.md` のいちばん上の version が `plugin.json` と同じかも確かめます（`.github/scripts/check-version.mjs`。手元では `node .github/scripts/check-version.mjs origin/main`）。
 
 `$.store` の `game`・`pets` は遊んでいる人の実データです。保存形式を変えるときは、`hooks/game.ts` の `SAVE_VERSION` を上げ、`restore` で古い形を読めるようにしてから出します。
 
