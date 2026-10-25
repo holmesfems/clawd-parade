@@ -4,9 +4,9 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
 import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, Work } from '../types'
-import { ACHIEVEMENTS, FRAME_MS, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, sceneOf } from './game'
+import { ACHIEVEMENTS, HOOK_FRAME_MS, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf } from './game'
 import type { ViewProps } from './parade-view'
-import { SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, kaomoji, layout, putHeart, toSvg } from './scene'
+import { NIGHT, SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, kaomoji, layout, putHeart, toSvg } from './scene'
 import type { Frame } from './scene'
 import type { TouchProps } from './touch-pad'
 
@@ -20,8 +20,8 @@ const DESKTOP_MARKUP_PIXEL = 16
 // 下にはみ出たぶんは舞台で切る（デスクトップは bottom での配置が効かず、層ごと消えた）。
 // デスクトップの 1 行はおよそ 28px、夜空はおよそ 160px なので 7 行で足りる
 const TOUCH_ROWS = 7
-// ぎゅっとされた仲間が跳ねているコマ数
-const HOP_FRAMES = 6
+// ぎゅっとされた仲間が跳ねている、フックのコマ数（端末の Client は自分のコマで VIEW_HOP_FRAMES）
+const HOOK_HOP_FRAMES = 6
 // 絵が出せる帯の幅（マス）
 const MIN_SCENE_CELLS = 40
 
@@ -119,7 +119,7 @@ export function bandText(s: BandState): BandText {
   const happy = isHappy(g, now) ? ` · ごきげん ${clockText(g.happyUntil - now)}` : ''
   const score = isFeverNow
     ? `★ フィーバー ★ ♡×3 あと ${Math.ceil((g.feverUntil - now) / 1000)} 秒 · ♡ ${formatHearts(g.hearts)}`
-    : `♡ ${formatHearts(g.hearts)} · +${formatRate(perSecond(g, sceneOf(w, s.friends), now))}/秒${combo >= 2 ? ` · ${combo} コンボ！` : happy}`
+    : `♡ ${formatHearts(g.hearts)} · +${formatRate(perSecond(g, situationOf(w, s.friends), now))}/秒${combo >= 2 ? ` · ${combo} コンボ！` : happy}`
   return {
     say,
     sayColor: petted || thanked ? '#ff6b9a' : TONE[m.kind],
@@ -134,14 +134,17 @@ export function bandText(s: BandState): BandText {
 // デスクトップの SVG。さわったぶんのハート・傾き・仲間のジャンプを足して描く
 export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number) {
   const petted = isPetted(p, now)
-  const age = Math.floor((now - p.from) / FRAME_MS)
+  const age = Math.floor((now - p.from) / HOOK_FRAME_MS)
   const isStroked = petted && p.kind === 'pet'
-  const hugged = petted && p.kind === 'hug' && p.friend !== null && age < HOP_FRAMES ? [p.friend] : []
+  const hugged = petted && p.kind === 'hug' && p.friend !== null && age < HOOK_HOP_FRAMES ? [p.friend] : []
   const spots = layout(frame.columns, frame.paradeColumns, scene.friends, scene.character)
   const { x, w } = spots.leader
   const sway = p.hand !== null ? Math.round((p.hand - (x + w / 2)) / 3) : [0, 1, 0, -1][age % 4] ?? 0
+  // 空の色は、絵（drawScene）と背景（toSvg）に同じものを渡す
+  const palette = NIGHT
   const g = drawScene({
     ...scene,
+    palette,
     paradeColumns: frame.paradeColumns,
     twinkleTicks: DESKTOP_TWINKLE_TICKS,
     headroom: frame.headroom,
@@ -151,12 +154,12 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number)
   if (isStroked) {
     // なでている間は 2 コマごとにハートを出し、両脇から昇らせる
     const { hearts } = spots
-    const lastTouch = Math.floor((p.at - p.from) / FRAME_MS)
+    const lastTouch = Math.floor((p.at - p.from) / HOOK_FRAME_MS)
     for (let k = Math.max(0, Math.ceil((age - 11) / 2)); k * 2 <= Math.min(age, lastTouch + 4); k++) {
       putHeart(g, hearts[k % hearts.length]!, frame.headroom + 8 - (age - k * 2), k % 2 === 0)
     }
   }
-  return toSvg(g, DESKTOP_MARKUP_PIXEL)
+  return toSvg(g, DESKTOP_MARKUP_PIXEL, palette)
 }
 
 // 帯を描くのに使うもの。onPet は、絵が出せないほど狭いデスクトップの「なでる」ボタン

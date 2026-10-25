@@ -3,7 +3,7 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
 import type { Character, Game } from '../types'
-import type { Deal, Scene } from './game'
+import type { Deal, Situation } from './game'
 
 import {
   ACHIEVEMENTS,
@@ -31,7 +31,7 @@ export const SHOP = 'parade-shop'
 
 export type ShopInput = {
   game: Game
-  at: Scene
+  at: Situation
   petsTotal: number
   character: Character
   // ボタンを押したときの買い物（足りなければ断られる）。label は買えたときのトースト

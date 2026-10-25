@@ -5,9 +5,9 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, Work } from '../types'
 import { bandView } from './band'
-import type { Deal, Scene } from './game'
+import type { Deal, Situation } from './game'
 import {
-  FRAME_MS,
+  HOOK_FRAME_MS,
   accrue,
   grant,
   heldGift,
@@ -21,7 +21,7 @@ import {
   payIdle,
   perSecond,
   restore,
-  sceneOf,
+  situationOf,
   toolTip,
   touchGame,
   unlocked,
@@ -139,7 +139,7 @@ async function payIdleIncome($: EngineInterface, now: number) {
 // ---- 実績・なでる・買う ------------------------------------------------------
 
 // 条件を満たした実績を渡して、トーストで知らせる
-async function award($: EngineInterface, now: number, petsTotal: number, at: Scene) {
+async function award($: EngineInterface, now: number, petsTotal: number, at: Situation) {
   const facts = (g: Game) => ({ game: g, pets: petsTotal, rate: perSecond(g, at) })
   const fresh = unlocked(facts(await read($, game)))
   if (fresh.length === 0) return
@@ -164,7 +164,7 @@ async function pet($: EngineInterface, kind: TouchKind, touch: { hand?: number; 
   const wasSleeping = m.kind === 'sleeping'
   if (wasSleeping) await update($, mood, () => ({ kind: 'idle', at: now }))
 
-  const at = sceneOf(w, list)
+  const at = situationOf(w, list)
   let isFeverStart = false
   await update($, game, g => {
     const touched = touchGame(g, now, at, { kind, wasSleeping })
@@ -201,7 +201,7 @@ async function buy($: EngineInterface, label: string, deal: Deal) {
   }
   $.ui.toast(label)
   const [p, w, list] = await Promise.all([read($, pets), read($, work), read($, friends)])
-  await award($, now, p.total, sceneOf(w, list))
+  await award($, now, p.total, situationOf(w, list))
   await save($, now)
 }
 
@@ -225,7 +225,7 @@ async function step($: EngineInterface) {
     const now = await $.clock.now()
 
     if (beat % ACCRUE_EVERY === 0 && g.passiveAt > 0) {
-      const at = sceneOf(w, list)
+      const at = situationOf(w, list)
       await update($, game, one => accrue(one, now, at))
       await payIdleIncome($, now)
       await award($, now, p.total, at)
@@ -274,7 +274,7 @@ export const register: Register = on => {
     }
     savedAt = now
     timer?.cancel()
-    timer = $.clock.every(FRAME_MS, () => void step($))
+    timer = $.clock.every(HOOK_FRAME_MS, () => void step($))
 
     return next(e)
   })
@@ -437,7 +437,7 @@ export const register: Register = on => {
     const [g, w, list, p, who] = await Promise.all([read($, game), read($, work), read($, friends), read($, pets), read($, character)])
     return shopView($.ui.resolve(e), {
       game: g,
-      at: sceneOf(w, list),
+      at: situationOf(w, list),
       petsTotal: p.total,
       character: who,
       buy: (label, deal) => () => buy($, label, deal),
