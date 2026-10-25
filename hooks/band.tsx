@@ -6,8 +6,8 @@ import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, TreatId, Work } from '../types'
 import { ACHIEVEMENTS, HOOK_FRAME_MS, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf, treatOf } from './game'
 import type { ViewProps } from './parade-view'
-import { NIGHT, SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, kaomoji, layout, putHeart, toSvg } from './scene'
-import type { Frame } from './scene'
+import { NIGHT, PALETTES, SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, kaomoji, layout, putHeart, timeOfDay, toSvg } from './scene'
+import type { Frame, TimeOfDay } from './scene'
 import type { TouchProps } from './touch-pad'
 
 // 取った実績を帯に出しておく時間
@@ -37,6 +37,38 @@ const LINES: Record<MoodKind, string[]> = {
   error: ['エラーになっちゃった…ごめんね'],
   refusal: ['それはできないの…ごめんね'],
   sleeping: ['すやすや…（話しかけたら起きるよ）'],
+}
+
+// 時間帯ごとのセリフ。無い表情は LINES のまま。夜は LINES と同じ
+const TIME_LINES: Record<TimeOfDay, Partial<Record<MoodKind, string[]>>> = {
+  morning: {
+    idle: ['おはよう！今日もよろしくね', 'おはよ〜…コーヒーいれよっか？', 'あさだ！なにからはじめる？'],
+    done: ['おわったよ！朝からえらい！ほめて〜'],
+    sleeping: ['むにゃ…あと 5 分…（話しかけたら起きるよ）'],
+  },
+  day: {
+    idle: ['こんにちは！なんでも言ってね', 'お昼ごはん、ちゃんと食べた？', 'いい天気だね〜（たぶん）'],
+    sleeping: ['すぴー…おひるね中…（話しかけたら起きるよ）'],
+  },
+  evening: {
+    idle: ['こんばんは！もうひとがんばり？', 'ゆうやけ、きれいだね', 'そろそろ晩ごはんの時間かな？'],
+    done: ['おわったよ！今日もおつかれさま〜'],
+  },
+  night: {
+    idle: ['よろしくね！なんでも言ってね', 'こんばんは！夜のコーディング、わくわくするね', '星がきれいな夜だね'],
+  },
+  lateNight: {
+    idle: ['ふぁ…まだ起きてるの？', 'もう寝ようぜ…つづきは明日にしよ？', 'ねむい…でも、もうちょっとだけ付き合うよ'],
+    working: ['ねむいけど…がんばる…', 'カタカタ…（夜ふかし中）', 'もうちょっと待ってね…ふぁ〜'],
+    done: ['おわったよ…ほめて…そして寝よ？'],
+    sleeping: ['すやすや…（もう夜おそいね。話しかけたら起きるよ）'],
+  },
+}
+
+// なでられたときの、時間帯ごとのひとこと（表情ごとの PETTED_LINES が無いとき）
+const TIME_PETTED: Partial<Record<TimeOfDay, string>> = {
+  morning: 'おはようのなでなで…♡ 元気でた！',
+  lateNight: 'むにゃ…なでなで…ねむくなっちゃう…♡',
 }
 
 const PETTED_LINES: Partial<Record<MoodKind, string>> = {
@@ -73,8 +105,8 @@ function groupBy<T, K>(list: T[], keyOf: (one: T) => K): Map<K, T[]> {
   return out
 }
 
-// 帯に出す文字を作るのに使う状態
-export type BandState = { mood: Mood; work: Work; friends: Friend[]; pets: Pets; game: Game; holding: Holding; tick: Tick }
+// 帯に出す文字を作るのに使う状態。hour は今の「時」（0〜23、使う人のタイムゾーン）
+export type BandState = { mood: Mood; work: Work; friends: Friend[]; pets: Pets; game: Game; holding: Holding; tick: Tick; hour: number }
 
 export type BandText = {
   // セリフと、その色（なでられている・お礼のときはピンク）。tone は表情の色
@@ -99,11 +131,12 @@ export function bandText(s: BandState): BandText {
   // 贈り物をもらった直後は、なにより先にその贈り物へのお礼を言う
   const holdingId = heldGift(s.holding, now)
   const thanked = holdingId ? giftOf(holdingId) : undefined
-  const lines = LINES[m.kind]
+  const time = timeOfDay(s.hour)
+  const lines = TIME_LINES[time][m.kind] ?? LINES[m.kind]
   const say = thanked
     ? thanked.thanks
     : petted
-      ? p.kind === 'hug' ? 'なかまもよろこんでるよ♡' : PETTED_LINES[m.kind] ?? 'えへへ…♡ もっとなでて〜'
+      ? p.kind === 'hug' ? 'なかまもよろこんでるよ♡' : PETTED_LINES[m.kind] ?? TIME_PETTED[time] ?? 'えへへ…♡ もっとなでて〜'
       : lines[Math.floor(s.tick.n / 25) % lines.length] ?? lines[0]!
   // 取ったばかりの実績は、しばらくなでなで回数やタイマーの行に出す
   const unlock = g.lastUnlock && now - g.lastUnlock.at < UNLOCK_SHOW_MS ? ACHIEVEMENTS.find(a => a.id === g.lastUnlock?.id) : undefined
@@ -150,7 +183,7 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number)
   const { x, w } = spots.leader
   const sway = p.hand !== null ? Math.round((p.hand - (x + w / 2)) / 3) : [0, 1, 0, -1][age % 4] ?? 0
   // 空の色は、絵（drawScene）と背景（toSvg）に同じものを渡す
-  const palette = NIGHT
+  const palette = scene.palette ?? NIGHT
   const g = drawScene({
     ...scene,
     palette,
@@ -259,7 +292,15 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
   const frame = frameOf(isDesktop ? 'desktop' : 'terminal', cols)
   const { isWide, columns: sceneColumns } = frame
   const room = SCENE_ROWS + (isWide ? 0 : 3 + list.length)
-  const sceneProps: ViewProps = { columns: sceneColumns, mood: m.kind, tick: t.n, friends: list, character: who, look: lookOf(g, t.at, held) }
+  const sceneProps: ViewProps = {
+    columns: sceneColumns,
+    mood: m.kind,
+    tick: t.n,
+    friends: list,
+    character: who,
+    look: lookOf(g, t.at, held),
+    palette: PALETTES[timeOfDay(input.hour)],
+  }
   // デスクトップの絵は px で描くので、行数の余裕は見ない
   const canDraw = cols >= MIN_SCENE_CELLS && (isDesktop || (input.surface === 'terminal' && input.maxRows >= room))
 

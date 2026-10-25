@@ -36,6 +36,8 @@ export type Palette = {
   flower: number
   star: number
   starDim: number
+  // 見える星の割合（0〜1）。昼は 0 で、星を描かない
+  stars: number
 }
 
 export const NIGHT: Palette = {
@@ -45,6 +47,33 @@ export const NIGHT: Palette = {
   flower: 0xffb3d1,
   star: 0xffe38a,
   starDim: 0x8a86c9,
+  stars: 1,
+}
+
+// 時間帯。「時」（0〜23）から決める（timeOfDay）
+export type TimeOfDay = 'morning' | 'day' | 'evening' | 'night' | 'lateNight'
+
+// 朝 5〜9 時、昼 10〜15 時、夕方 16〜18 時、夜 19〜0 時、深夜 1〜4 時。
+// 時刻のミリ秒からここで出すと、テストの結果が動かす環境のタイムゾーンで変わるので、「時」を受け取る
+export function timeOfDay(hour: number): TimeOfDay {
+  if (hour >= 5 && hour < 10) return 'morning'
+  if (hour >= 10 && hour < 16) return 'day'
+  if (hour >= 16 && hour < 19) return 'evening'
+  if (hour >= 1 && hour < 5) return 'lateNight'
+  return 'night'
+}
+
+// 時間帯ごとの空の色。デスクトップでは空の上にセリフを重ねるので、どの空も文字が読める暗さにする
+export const PALETTES: Record<TimeOfDay, Palette> = {
+  // 明けがたの藍色。星が少し残る
+  morning: { sky: 0x3a4a7c, ground: 0x5f5a66, grass: 0x7ccf7c, flower: 0xffc4dd, star: 0xfff0c2, starDim: 0x9da3d6, stars: 0.3 },
+  // 昼の青空。星は見えない
+  day: { sky: 0x2d5a8c, ground: 0x6b6b6b, grass: 0x80d880, flower: 0xffb3d1, star: 0xffffff, starDim: 0xc4d8ef, stars: 0 },
+  // 夕やけのむらさき。一番星が出はじめる
+  evening: { sky: 0x5e3555, ground: 0x5e4c50, grass: 0x6aa86a, flower: 0xffa8a8, star: 0xffd27a, starDim: 0xc792b0, stars: 0.25 },
+  night: NIGHT,
+  // 深夜は空がいちばん暗い
+  lateNight: { sky: 0x14152a, ground: 0x4a4a4a, grass: 0x5a9f5a, flower: 0xd99ab4, star: 0xffe38a, starDim: 0x6f6ba8, stars: 1 },
 }
 
 // 文字の表を絵に押すときの、文字 → 色。表に無い文字は透明
@@ -505,6 +534,8 @@ export function drawScene({
 
   // 空の星。遠くにあるので歩いても動かさない
   starsOf(W, 6 + sky).forEach(({ x, y }, i) => {
+    // 星が少ない時間帯は、決まった星だけを残す（毎コマ同じ星）
+    if (palette.stars < 1 && hash(i * 2 + 7) >= palette.stars) return
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
     put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? palette.star : palette.starDim)
   })
