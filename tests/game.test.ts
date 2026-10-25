@@ -25,6 +25,7 @@ import {
   mergeGame,
   newGame,
   payIdle,
+  pickFavorite,
   priceOf,
   restore,
   touchGame,
@@ -283,6 +284,23 @@ test('mergeGame：ぼうし・最後の実績・最後の贈り物は、この�
   const changed = mergeGame(theirs, base, { ...base, hat: null })
   expect(changed.hat).toBeNull()
   expect(changed.lastUnlock).toEqual({ id: 'pets1', at: 1 })
+})
+
+test('帯に出す贈り物：小さな贈り物だけを読み、別のセッションで選び直したらあとのほう', () => {
+  expect(newGame(0, 0).favorite).toBeNull()
+  // 前の版の保存（favorite が無い）は、出さない
+  expect(restore({ hearts: 1 }, game()).favorite).toBeNull()
+  expect(restore({ hearts: 1, favorite: 'cake' }, game()).favorite).toBe('cake')
+  // 夢のプレゼント・知らない id・型の違うものは読まない
+  for (const broken of ['house', 'pizza', 3, { id: 'cake' }]) expect(restore({ hearts: 1, favorite: broken }, game()).favorite).toBeNull()
+
+  const base = game({ favorite: 'cake' })
+  const theirs = { ...base, favorite: 'cookie' as const }
+  expect(mergeGame(theirs, base, base).favorite).toBe('cookie')
+  expect(mergeGame(theirs, base, { ...base, favorite: null }).favorite).toBeNull()
+
+  expect(bought(pickFavorite(base, 'letter')).favorite).toBe('letter')
+  expect(bought(pickFavorite(base, null)).favorite).toBeNull()
 })
 
 test('mergeGame：キーの順番が違うだけなら、変えていないとみなす', () => {

@@ -83,6 +83,14 @@ test('♡ の行：お仕事中の稼ぎ・コンボ・ごきげん・フィー�
   expect(fever.isFever).toBe(true)
 })
 
+test('帯に出した贈り物：ワンぽちのボタンの文字と、♡ が足りるか', () => {
+  expect(bandText(state()).gift).toBeNull()
+  const cake = { ...newGame(1_234, NOW), favorite: 'cake' as const }
+  expect(bandText(state({ game: cake })).gift).toEqual({ id: 'cake', label: '🍰 あげる 400♡', canAfford: true })
+  expect(bandText(state({ game: { ...cake, hearts: 399 } })).gift?.canAfford).toBe(false)
+  expect(bandText(state({ game: { ...cake, favorite: 'keyboard' } })).gift?.label).toBe('💻 あげる 1万♡')
+})
+
 test('isPetted と clockText', () => {
   expect(isPetted(untouched, NOW)).toBe(false)
   expect(isPetted({ ...untouched, at: NOW - 3_999 }, NOW)).toBe(true)

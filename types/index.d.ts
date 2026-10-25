@@ -127,6 +127,8 @@ export type Game = {
   given: number
   happyUntil: number
   lastGift: { id: GiftId; at: number } | null
+  // 帯に出して、ワンぽちで贈れる小さな贈り物（ショップの ☆ で選ぶ）。null は出さない
+  favorite: TreatId | null
   // 最後に放置収入を足した時刻。0 はこのセッションでまだ読み込んでいない
   passiveAt: number
 }

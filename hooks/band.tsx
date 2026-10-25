@@ -3,8 +3,8 @@
 
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, Work } from '../types'
-import { ACHIEVEMENTS, HOOK_FRAME_MS, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf } from './game'
+import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, TreatId, Work } from '../types'
+import { ACHIEVEMENTS, HOOK_FRAME_MS, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf, treatOf } from './game'
 import type { ViewProps } from './parade-view'
 import { NIGHT, SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, kaomoji, layout, putHeart, toSvg } from './scene'
 import type { Frame } from './scene'
@@ -87,6 +87,8 @@ export type BandText = {
   score: string
   scoreColor: string
   isFever: boolean
+  // 帯に出したワンぽちの贈り物（ショップの ☆ で選んだもの）。選んでいなければ null
+  gift: { id: TreatId; label: string; canAfford: boolean } | null
 }
 
 // 帯のセリフ・info・♡ の行。時刻は最後のコマ（tick.at）
@@ -128,7 +130,14 @@ export function bandText(s: BandState): BandText {
     score,
     scoreColor: isFeverNow ? '#ffb347' : '#ff9ec7',
     isFever: isFeverNow,
+    gift: giftButtonOf(g),
   }
+}
+
+function giftButtonOf(g: Game): BandText['gift'] {
+  if (g.favorite === null) return null
+  const treat = treatOf(g.favorite)
+  return { id: treat.id, label: `${treat.icon} あげる ${formatHearts(treat.price)}♡`, canAfford: g.hearts >= treat.price }
 }
 
 // デスクトップの SVG。さわったぶんのハート・傾き・仲間のジャンプを足して描く
@@ -162,7 +171,8 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number)
   return toSvg(g, DESKTOP_MARKUP_PIXEL, palette)
 }
 
-// 帯を描くのに使うもの。onPet は、絵が出せないほど狭いデスクトップの「なでる」ボタン
+// 帯を描くのに使うもの。onPet は、絵が出せないほど狭いデスクトップの「なでる」ボタン。
+// onGift は、帯に出した贈り物のワンぽちのボタン
 export type BandInput = BandState & {
   surface: RenderSurface
   // 帯の幅（マス）と、端末で使える行数
@@ -171,6 +181,7 @@ export type BandInput = BandState & {
   character: Character
   isDebug: boolean
   onPet: () => void
+  onGift: (id: TreatId) => void
 }
 
 // 入力欄の上の帯を描く（ui は $.ui.resolve(e) の部品）
@@ -181,10 +192,20 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
   const { Box, Text, Button } = ui
   const isDesktop = input.surface === 'desktop'
 
-  const scoreLine = (
+  // ♡ の行。帯に贈り物を出していれば、その右にワンぽちで贈るボタンを置く
+  const { gift } = text
+  const scoreText = (
     <Text key="score" color={text.scoreColor} bold={text.isFever} wrap="truncate-end">
       {text.score}
     </Text>
+  )
+  const scoreLine = gift ? (
+    <Box key="score-row" columnGap={1} alignItems="center">
+      {scoreText}
+      <Button key="quick-gift" label={gift.label} variant={gift.canAfford ? 'primary' : 'secondary'} onPress={() => input.onGift(gift.id)} />
+    </Box>
+  ) : (
+    scoreText
   )
   // セリフ・info・♡ の行。横に並べる版と、夜空に重ねる版で同じものを使う
   const lines = [

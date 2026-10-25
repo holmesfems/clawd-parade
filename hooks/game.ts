@@ -55,6 +55,7 @@ export function newGame(hearts: number, now: number): Game {
     given: 0,
     happyUntil: 0,
     lastGift: null,
+    favorite: null,
     passiveAt: now,
   }
 }
@@ -81,6 +82,7 @@ export function restore(saved: unknown, fallback: Game): Game {
     hat: saved.hat === null || (isHat(saved.hat) && owned.includes(saved.hat)) ? saved.hat : null,
     lastUnlock: saved.lastUnlock === null || isStamp(saved.lastUnlock, isAchievementId) ? saved.lastUnlock : fallback.lastUnlock,
     lastGift: saved.lastGift === null || isStamp(saved.lastGift, isGiftId) ? saved.lastGift : fallback.lastGift,
+    favorite: saved.favorite === null || isTreatId(saved.favorite) ? saved.favorite : fallback.favorite,
     passiveAt: fallback.passiveAt,
   }
 }
@@ -131,6 +133,8 @@ const isStamp = <T>(v: unknown, isId: (id: unknown) => id is T): v is { id: T; a
 const isHat = (v: unknown): v is Hat => COSMETICS.some(c => c.hat !== undefined && c.hat === v)
 
 const isGiftId = (v: unknown): v is GiftId => typeof v === 'string' && Object.hasOwn(GIFTS, v)
+
+const isTreatId = (v: unknown): v is TreatId => typeof v === 'string' && Object.hasOwn(TREAT_TABLE, v)
 
 // ---- 保存（セッションをまたいで） --------------------------------------
 
@@ -217,6 +221,8 @@ const MERGE: { [K in keyof Game]-?: PolicyFor<Game[K]> } = {
   given: 'add',
   happyUntil: 'max',
   lastGift: 'latest',
+  // 別のセッションで選び直したら、あとから選んだほう
+  favorite: 'latest',
   passiveAt: 'mine',
 }
 const MERGE_KEYS = Object.keys(MERGE) as (keyof Game)[]
@@ -326,18 +332,19 @@ export function wear(g: Game, hat: Hat | null): Dealt {
 // ---- 贈り物 -------------------------------------------------------------
 
 type GiftBase = { name: string; price: number; thanks: string }
-export type Treat = GiftBase & { kind: 'treat'; id: TreatId; happyMs: number }
+// icon は帯のワンぽちのボタンに出す絵文字
+export type Treat = GiftBase & { kind: 'treat'; id: TreatId; happyMs: number; icon: string }
 export type Dream = GiftBase & { kind: 'dream'; id: DreamId; shows: string }
 export type Gift = Treat | Dream
 
 // id を鍵にした表。贈り物の id を足したら、ここに足すまで型エラーになる（表の順がお店の並び）
 const TREAT_TABLE: Record<TreatId, Omit<Treat, 'kind' | 'id'>> = {
-  cookie: { name: 'クッキー', price: 50, happyMs: 10_000, thanks: 'クッキー！サクサク…しあわせ〜' },
-  cocoa: { name: 'あったかいココア', price: 150, happyMs: 20_000, thanks: 'ふぅ…あったかい。ほっとするね' },
-  cake: { name: 'いちごのショートケーキ', price: 400, happyMs: 40_000, thanks: 'ケーキ！？いいの！？いただきまーす♡' },
-  letter: { name: 'ありがとうの手紙', price: 1000, happyMs: 60_000, thanks: '…大事にとっておくね。いつもありがとう' },
-  cushion: { name: 'ふかふかクッション', price: 3000, happyMs: 120_000, thanks: 'ふかふか〜…ちょっとだけおひるね…' },
-  keyboard: { name: '新しいキーボード', price: 10_000, happyMs: 300_000, thanks: 'カタカタ…打ち心地さいこう！もっとがんばれちゃう' },
+  cookie: { name: 'クッキー', icon: '🍪', price: 50, happyMs: 10_000, thanks: 'クッキー！サクサク…しあわせ〜' },
+  cocoa: { name: 'あったかいココア', icon: '☕', price: 150, happyMs: 20_000, thanks: 'ふぅ…あったかい。ほっとするね' },
+  cake: { name: 'いちごのショートケーキ', icon: '🍰', price: 400, happyMs: 40_000, thanks: 'ケーキ！？いいの！？いただきまーす♡' },
+  letter: { name: 'ありがとうの手紙', icon: '💌', price: 1000, happyMs: 60_000, thanks: '…大事にとっておくね。いつもありがとう' },
+  cushion: { name: 'ふかふかクッション', icon: '🧸', price: 3000, happyMs: 120_000, thanks: 'ふかふか〜…ちょっとだけおひるね…' },
+  keyboard: { name: '新しいキーボード', icon: '💻', price: 10_000, happyMs: 300_000, thanks: 'カタカタ…打ち心地さいこう！もっとがんばれちゃう' },
 }
 
 const DREAM_TABLE: Record<DreamId, Omit<Dream, 'kind' | 'id'>> = {
@@ -367,6 +374,8 @@ const DREAM_BONUS = 0.1
 
 export const giftOf = (id: GiftId): Gift => GIFTS[id]
 
+export const treatOf = (id: TreatId): Treat => TREATS.find(t => t.id === id)!
+
 export const isDream = (id: GiftId): id is DreamId => GIFTS[id].kind === 'dream'
 
 export const isHappy = (g: Game, now: number) => now < g.happyUntil
@@ -390,6 +399,11 @@ export function giveGift(g: Game, id: GiftId, now: number): Dealt {
     happyUntil: happyMs > 0 ? Math.max(now, g.happyUntil) + happyMs : g.happyUntil,
     lastGift: { id, at: now },
   })
+}
+
+// 帯に出す贈り物を選ぶ（null で帯から下ろす）
+export function pickFavorite(g: Game, id: TreatId | null): Dealt {
+  return ok({ ...g, favorite: id })
 }
 
 // なかよし度：贈った ♡ の合計で上がる

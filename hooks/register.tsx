@@ -9,6 +9,7 @@ import type { Deal, Situation } from './game'
 import {
   HOOK_FRAME_MS,
   accrue,
+  giveGift,
   grant,
   heldGift,
   idleDue,
@@ -24,6 +25,7 @@ import {
   situationOf,
   toolTip,
   touchGame,
+  treatOf,
   unlocked,
 } from './game'
 import { messageOf } from './message'
@@ -187,7 +189,7 @@ async function pet($: EngineInterface, kind: TouchKind, touch: { hand?: number; 
 }
 
 // 買い物：足りなければ理由をトーストで、買えたら知らせて実績も見て、すぐ保存する。
-// 贈り物なら、Clawd がかかえてお礼を言う。いまはショップのボタンから呼ぶ（帯のボタンからも呼べる形にしてある）
+// 贈り物なら、Clawd がかかえてお礼を言う。ショップのボタンと、帯のワンぽちの贈り物のボタンから呼ぶ
 async function buy($: EngineInterface, label: string, deal: Deal) {
   const now = await $.clock.now()
   let refusal: string | undefined
@@ -440,6 +442,7 @@ export const register: Register = on => {
       character: who,
       isDebug,
       onPet: () => void pet($, 'pet'),
+      onGift: id => void buy($, `🎁 ${treatOf(id).name} をあげたよ！`, (one, when) => giveGift(one, id, when)),
     })
   })
 
