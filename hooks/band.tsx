@@ -6,7 +6,7 @@ import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, Work } from '../types'
 import { ACHIEVEMENTS, HOOK_FRAME_MS, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf } from './game'
 import type { ViewProps } from './parade-view'
-import { SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, kaomoji, layout, putHeart, toSvg } from './scene'
+import { NIGHT, SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, kaomoji, layout, putHeart, toSvg } from './scene'
 import type { Frame } from './scene'
 import type { TouchProps } from './touch-pad'
 
@@ -140,8 +140,11 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number)
   const spots = layout(frame.columns, frame.paradeColumns, scene.friends, scene.character)
   const { x, w } = spots.leader
   const sway = p.hand !== null ? Math.round((p.hand - (x + w / 2)) / 3) : [0, 1, 0, -1][age % 4] ?? 0
+  // 空の色は、絵（drawScene）と背景（toSvg）に同じものを渡す
+  const palette = NIGHT
   const g = drawScene({
     ...scene,
+    palette,
     paradeColumns: frame.paradeColumns,
     twinkleTicks: DESKTOP_TWINKLE_TICKS,
     headroom: frame.headroom,
@@ -156,7 +159,7 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number)
       putHeart(g, hearts[k % hearts.length]!, frame.headroom + 8 - (age - k * 2), k % 2 === 0)
     }
   }
-  return toSvg(g, DESKTOP_MARKUP_PIXEL)
+  return toSvg(g, DESKTOP_MARKUP_PIXEL, palette)
 }
 
 // 帯を描くのに使うもの。onPet は、絵が出せないほど狭いデスクトップの「なでる」ボタン

@@ -132,9 +132,12 @@ function sprite(rows: string[], coat: number): Sprite {
   return { w, h, px }
 }
 
-// 顔のパーツ。座標はスプライトの中のドット（輪郭のあるスプライトは輪郭を含めて数える）
+// 顔のパーツ
 type Stamp = string[]
 const stampFace = stampWith({ k: C.eye, w: C.white, c: C.cheek, b: C.tear })
+
+// 輪郭のあるスプライト（sprite() で作ったもの）に、シルエット基準の座標で顔を押す（輪郭ぶん +1 して置く）
+const stampOutlined = (s: Sprite, rows: Stamp, x: number, y: number) => stampFace(s.px, rows, x + 1, y + 1)
 
 type Eyes = 'open' | 'blink' | 'happy' | 'wide' | 'sad' | 'x'
 type Mouth = 'smile' | 'open' | 'flat' | 'frown' | 'tiny'
@@ -157,14 +160,14 @@ const MOUTHS: Record<Mouth, Stamp> = {
 
 function leader(eyes: Eyes, mouth: Mouth, step: number, tears: number | null): Sprite {
   const s = sprite([...LEADER, LEADER_FEET[step % 2]!], C.body)
-  stampFace(s.px, EYES[eyes][0], 3, 5)
-  stampFace(s.px, EYES[eyes][1], 8, 5)
-  stampFace(s.px, MOUTHS[mouth], 5, 7)
-  stampFace(s.px, ['c'], 2, 7)
-  stampFace(s.px, ['c'], 11, 7)
+  stampOutlined(s, EYES[eyes][0], 2, 4)
+  stampOutlined(s, EYES[eyes][1], 7, 4)
+  stampOutlined(s, MOUTHS[mouth], 4, 6)
+  stampOutlined(s, ['c'], 1, 6)
+  stampOutlined(s, ['c'], 10, 6)
   if (tears !== null) {
-    stampFace(s.px, ['b'], 3, 7 + (tears % 2))
-    stampFace(s.px, ['b'], 10, 7 + ((tears + 1) % 2))
+    stampOutlined(s, ['b'], 2, 6 + (tears % 2))
+    stampOutlined(s, ['b'], 9, 6 + ((tears + 1) % 2))
   }
   return s
 }
@@ -172,11 +175,11 @@ function leader(eyes: Eyes, mouth: Mouth, step: number, tears: number | null): S
 function kitten(coat: number, step: number, isDone: boolean): Sprite {
   const s = sprite([...KITTEN, KITTEN_FEET[step % 2]!], coat)
   if (isDone) {
-    stampFace(s.px, ['kk...kk'], 2, 4)
+    stampOutlined(s, ['kk...kk'], 1, 3)
   } else {
-    stampFace(s.px, ['k..k', 'k..k'], 3, 3)
+    stampOutlined(s, ['k..k', 'k..k'], 2, 2)
   }
-  stampFace(s.px, ['c....c'], 2, 5)
+  stampOutlined(s, ['c....c'], 1, 4)
   return s
 }
 
@@ -279,17 +282,17 @@ const GLYPHS: Record<string, string[]> = {
   small: ['#.#', '###', '.#.'],
 }
 
+// 小物は 1 色。色ごとの押す関数は、毎コマ作らないよう取っておく
+const glyphStamps = new Map<number, ReturnType<typeof stampWith>>()
+
 function put(g: Grid, glyph: string, x: number, y: number, color: number) {
-  stampWith({ '#': color })(g, GLYPHS[glyph] ?? [], x, y)
+  let stampGlyph = glyphStamps.get(color)
+  if (!stampGlyph) glyphStamps.set(color, (stampGlyph = stampWith({ '#': color })))
+  stampGlyph(g, GLYPHS[glyph] ?? [], x, y)
 }
 
 function blit(g: Grid, s: Sprite, x: number, y: number) {
-  s.px.forEach((row, dy) =>
-    row.forEach((c, dx) => {
-      const line = g[y + dy]
-      if (c !== null && line && x + dx >= 0 && x + dx < line.length) line[x + dx] = c
-    }),
-  )
+  s.px.forEach((row, dy) => row.forEach((c, dx) => c !== null && dot(g, x + dx, y + dy, c)))
 }
 
 // ---- 場面 -------------------------------------------------------------
@@ -965,7 +968,8 @@ export function clawdText(mood: MoodKind, tick: number): string {
 // デスクトップはコードフォントの行の高さが半角ブロックと揃わず縞になるので、
 // ドット絵は 1 ピクセル = 1 マスの SVG にして、夜空の窓に入れて描く
 
-export function toSvg(g: Grid, pixel: number, palette = NIGHT): { source: string; width: number; height: number } {
+// palette は drawScene に渡したものと同じにする（背景の空の色）
+export function toSvg(g: Grid, pixel: number, palette: Palette): { source: string; width: number; height: number } {
   const w = g[0]?.length ?? 0
   const h = g.length
   // 色ごとに 1 本の path にまとめる（横に続く同じ色は 1 つの長方形）

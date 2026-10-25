@@ -3,7 +3,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Friend, Look, MoodKind } from '../types'
-import { drawScene, encodeCells, toSvg } from '../hooks/scene'
+import { NIGHT, drawScene, encodeCells, toSvg } from '../hooks/scene'
 
 // FNV-1a（32 bit）
 const fingerprint = (text: string) => {
@@ -32,13 +32,15 @@ const SCENES: { name: string; mood: MoodKind; character: 'clawd' | 'neko'; frien
   { name: 'petted', mood: 'error', character: 'clawd', friends: 0, look: { ...plain, hat: 'ribbon' }, tick: 2, petted: true },
   { name: 'neko', mood: 'sleeping', character: 'neko', friends: 2, look: { ...dressed, hat: 'santa', gift: 'box' }, tick: 7 },
   { name: 'asking', mood: 'permission', character: 'clawd', friends: 4, look: { ...plain, hat: 'catEars' }, tick: 11 },
+  // ねこのリーダーの涙と、おわった仲間（3 匹目）の目
+  { name: 'neko-error', mood: 'error', character: 'neko', friends: 3, look: plain, tick: 4 },
 ]
 
 test('絵の指紋が変わらない（デスクトップの SVG と端末のセル）', () => {
   const got: Record<string, string> = {}
   for (const s of SCENES) {
     const input = { mood: s.mood, character: s.character, friends: crew(s.friends), look: s.look, tick: s.tick, petted: s.petted ? { sway: 1 } : null, hopping: ['f0'] }
-    got[`${s.name}/desktop`] = fingerprint(toSvg(drawScene({ ...input, columns: 180, paradeColumns: 114, headroom: 4, twinkleTicks: 4 }), 16).source)
+    got[`${s.name}/desktop`] = fingerprint(toSvg(drawScene({ ...input, columns: 180, paradeColumns: 114, headroom: 4, twinkleTicks: 4 }), 16, NIGHT).source)
     got[`${s.name}/terminal`] = fingerprint(JSON.stringify(encodeCells(drawScene({ ...input, columns: 84 }))))
   }
   expect(got).toEqual(EXPECTED)
@@ -58,4 +60,6 @@ const EXPECTED: Record<string, string> = {
   'neko/terminal': '86fe2f2d',
   'asking/desktop': '1343f236',
   'asking/terminal': '55b95308',
+  'neko-error/desktop': '5e6c0178',
+  'neko-error/terminal': '167e4f09',
 }
