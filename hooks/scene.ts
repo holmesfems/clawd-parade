@@ -38,6 +38,8 @@ export type Palette = {
   starDim: number
   // 見える星の割合（0〜1）。昼は 0 で、星を描かない
   stars: number
+  // 太陽：朝は右（東）の地平線から昇り、昼は空の上に小さく、夕方は左（西）に沈む。夜は出ない
+  sun: 'rise' | 'noon' | 'set' | null
 }
 
 export const NIGHT: Palette = {
@@ -48,6 +50,7 @@ export const NIGHT: Palette = {
   star: 0xffe38a,
   starDim: 0x8a86c9,
   stars: 1,
+  sun: null,
 }
 
 // 時間帯。「時」（0〜23）から決める（timeOfDay）
@@ -67,14 +70,14 @@ export function timeOfDay(hour: number): TimeOfDay {
 // コントラスト比が 3.5 以上になる暗さにする（夜は 5.1）
 export const PALETTES: Record<TimeOfDay, Palette> = {
   // 明けがたの藍色。星が少し残る
-  morning: { sky: 0x2a3560, ground: 0x5f5a66, grass: 0x7ccf7c, flower: 0xffc4dd, star: 0xfff0c2, starDim: 0x9da3d6, stars: 0.3 },
+  morning: { sky: 0x2a3560, ground: 0x5f5a66, grass: 0x7ccf7c, flower: 0xffc4dd, star: 0xfff0c2, starDim: 0x9da3d6, stars: 0.3, sun: 'rise' },
   // 昼の青空。星は見えない
-  day: { sky: 0x1d3d63, ground: 0x6b6b6b, grass: 0x80d880, flower: 0xffb3d1, star: 0xffffff, starDim: 0xc4d8ef, stars: 0 },
+  day: { sky: 0x1d3d63, ground: 0x6b6b6b, grass: 0x80d880, flower: 0xffb3d1, star: 0xffffff, starDim: 0xc4d8ef, stars: 0, sun: 'noon' },
   // 夕やけのむらさき。一番星が出はじめる
-  evening: { sky: 0x43243d, ground: 0x5e4c50, grass: 0x6aa86a, flower: 0xffa8a8, star: 0xffd27a, starDim: 0xc792b0, stars: 0.25 },
+  evening: { sky: 0x43243d, ground: 0x5e4c50, grass: 0x6aa86a, flower: 0xffa8a8, star: 0xffd27a, starDim: 0xc792b0, stars: 0.25, sun: 'set' },
   night: NIGHT,
   // 深夜は空がいちばん暗い
-  lateNight: { sky: 0x14152a, ground: 0x4a4a4a, grass: 0x5a9f5a, flower: 0xd99ab4, star: 0xffe38a, starDim: 0x6f6ba8, stars: 1 },
+  lateNight: { sky: 0x14152a, ground: 0x4a4a4a, grass: 0x5a9f5a, flower: 0xd99ab4, star: 0xffe38a, starDim: 0x6f6ba8, stars: 1, sun: null },
 }
 
 // 文字の表を絵に押すときの、文字 → 色。表に無い文字は透明
@@ -526,6 +529,9 @@ export function drawScene({
   const scroll = marching ? tick : 0
 
   if (look.aurora) drawAurora(g, tick)
+  // 太陽は空のいちばん奥。夢のプレゼント（虹・Clawd 座・月）と地面、みんなはあとから描くので、その前に出る
+  const sun = palette.sun ? sunOf(palette.sun, ground, Math.max(20, Math.min(W, paradeColumns))) : null
+  if (sun) drawSun(g, sun)
 
   // 並びを先に決めて、行進の右にあいた「庭」に夢のプレゼントを飾る
   const spots = layout(W, paradeColumns, friends, character)
@@ -537,6 +543,8 @@ export function drawScene({
   starsOf(W, 6 + sky).forEach(({ x, y }, i) => {
     // 星が少ない時間帯は、決まった星だけを残す（毎コマ同じ星）。星の場所の hash（i * 2、i * 2 + 1）とは別の値で決める
     if (palette.stars < 1 && hash(-1 - i) >= palette.stars) return
+    // 太陽の上には星を出さない
+    if (sun && (x - sun.cx) ** 2 + (y - sun.cy) ** 2 <= (sun.halo + 2) ** 2) return
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
     put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? palette.star : palette.starDim)
   })
@@ -743,6 +751,42 @@ function drawShootingStar(g: Grid, tick: number, palette: Palette) {
   const hx = W - 6 - ((n * 53) % Math.max(1, Math.floor(W * 0.6))) - phase * 3
   const trail = [C.white, palette.star, palette.star, palette.star, palette.starDim, palette.starDim, palette.starDim]
   trail.forEach((color, j) => dot(g, hx + j, phase - Math.floor(j / 3), color))
+}
+
+// 太陽。朝日は右（東）、昼は上に小さく、夕日は左（西）の空。地平線ぎりぎりだと、朝日は右寄せの夢のプレゼント（おうち）に、
+// 夕日は左を歩く Clawd と仲間に隠れるので、少し上の空に出す。仲間と Clawd はあとから描くので、夕日の前を歩く
+// glow は朝日と夕日のまわりの、空に溶けるあかり
+const SUN = {
+  rise: { core: 0xffd98a, rim: 0xffae5c, glow: 0x4b4a6e },
+  noon: { core: 0xfff8d6, rim: 0xffe066, glow: null },
+  set: { core: 0xffa25e, rim: 0xff6a3d, glow: 0x6a3040 },
+}
+
+type Sun = { kind: 'rise' | 'noon' | 'set'; cx: number; cy: number; r: number; halo: number }
+
+// 太陽の場所と大きさ。paradeColumns は行進に使う幅（広いデスクトップでは、右のセリフの空を除いた幅）
+function sunOf(kind: Sun['kind'], ground: number, paradeColumns: number): Sun {
+  const r = kind === 'noon' ? 2 : kind === 'rise' ? 3 : 4
+  const halo = SUN[kind].glow === null ? r : r + 2
+  // 昼は空の上のほう、行進の幅の真ん中より少し右。朝日は行進の右の端、夕日は左の端。
+  // 朝日と夕日はあかりまで空に収まる高さにする（端末は空が低い）
+  const [cx, cy] =
+    kind === 'noon' ? [Math.floor(paradeColumns * 0.6), 3] :
+    kind === 'rise' ? [paradeColumns - 6, Math.max(halo, ground - 11)] :
+    [3, Math.max(halo, ground - 9)]
+  return { kind, cx, cy, r, halo }
+}
+
+function drawSun(g: Grid, { kind, cx, cy, r, halo }: Sun) {
+  const { core, rim, glow } = SUN[kind]
+  for (let y = cy - halo; y <= cy + halo; y++)
+    for (let x = cx - halo; x <= cx + halo; x++) {
+      const d = (x - cx) ** 2 + (y - cy) ** 2
+      const color = d <= (r - 1) * (r - 1) + r - 1 ? core : d <= r * r + r ? rim : glow !== null && d <= halo * halo + halo ? glow : null
+      if (color !== null) dot(g, x, y, color)
+    }
+  // 昼の太陽は、上下左右に短い光をのばす
+  if (kind === 'noon') for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) dot(g, cx + dx * (r + 2), cy + dy * (r + 2), rim)
 }
 
 function drawHeartRain(g: Grid, tick: number) {
