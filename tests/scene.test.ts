@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Friend } from '../types'
-import { STROKE_DOTS, drawScene, frameOf, hitTest, layout, starsOf, strokeMeter } from '../hooks/scene'
+import type { DreamId, Friend } from '../types'
+import { STROKE_DOTS, drawScene, frameOf, groundDecos, hitTest, layout, starsOf, strokeMeter } from '../hooks/scene'
 
 const STAR = 0xffe38a
 const STAR_DIM = 0x8a86c9
@@ -59,12 +59,47 @@ test('並び：仲間・Clawd・庭・ハートの湧く列', () => {
     { id: 'b', x: 14, w: 11 },
   ])
   expect(l.leader).toEqual({ x: 26, w: 18 })
-  // 庭は行進に使う左側の中だけ
-  expect(l.yard).toEqual({ left: 56, right: 112 })
+  // 庭は行進に使う左側（right まで）。入りきらない地面の飾りは、絵の右端（far）まではみ出せる
+  expect(l.yard).toEqual({ left: 56, right: 112, far: 178 })
   expect(l.hearts).toEqual([45, 22, 49])
   // 入りきらない古い仲間から外れ、狭いと庭は無い
   expect(layout(60, 60, [friend('a'), friend('b')], 'clawd').friends.map(f => f.id)).toEqual(['b'])
   expect(layout(40, 40, [], 'clawd').yard).toBeNull()
+})
+
+const ALL_GROUND: DreamId[] = ['house', 'library', 'moonTrip', 'telescope', 'greenTests']
+
+test('夢のプレゼント：入るときは行進の右端に右寄せ、入らないぶんだけセリフの空へはみ出す', () => {
+  // 仲間が 2 匹：行進の左側に全部入るので、前と同じく right に右寄せ
+  const roomy = layout(180, 114, [friend('a'), friend('b')], 'clawd').yard!
+  const fits = groundDecos(roomy, ALL_GROUND)
+  expect(fits.right).toBe(112)
+  expect(fits.placed.map(p => p.dream)).toEqual(ALL_GROUND)
+
+  // 仲間が 6 匹：行進の左側には入らない。前は庭ごと無くなって何も飾れなかった
+  const crowded = layout(180, 114, ['a', 'b', 'c', 'd', 'e', 'f'].map(friend), 'clawd').yard!
+  expect(crowded.right - crowded.left).toBeLessThan(10)
+  const spill = groundDecos(crowded, ALL_GROUND)
+  expect(spill.placed.map(p => p.dream)).toEqual(ALL_GROUND)
+  expect(spill.right).toBeGreaterThan(crowded.right)
+  expect(spill.right).toBeLessThanOrEqual(crowded.far)
+  // 飾りどうしは重ならず、庭の左端より右
+  const xs = spill.placed.map(p => p.x)
+  expect(Math.min(...xs)).toBeGreaterThanOrEqual(crowded.left)
+  expect(xs).toEqual([...xs].sort((a, b) => b - a))
+
+  // 行進に使う幅に仲間がひとりも入らないときは、仲間を出さず Clawd を左端に置く（前は全員が残って、Clawd が右へ押し出された）
+  const tight = layout(114, 48, [friend('a'), friend('b')], 'clawd')
+  expect(tight.friends).toEqual([])
+  expect(tight.leader.x).toBe(2)
+  expect(tight.yard!.right - tight.yard!.left).toBeGreaterThanOrEqual(0)
+
+  // 端末（行進に使う幅 = 絵の幅）は、はみ出す先が無いので、入らないぶんは前と同じく飾らない
+  const terminal = layout(84, 84, [friend('a'), friend('b')], 'clawd').yard!
+  expect(terminal.far).toBe(terminal.right)
+  const cut = groundDecos(terminal, ALL_GROUND)
+  expect(cut.right).toBe(terminal.right)
+  expect(cut.placed.length).toBeLessThan(ALL_GROUND.length)
 })
 
 test('当たり判定：リーダーは両脇 1 ドットまで、仲間はその幅だけ', () => {
