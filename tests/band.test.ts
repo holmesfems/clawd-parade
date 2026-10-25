@@ -1,7 +1,7 @@
 // 帯のセリフ・info・♡ の行（bandText）の単体テスト
 import { expect, test } from 'claude-code/testing'
 
-import type { Friend, Pets, Work } from '../types'
+import type { Friend, Pets, TreatId, Work } from '../types'
 import type { BandState } from '../hooks/band'
 import { bandText } from '../hooks/band'
 import { clockText, isPetted, newGame } from '../hooks/game'
@@ -81,6 +81,16 @@ test('♡ の行：お仕事中の稼ぎ・コンボ・ごきげん・フィー�
   expect(fever.score).toBe('★ フィーバー ★ ♡×3 あと 3 秒 · ♡ 10')
   expect(fever.scoreColor).toBe('#ffb347')
   expect(fever.isFever).toBe(true)
+})
+
+test('帯に出した贈り物：ワンぽちのボタンの文字と、♡ が足りるか', () => {
+  expect(bandText(state()).gift).toBeNull()
+  const cake = { ...newGame(1_234, NOW), favorite: 'cake' as const }
+  expect(bandText(state({ game: cake })).gift).toEqual({ id: 'cake', label: '🍰 あげる 400♡', canAfford: true })
+  expect(bandText(state({ game: { ...cake, hearts: 399 } })).gift?.canAfford).toBe(false)
+  expect(bandText(state({ game: { ...cake, favorite: 'keyboard' } })).gift?.label).toBe('💻 あげる 1万♡')
+  // 新しい版で選んだ、この版の知らない贈り物は出さない
+  expect(bandText(state({ game: { ...cake, favorite: 'tea' as TreatId } })).gift).toBeNull()
 })
 
 test('isPetted と clockText', () => {

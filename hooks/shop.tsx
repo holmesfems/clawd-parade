@@ -23,6 +23,7 @@ import {
   levelOf,
   perPet,
   perSecond,
+  pickFavorite,
   priceOf,
   wear,
 } from './game'
@@ -121,10 +122,21 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
           : 'これ以上ないくらいなかよし！'}
         {isHappy(g, now) ? ` · ごきげん中 ♡×1.5（あと ${clockText(g.happyUntil - now)}）` : ''}
       </Text>
+      <Text dimColor>☆ を押すと、その贈り物を帯に出して、ワンぽちで贈れるよ</Text>
       {TREATS.map(treat => {
         const count = g.gifts[treat.id] ?? 0
+        const isFavorite = g.favorite === treat.id
         return (
           <Box key={`t-${treat.id}`} columnGap={1}>
+            <Button
+              key={`fav-${treat.id}`}
+              onPress={buy(
+                isFavorite ? `${treat.name} を帯から下ろしたよ` : `${treat.icon} ${treat.name} を帯に出したよ！ワンぽちで贈れるよ`,
+                one => pickFavorite(one, isFavorite ? null : treat.id),
+              )}
+            >
+              {isFavorite ? '★' : '☆'}
+            </Button>
             <Button
               key={`gift-${treat.id}`}
               variant={g.hearts >= treat.price ? 'primary' : 'secondary'}
