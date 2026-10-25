@@ -601,7 +601,6 @@ export const register: Register = on => {
           const touchProps: TouchProps = {
             columns: sceneColumns,
             paradeColumns,
-            dotRows: SCENE_ROWS * 2 + headroom,
             rows: TOUCH_ROWS,
             friends: list,
             character: who,

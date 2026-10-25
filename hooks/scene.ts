@@ -378,35 +378,35 @@ const GAP = 1
 const YARD_GAP = 12
 const YARD_MIN = 10
 
-export type Hit = { kind: 'leader' } | { kind: 'friend'; id: string } | null
+export type Hit = { kind: 'leader' } | { kind: 'friend'; spot: Layout['friends'][number] } | null
 
 // 絵のドットの列 x をさわったら、だれに当たるか。リーダーは両脇 1 ドットまでおまけする
 export function hitTest(l: Layout, x: number): Hit {
   if (x >= l.leader.x - 1 && x <= l.leader.x + l.leader.w) return { kind: 'leader' }
   const friend = l.friends.find(f => x >= f.x && x < f.x + f.w)
-  return friend ? { kind: 'friend', id: friend.id } : null
+  return friend ? { kind: 'friend', spot: friend } : null
 }
 
-// 押したままなでた手の動き（絵のドット数）を数え、STROKE_DOTS 動くごとに 1 回なでたことにする。
-// 端末もデスクトップも同じ距離で 1 回なので、♡ の貯まる速さがそろう
+// 押したままなでた手の横の動き（絵のドット数）を数え、STROKE_DOTS 動くごとに 1 回なでたことにする。
+// 端末もデスクトップも同じ距離で 1 回なので、♡ の貯まる速さがそろう。
+// 縦は、デスクトップの 1 行が絵の何ドットかが分からないので数えない
 export const STROKE_DOTS = 6
 
 export function strokeMeter() {
-  let last = { x: 0, y: 0 }
+  let lastX = 0
   let travel = 0
   return {
-    start(x: number, y: number) {
-      last = { x, y }
+    start(x: number) {
+      lastX = x
       travel = 0
     },
-    // 動いたドット数を返し、なでた 1 回ぶんに届いたら isStroke
-    move(x: number, y: number): { moved: number; isStroke: boolean } {
-      const moved = Math.abs(x - last.x) + Math.abs(y - last.y)
-      last = { x, y }
-      travel += moved
-      const isStroke = travel >= STROKE_DOTS
-      if (isStroke) travel = 0
-      return { moved, isStroke }
+    // 手が x まで来た。なでた回数を返す（端数は次に持ち越す）
+    move(x: number): number {
+      travel += Math.abs(x - lastX)
+      lastX = x
+      const strokes = Math.floor(travel / STROKE_DOTS)
+      travel -= strokes * STROKE_DOTS
+      return strokes
     },
   }
 }
@@ -473,17 +473,17 @@ export function drawScene({
 
   // 並びを先に決めて、行進の右にあいた「庭」に夢のプレゼントを飾る
   const spots = layout(W, paradeColumns, friends, character)
-  const yard = spots.yard ?? { left: 0, right: 0 }
-  const dreams = spots.yard ? look.dreams ?? [] : []
-  if (dreams.includes('noBugs')) drawRainbow(g, yard, ground)
+  const { yard } = spots
+  const dreams = (yard && look.dreams) || []
+  if (yard && dreams.includes('noBugs')) drawRainbow(g, yard, ground)
 
   // 空の星。遠くにあるので歩いても動かさない
   starsOf(W, 6 + sky).forEach(({ x, y }, i) => {
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
     put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? C.star : C.starDim)
   })
-  if (dreams.includes('constellation')) drawConstellation(g, yard, sky, tick)
-  if (dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
+  if (yard && dreams.includes('constellation')) drawConstellation(g, yard, sky, tick)
+  if (yard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
   if (look.shootingStars) drawShootingStar(g, tick)
   if (look.fever) drawHeartRain(g, tick)
 
@@ -501,7 +501,7 @@ export function drawScene({
     }
   }
 
-  drawYard(g, dreams, yard, ground, tick)
+  if (yard) drawYard(g, dreams, yard, ground, tick)
 
   // 並び：いちばん新しい仲間がリーダーのすぐ後ろ
   const byId = new Map(friends.map(f => [f.id, f]))

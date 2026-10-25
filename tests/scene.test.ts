@@ -70,20 +70,22 @@ test('並び：仲間・Clawd・庭・ハートの湧く列', () => {
 test('当たり判定：リーダーは両脇 1 ドットまで、仲間はその幅だけ', () => {
   const l = layout(84, 84, [friend('a')], 'clawd')
   expect(hitTest(l, 1)).toBeNull()
-  expect(hitTest(l, 2)).toEqual({ kind: 'friend', id: 'a' })
-  expect(hitTest(l, 12)).toEqual({ kind: 'friend', id: 'a' })
+  expect(hitTest(l, 2)).toEqual({ kind: 'friend', spot: { id: 'a', x: 2, w: 11 } })
+  expect(hitTest(l, 12)).toMatchObject({ kind: 'friend', spot: { id: 'a' } })
   expect(hitTest(l, 13)).toEqual({ kind: 'leader' })
   expect(hitTest(l, 32)).toEqual({ kind: 'leader' })
   expect(hitTest(l, 33)).toBeNull()
 })
 
-test('なでた手が STROKE_DOTS 動くごとに 1 回', () => {
+test('なでた手が横に STROKE_DOTS 動くごとに 1 回。端数は持ち越す', () => {
   const meter = strokeMeter()
-  meter.start(10, 0)
-  const strokes = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].filter(x => meter.move(x, 0).isStroke)
-  expect(strokes).toEqual([10 + STROKE_DOTS, 10 + STROKE_DOTS * 2])
-  // 縦の動きも数える
-  meter.start(0, 0)
-  expect(meter.move(0, STROKE_DOTS).isStroke).toBe(true)
-  expect(meter.move(0, STROKE_DOTS).moved).toBe(0)
+  meter.start(10)
+  const strokes = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map(x => meter.move(x))
+  expect(strokes).toEqual([0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1])
+  // 行き来しても数える。一度に大きく動いたら、そのぶんだけ
+  meter.start(0)
+  expect(meter.move(4)).toBe(0)
+  expect(meter.move(0)).toBe(1)
+  expect(meter.move(STROKE_DOTS * 3)).toBe(3)
+  expect(meter.move(STROKE_DOTS * 3 + 1)).toBe(0)
 })

@@ -11,8 +11,6 @@ export type TouchProps = {
   columns: number
   // 行進に使う左側のドット数（drawScene と同じ並びで当たり判定する）
   paradeColumns: number
-  // 絵の高さ（ドット）。縦の動きも絵のドット数で数える
-  dotRows: number
   // 層の高さ（行）。デスクトップは中身の高さで層の高さが決まるので、この行数ぶん空行で埋める
   rows: number
   // /parade debug 中は、層のふちと大きさを描いて見えるようにする
@@ -36,20 +34,19 @@ const TouchPad: ClientModule<TouchProps, number> = (props, surface) => {
       if (!now || surface.columns === 0) return
       // 層は SVG と同じマス数の幅なので、マスの位置を絵のドット数に比例させる
       const px = Math.floor(((ev.x + 0.5) * now.columns) / surface.columns)
-      const py = surface.rows > 0 ? Math.floor(((ev.y + 0.5) * now.dotRows) / surface.rows) : 0
       const spots = layout(now.columns, now.paradeColumns, now.friends, now.character)
 
       if (ev.type === 'down' && ev.button === 'left') {
         const hit = hitTest(spots, px)
         if (hit?.kind === 'leader') {
           isHolding = true
-          meter.start(px, py)
+          meter.start(px)
           surface.post({ kind: 'pet', x: px })
         } else if (hit?.kind === 'friend') {
-          surface.post({ kind: 'hug', id: hit.id })
+          surface.post({ kind: 'hug', id: hit.spot.id })
         }
       } else if (ev.type === 'move' && isHolding && ev.button === 'left') {
-        if (meter.move(px, py).isStroke) surface.post({ kind: 'stroke', x: px })
+        for (let n = meter.move(px); n > 0; n--) surface.post({ kind: 'stroke', x: px })
       } else if (ev.type === 'up') {
         isHolding = false
       }
