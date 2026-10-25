@@ -81,6 +81,7 @@ claude plugin enable clawd-parade@clawd-parade
 | `hooks/parade-view.tsx` | ターミナルでなでるための Client |
 | `hooks/touch-pad.tsx` | デスクトップで SVG に重ねる、見えない手ざわり層の Client |
 | `types/index.d.ts` | 状態と保存（`$.store`）の型 |
+| `.claude-plugin/icon.png` | プラグインのアイコン（`hooks/scene.ts` の `drawScene` で描いた、夜空でよろこぶ Clawd を 1 ドット 32px に拡大した 800×800 の PNG） |
 | `tests/` | `claude plugin test .` で動くテスト |
 | `.github/workflows/ci.yml` | PR と main への push で validate・test・version の確認を回す CI |
 | `CHANGELOG.md` | 変更履歴 |
