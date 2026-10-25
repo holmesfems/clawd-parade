@@ -12,7 +12,9 @@ const FEVER_RATE = 3
 // 放置収入は 1 分ぶんまで（別のセッションのあいだに貯まったりはしない）
 const PASSIVE_CAP_MS = 60_000
 
-// 保存形式の版。形を変えたら上げて、restore で古い形を読めるようにする
+// 保存形式の版。形を変えたら上げて、restore で古い形を読めるようにする。
+// 古い版のセッションが同時に開いていることがあるので、今ある項目の型は変えずに、新しい項目を足す
+// （古い版は型の合わない項目を初期値に戻してしまうが、知らない項目は残す）
 export const SAVE_VERSION = 1
 
 // いま何が起きているか（Claude が働いているか、働いている仲間の数）
@@ -51,6 +53,7 @@ export function restore(saved: unknown, fallback: Game): Game {
   if (!isRecord(saved)) return fallback
   const num = (k: CountKey) => (isFiniteNumber(saved[k]) ? saved[k] : fallback[k])
   const nums = Object.fromEntries(COUNT_KEYS.map(k => [k, num(k)])) as Pick<Game, CountKey>
+  const owned = (stringsOf(saved.owned) as CosmeticId[] | undefined) ?? fallback.owned
   return {
     ...fallback,
     ...saved,
@@ -59,9 +62,10 @@ export function restore(saved: unknown, fallback: Game): Game {
     v: isFiniteNumber(saved.v) && saved.v > SAVE_VERSION ? saved.v : SAVE_VERSION,
     levels: countsOf(saved.levels) ?? fallback.levels,
     gifts: countsOf(saved.gifts) ?? fallback.gifts,
-    owned: (stringsOf(saved.owned) as CosmeticId[] | undefined) ?? fallback.owned,
+    owned,
     achievements: stringsOf(saved.achievements) ?? fallback.achievements,
-    hat: saved.hat === null || isHat(saved.hat) ? saved.hat : fallback.hat,
+    // 持っていないぼうしはかぶらない
+    hat: saved.hat === null || (isHat(saved.hat) && owned.includes(saved.hat)) ? saved.hat : null,
     lastUnlock: saved.lastUnlock === null || isStamp(saved.lastUnlock, isString) ? saved.lastUnlock : fallback.lastUnlock,
     lastGift: saved.lastGift === null || isStamp(saved.lastGift, isGiftId) ? saved.lastGift : fallback.lastGift,
     passiveAt: fallback.passiveAt,
@@ -70,21 +74,26 @@ export function restore(saved: unknown, fallback: Game): Game {
 
 type CountKey = { [K in keyof Game]: Game[K] extends number ? K : never }[keyof Game]
 
-// v と passiveAt は restore が別に決める
-const COUNT_KEYS = [
-  'hearts',
-  'earned',
-  'combo',
-  'comboAt',
-  'maxCombo',
-  'feverUntil',
-  'fevers',
-  'workPets',
-  'hugs',
-  'wakes',
-  'given',
-  'happyUntil',
-] as const satisfies readonly Exclude<CountKey, 'v' | 'passiveAt'>[]
+// 数の項目（v と passiveAt は restore が別に決める）。Game に数の項目を足したら、ここに足すまで型エラーになる
+const COUNTS: Record<Exclude<CountKey, 'v' | 'passiveAt'>, true> = {
+  hearts: true,
+  earned: true,
+  combo: true,
+  comboAt: true,
+  maxCombo: true,
+  feverUntil: true,
+  fevers: true,
+  workPets: true,
+  hugs: true,
+  wakes: true,
+  given: true,
+  happyUntil: true,
+}
+const COUNT_KEYS = Object.keys(COUNTS) as (keyof typeof COUNTS)[]
+
+// この版の知らない項目（新しい版が書いたもの）
+const KNOWN_KEYS = new Set(Object.keys(newGame(0, 0)))
+const unknownOf = (g: Game) => Object.fromEntries(Object.entries(g).filter(([k]) => !KNOWN_KEYS.has(k)))
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
@@ -127,6 +136,8 @@ export function mergeGame(theirs: Game, base: Game, mine: Game): Game {
   const latest = <T>(t: T, b: T, m: T) => (JSON.stringify(m) !== JSON.stringify(b) ? m : t)
   return {
     ...mine,
+    // 知らない項目は、このセッションでは変えないので向こうの
+    ...unknownOf(theirs),
     v: Math.max(theirs.v, mine.v),
     hearts: Math.max(0, add('hearts')),
     earned: add('earned'),

@@ -96,9 +96,22 @@ test('restore：♡ が壊れていたら、なでた回数から作り直す。
   expect(g.owned).toEqual(['crown'])
 })
 
+test('restore：持っていないぼうしはかぶらない', () => {
+  expect(restore({ hearts: 1, hat: 'crown', owned: 'oops' }, newGame(0, 5_000)).hat).toBeNull()
+  expect(restore({ hearts: 1, hat: 'crown', owned: ['ribbon'] }, newGame(0, 5_000)).hat).toBeNull()
+})
+
+test('restore：今の形のゲームは、読み直しても変わらない', () => {
+  const g = game({ hearts: 5, levels: { glove: 2 }, owned: ['ribbon'], hat: 'ribbon', gifts: { cake: 1 }, lastGift: { id: 'cake', at: 3 } })
+  expect(restore(g, newGame(0, g.passiveAt))).toEqual(g)
+  // 前の版のセッションに残っていた v の無いゲームには、v を埋める
+  const { v: _, ...older } = g
+  expect(restore(older, newGame(0, g.passiveAt))).toEqual(g)
+})
+
 test('restore：形の合う hat・lastUnlock・lastGift は残す', () => {
   const g = restore(
-    { hearts: 1, hat: 'crown', lastUnlock: { id: 'pets1', at: 10 }, lastGift: { id: 'cake', at: 20 } },
+    { hearts: 1, owned: ['crown'], hat: 'crown', lastUnlock: { id: 'pets1', at: 10 }, lastGift: { id: 'cake', at: 20 } },
     newGame(0, 5_000),
   )
   expect(g.hat).toBe('crown')
@@ -174,6 +187,15 @@ test('mergeGame：ぼうし・最後の実績・最後の贈り物は、この�
   const changed = mergeGame(theirs, base, { ...base, hat: null })
   expect(changed.hat).toBeNull()
   expect(changed.lastUnlock).toEqual({ id: 'pets1', at: 1 })
+})
+
+test('mergeGame：知らない項目（新しい版が書いたもの）は、向こうの値を残す', () => {
+  const base = { ...game(), favorite: 'cookie' } as Game
+  const theirs = { ...base, favorite: 'cake', v: 2 } as Game
+  const merged = mergeGame(theirs, base, { ...base, hearts: 5 }) as Game & { favorite?: unknown }
+  expect(merged.favorite).toBe('cake')
+  expect(merged.v).toBe(2)
+  expect(merged.hearts).toBe(5)
 })
 
 test('mergeGame：セッションだけのもの（コンボ・フィーバー・放置の時計）はこちらの値', () => {

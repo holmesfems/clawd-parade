@@ -310,6 +310,11 @@ export const register: Register = on => {
       const loaded = restore(await $.store.get(GAME_KEY), newGame(total, now))
       await update($, game, () => loaded)
       await update($, synced, () => ({ game: loaded, pets: total }))
+    } else {
+      // 前の版のセッションの値に、この版で足した項目（v など）を埋める
+      const fill = (g: Game) => restore(g, newGame(g.hearts, g.passiveAt))
+      await update($, game, fill)
+      await update($, synced, s => ({ ...s, game: fill(s.game) }))
     }
     savedAt = now
     timer?.cancel()
