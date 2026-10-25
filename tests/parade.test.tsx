@@ -1,125 +1,215 @@
-import { expect, mock, test } from 'claude-code/testing'
-import type { On } from 'claude-code/testing'
+import { expect, test } from 'claude-code/testing'
 
 import { ACHIEVEMENTS } from '../hooks/game'
+import {
+  ALL_ACHIEVEMENTS,
+  boot,
+  completeTurn,
+  endSession,
+  mountBand,
+  mountShop,
+  mountTouchBand,
+  petLeader,
+  runParade,
+  spawnFriend,
+  startSession,
+  svgOf,
+  textOf,
+  veteran,
+} from './helpers'
 
-const band = (bodyColumns: number, maxRows: number) => ({
-  plugin: 'clawd-parade',
-  component: 'AbovePrompt' as const,
-  props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns, scroll: { offset: 0, bodyRows: maxRows }, view: {} },
-})
-
-// 実績を全部取ってある遊び慣れたセーブ。なでても実績の知らせが出ないので、なでなで回数の行を見られる
-const veteran = (on: On) => {
-  mock.store(on, { game: { hearts: 0, achievements: ACHIEVEMENTS.map(a => a.id) } })
-  on('ui.toast', async () => ({ value: undefined }))
-}
+// ---- パレードと表情 ----
 
 test('仲間が増えて、終わると表情とセリフが変わる', async ($, on) => {
-  const clock = mock.clock(on, { now: 1_000 })
-  veteran(on)
-  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-  on('agent.spawn', async () => ({ model: 'haiku', agentId: 'agent-1' }))
-  on('turn.complete', async (_$, e) => ({ text: e.answer }))
-  on('turn.start', async (_$, e) => ({ turnId: e.turnId }))
-
-  await $.session.start({ cwd: 'C:/tmp', surface: 'terminal', isInteractive: true })
+  const { clock } = boot(on, { store: veteran() })
+  await startSession($, 'terminal')
   await $.turn.start({ text: 'しらべて', turnId: 't1' })
-  await $.agent.spawn({
-    tool_use_id: 'tu1',
-    prompt: 'コードを探す',
-    description: 'コード探索',
-    subagentType: 'Explore',
-    provider: { plugin: 'engine', tier: 'core' },
-    parentModel: 'opus',
-    background: false,
-    fork: false,
-  } as never)
+  await spawnFriend($)
   await clock.advance(400)
 
   for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ ...band(120, 20), surface })
-    expect((await ui.find({ text: /おしごと中|がんばって|待ってね|なるほど/ }))?.text).toBeDefined()
-    expect((await ui.find({ text: /Explore/ }))?.text).toBeDefined()
+    const ui = await mountBand($, surface)
+    expect(await textOf(ui, /おしごと中|がんばって|待ってね|なるほど/)).toBeDefined()
+    expect(await textOf(ui, /Explore/)).toBeDefined()
     if (surface === 'terminal') expect(await ui.find({ key: 'parade' })).toBeDefined()
     if (surface === 'desktop') expect(await ui.find({ type: 'Svg' })).toBeDefined()
     await ui.unmount()
   }
 
-  await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 'x', agentId: 'agent-1', reason: 'answer' })
-  await $.turn.complete({ answer: '直しました。これで進めていい？', durationMs: 83_000, isAborted: false, turnId: 't1', reason: 'answer' })
+  await completeTurn($, { turnId: 'x', agentId: 'agent-1', durationMs: 5 })
+  await completeTurn($, { turnId: 't1', answer: '直しました。これで進めていい？', durationMs: 83_000 })
   await clock.advance(400)
 
-  const waiting = await $.ui.mount({ ...band(120, 20), surface: 'terminal' })
-  expect((await waiting.find({ text: /おへんじ待ってる/ }))?.text).toBeDefined()
-  expect((await waiting.find({ text: /1:23 でおわり/ }))?.text).toBeDefined()
+  const waiting = await mountBand($, 'terminal')
+  expect(await textOf(waiting, /おへんじ待ってる/)).toBeDefined()
+  expect(await textOf(waiting, /1:23 でおわり/)).toBeDefined()
   await waiting.unmount()
 
   await $.turn.start({ text: 'つぎ', turnId: 't2' })
-  await $.turn.complete({ answer: 'できました！', durationMs: 1_000, isAborted: false, turnId: 't2', reason: 'answer' })
+  await completeTurn($, { turnId: 't2', answer: 'できました！' })
   await clock.advance(3_000)
-  const done = await $.ui.mount({ ...band(50, 4), surface: 'terminal' })
-  expect((await done.find({ text: /ほめて/ }))?.text).toBeDefined()
+  const done = await mountBand($, 'terminal', 50, 4)
+  expect(await textOf(done, /ほめて/)).toBeDefined()
   expect(await done.find({ key: 'parade' })).toBeUndefined()
   await done.unmount()
 
   await clock.advance(4 * 60 * 1000)
-  const sleepy = await $.ui.mount({ ...band(120, 20), surface: 'terminal' })
-  expect((await sleepy.find({ text: /すやすや/ }))?.text).toBeDefined()
+  const sleepy = await mountBand($, 'terminal')
+  expect(await textOf(sleepy, /すやすや/)).toBeDefined()
   await sleepy.unmount()
 })
 
-test('デスクトップは SVG で描き、絵が出せないほど狭いときだけボタンでなでる', async ($, on) => {
-  const clock = mock.clock(on, { now: 1_000 })
-  veteran(on)
-  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+test('許可待ち・エラー・拒否・中断で、セリフが変わる。中断すると仲間も帰る', async ($, on) => {
+  const { clock } = boot(on, { store: veteran() })
+  await startSession($, 'terminal')
+  const line = async (text: RegExp) => {
+    await clock.advance(400)
+    const ui = await mountBand($, 'terminal', 50, 4)
+    const found = await textOf(ui, text)
+    await ui.unmount()
+    return found
+  }
 
-  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+  await $.turn.start({ text: 'けして', turnId: 't1' })
+  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build' } })
+  expect(await line(/やってもいい/)).toBeDefined()
+
+  await completeTurn($, { turnId: 't1', reason: 'error' })
+  expect(await line(/エラーになっちゃった/)).toBeDefined()
+
+  await $.turn.start({ text: 'つぎ', turnId: 't2' })
+  await completeTurn($, { turnId: 't2', reason: 'refusal' })
+  expect(await line(/それはできない/)).toBeDefined()
+
+  await $.turn.start({ text: 'しらべて', turnId: 't3' })
+  await spawnFriend($)
+  await completeTurn($, { turnId: 't3', reason: 'aborted' })
+  expect(await line(/とめられちゃった/)).toBeDefined()
+  // 中断したターンの仲間は「おつかれさま」になって、しばらくすると帰る
+  const wide = await mountBand($, 'terminal')
+  expect(await textOf(wide, /おつかれさま/)).toBeDefined()
+  await wide.unmount()
+  await clock.advance(3_000)
+  const later = await mountBand($, 'terminal')
+  expect(await textOf(later, /Explore/)).toBeUndefined()
+})
+
+test('画像を貼った下書きの間は、帯をほかのプラグインにゆずる', async ($, on) => {
+  boot(on, { store: veteran() })
+  let draft = '[Image #1] これ見て'
+  on('prompt.read', async () => ({ value: { text: draft, cursor: draft.length } }))
+  await startSession($, 'terminal')
+
+  const pasted = await mountBand($, 'terminal')
+  expect(await pasted.find({ type: 'Text' })).toBeUndefined()
+  await pasted.unmount()
+
+  draft = 'ふつうの文'
+  const plain = await mountBand($, 'terminal')
+  expect(await textOf(plain, /よろしくね/)).toBeDefined()
+})
+
+// ---- コマンド ----
+
+test('/parade でキャラを切り替え、隠し、また呼べる。キャラは保存に残る', async ($, on) => {
+  const { clock, held } = boot(on, { store: veteran() })
+  await startSession($, 'terminal')
+  const face = async () => {
+    await clock.advance(200)
+    const ui = await mountBand($, 'terminal', 50, 4)
+    const shown = (await ui.findAll({ type: 'Text' })).map(t => t.text).join(' ')
+    await ui.unmount()
+    return shown
+  }
+  expect(await face()).toContain('▐▛███▜▌')
+
+  expect((await runParade($, 'cat')).text).toBe('ねこたちがやってきた！')
+  expect(held.get('character')).toBe('neko')
+  expect(await face()).toMatch(/ω/)
+
+  expect((await runParade($, '')).text).toMatch(/お昼寝/)
+  expect(await face()).toBe('')
+  expect((await runParade($, '')).text).toMatch(/戻ってきました/)
+  expect(await face()).toMatch(/ω/)
+
+  expect((await runParade($, 'clawd')).text).toBe('Clawd がやってきた！')
+  expect(await face()).toContain('▐▛███▜▌')
+
+  expect((await runParade($, 'xyz')).text).toMatch(/^使い方/)
+})
+
+test('保存してあるキャラで始まる', async ($, on) => {
+  const { clock } = boot(on, { store: veteran({}, { character: 'neko' }) })
+  await startSession($, 'terminal')
+  await clock.advance(200)
+  const ui = await mountBand($, 'terminal', 50, 4)
+  expect(await textOf(ui, /ω/)).toBeDefined()
+})
+
+// ---- なでなで ----
+
+test('端末ではパレードの Client で、直接なでて・ぎゅっとできる', async ($, on) => {
+  const { clock } = boot(on, { store: veteran() })
+  await startSession($, 'terminal')
   await clock.advance(400)
 
-  const ui = await $.ui.mount({ ...band(120, 20), surface: 'desktop' })
-  const scene = await ui.find({ type: 'Svg' })
-  expect(scene).toBeDefined()
+  // 幅 120 の端末では、絵は 84 マス。仲間がいないので Clawd はマス 2〜19 にいる
+  const ui = await mountBand($, 'terminal')
+  await ui.resize({ columns: 84, rows: 7, in: 'parade' })
+  await ui.pointer({ in: 'parade', type: 'down', x: 8, y: 3, button: 'left' })
+  await clock.advance(200)
+  expect(await textOf(ui, /なでなで 1 回目/)).toBeDefined()
+  expect(await textOf(ui, /えへへ/)).toBeDefined()
+
+  // 押したままなでると、9 マス動くごとに 1 回
+  for (const x of [11, 14, 17]) await ui.pointer({ in: 'parade', type: 'move', x, y: 3, button: 'left' })
+  await ui.pointer({ in: 'parade', type: 'up', x: 17, y: 3, button: 'left' })
+  await clock.advance(200)
+  expect(await textOf(ui, /なでなで 2 回目/)).toBeDefined()
+  await ui.unmount()
+
+  // 仲間（マス 2〜12）をクリックすると、ぎゅっ。Clawd はマス 14〜31 に下がる
+  await $.turn.start({ text: 'しらべて', turnId: 't1' })
+  await spawnFriend($)
+  await clock.advance(200)
+  const crew = await mountBand($, 'terminal')
+  await crew.resize({ columns: 84, rows: 7, in: 'parade' })
+  await crew.pointer({ in: 'parade', type: 'down', x: 5, y: 4, button: 'left' })
+  await clock.advance(200)
+  expect(await textOf(crew, /なかまもよろこんでる/)).toBeDefined()
+  expect(await textOf(crew, /なでなで 3 回目/)).toBeDefined()
+})
+
+test('デスクトップは SVG で描き、絵が出せないほど狭いときだけボタンでなでる', async ($, on) => {
+  const { clock } = boot(on, { store: veteran() })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+
+  const ui = await mountBand($, 'desktop')
+  expect(await ui.find({ type: 'Svg' })).toBeDefined()
   expect(await ui.find({ key: 'parade' })).toBeUndefined()
   // 絵は直接なでられるので、ボタンは出さない
   expect(await ui.find({ key: 'pet' })).toBeUndefined()
 
   // 狭いと絵はやめて、文字とボタンだけになる
-  const narrow = await $.ui.mount({ ...band(30, 20), surface: 'desktop' })
+  const narrow = await mountBand($, 'desktop', 30)
   expect(await narrow.find({ type: 'Svg' })).toBeUndefined()
   await narrow.press({ key: 'pet' })
   await clock.advance(400)
-  expect((await narrow.find({ text: /なでなで 1 回目/ }))?.text).toBeDefined()
-  expect((await narrow.find({ text: /えへへ/ }))?.text).toBeDefined()
+  expect(await textOf(narrow, /なでなで 1 回目/)).toBeDefined()
+  expect(await textOf(narrow, /えへへ/)).toBeDefined()
 })
 
 test('デスクトップでは絵に重ねた手ざわり層で、直接なでて・ぎゅっとできる', async ($, on) => {
-  const clock = mock.clock(on, { now: 1_000 })
-  veteran(on)
-  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-  on('agent.spawn', async () => ({ model: 'haiku', agentId: 'agent-1' }))
-  on('turn.start', async (_$, e) => ({ turnId: e.turnId }))
-
-  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+  const { clock } = boot(on, { store: veteran() })
+  await startSession($, 'desktop')
   await $.turn.start({ text: 'しらべて', turnId: 't1' })
-  await $.agent.spawn({
-    tool_use_id: 'tu1',
-    prompt: 'コードを探す',
-    description: 'コード探索',
-    subagentType: 'Explore',
-    provider: { plugin: 'engine', tier: 'core' },
-    parentModel: 'opus',
-    background: false,
-    fork: false,
-  } as never)
+  await spawnFriend($)
   await clock.advance(400)
 
   // 幅 120 なら夜空は帯いっぱいの 120 マスに 180 ドット（1 マス 1.5 ドット）。右の 44 マスはセリフの空で、
   // 仲間はドット 2〜12（マス 1〜8）、リーダーはドット 14〜31（マス 9〜20）にいる
-  const ui = await $.ui.mount({ ...band(120, 20), surface: 'desktop' })
+  const ui = await mountBand($, 'desktop')
   const touch = await ui.find({ type: 'Client', key: 'touch' })
   expect(touch?.props).toMatchObject({ width: 120, height: 7 })
   expect(await ui.find({ key: 'sky-words' })).toBeDefined()
@@ -128,53 +218,41 @@ test('デスクトップでは絵に重ねた手ざわり層で、直接なで�
   // 層の下のほう（5 行目）をさわっても届く
   await ui.pointer({ in: 'touch', type: 'down', x: 15, y: 5, button: 'left' })
   await clock.advance(200)
-  expect((await ui.find({ text: /なでなで 1 回目/ }))?.text).toBeDefined()
+  expect(await textOf(ui, /なでなで 1 回目/)).toBeDefined()
 
   for (const x of [16, 17]) await ui.pointer({ in: 'touch', type: 'move', x, y: 5, button: 'left' })
   await ui.pointer({ in: 'touch', type: 'up', x: 17, y: 5, button: 'left' })
   await clock.advance(200)
-  expect((await ui.find({ text: /なでなで 2 回目/ }))?.text).toBeDefined()
+  expect(await textOf(ui, /なでなで 2 回目/)).toBeDefined()
 
   await ui.pointer({ in: 'touch', type: 'down', x: 4, y: 3, button: 'left' })
   await clock.advance(200)
-  expect((await ui.find({ text: /なかまもよろこんでる/ }))?.text).toBeDefined()
+  expect(await textOf(ui, /なかまもよろこんでる/)).toBeDefined()
 
   // デスクトップは中身の高さで層の高さが決まるので、層は自分で 7 行ぶんの空行を描く
   expect((await ui.findAll({ type: 'Text', in: 'touch' })).length).toBe(7)
 
   // /parade debug で層のふちと大きさが見える
   expect(await ui.find({ text: /手ざわり層/, in: 'touch' })).toBeUndefined()
-  await $.command.run({ command: 'parade', args: 'debug', origin: { kind: 'human' } } as never)
+  await runParade($, 'debug')
   await clock.advance(200)
-  expect((await ui.find({ text: /手ざわり層 120×7 マス/, in: 'touch' }))?.text).toBeDefined()
+  expect(await textOf(ui, /手ざわり層 120×7 マス/, { in: 'touch' })).toBeDefined()
 })
 
-test('なでなでゲーム：コンボ・フィーバー・実績・お店', async ($, on) => {
-  const clock = mock.clock(on, { now: 1_000 })
-  mock.store(on, { pets: 100 })
-  const toasts: string[] = []
-  on('ui.toast', async (_$, e) => {
-    toasts.push(e.text)
-    return { value: undefined }
-  })
-  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+// ---- なでなでゲーム ----
 
-  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+test('なでなでゲーム：コンボ・フィーバー・実績・お店', async ($, on) => {
+  const { clock, toasts } = boot(on, { store: { pets: 100 } })
+  await startSession($, 'desktop')
   await clock.advance(400)
 
-  const ui = await $.ui.mount({ ...band(120, 20), surface: 'desktop' })
-  await ui.resize({ columns: 120, rows: 7, in: 'touch' })
+  const ui = await mountTouchBand($)
   // これまでの 100 なでが初期資金
-  expect((await ui.find({ text: /♡ 100 /}))?.text).toBeDefined()
+  expect(await textOf(ui, /♡ 100 /)).toBeDefined()
 
-  // 仲間がいないので Clawd はドット 2〜19（マス 1〜12）にいる。素早くなでるとコンボが伸び、実績も取れる
-  for (let i = 0; i < 12; i++) {
-    await ui.pointer({ in: 'touch', type: 'down', x: 8, y: 3, button: 'left' })
-    await ui.pointer({ in: 'touch', type: 'up', x: 8, y: 3, button: 'left' })
-    await clock.advance(200)
-  }
-  expect((await ui.find({ text: /12 コンボ/ }))?.text).toBeDefined()
+  // 素早くなでるとコンボが伸び、実績も取れる
+  await petLeader(ui, clock, 12)
+  expect(await textOf(ui, /12 コンボ/)).toBeDefined()
   expect(toasts).toContain('🏆 実績「はじめてのなでなで」ゲット！')
   expect(toasts).toContain('🏆 実績「れんぞくなでなで」ゲット！')
 
@@ -185,67 +263,69 @@ test('なでなでゲーム：コンボ・フィーバー・実績・お店', as
   }
   expect(toasts).toContain('★ フィーバー！ ♡ 3 倍！ ★')
   await clock.advance(5_000)
-  expect((await ui.find({ text: /フィーバー ★ ♡×3 あと/ }))?.text).toBeDefined()
+  expect(await textOf(ui, /フィーバー ★ ♡×3 あと/)).toBeDefined()
 
   // お店で手袋を買い、高すぎる王冠は断られる
-  const shop = await $.ui.mount({
-    plugin: 'clawd-parade',
-    surface: 'desktop',
-    component: 'Pane',
-    requestId: 'parade-shop',
-    props: { title: 'なでなでショップ', isFocused: false, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
-  })
-  expect((await shop.find({ text: /やわらか手袋 Lv0/ }))?.text).toBeDefined()
+  const shop = await mountShop($, 60)
+  expect(await textOf(shop, /やわらか手袋 Lv0/)).toBeDefined()
   await shop.press({ key: 'buy-glove' })
   expect(toasts).toContain('やわらか手袋 を Lv1 にしたよ！')
-  expect((await shop.find({ text: /やわらか手袋 Lv1/ }))?.text).toBeDefined()
+  expect(await textOf(shop, /やわらか手袋 Lv1/)).toBeDefined()
   expect(toasts).toContain('🏆 実績「はじめてのおかいもの」ゲット！')
   await shop.press({ key: 'dress-crown' })
   expect(toasts.at(-1)).toMatch(/足りないよ/)
-  expect((await shop.find({ text: new RegExp(`実績 \\d+/${ACHIEVEMENTS.length}`) }))?.text).toBeDefined()
+  expect(await textOf(shop, new RegExp(`実績 \\d+/${ACHIEVEMENTS.length}`))).toBeDefined()
+})
+
+test('ぼうしをかぶって・はずせる。強化は最大になると買えない', async ($, on) => {
+  const { clock, held, toasts } = boot(on, { store: veteran({ hearts: 1_000_000, owned: ['ribbon'], levels: { feverTime: 5 } }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const shop = await mountShop($)
+
+  await shop.press({ key: 'dress-ribbon' })
+  expect(toasts.at(-1)).toBe('リボン をかぶったよ！')
+  expect(await textOf(shop, /リボン ✓かぶってる/)).toBeDefined()
+  expect((held.get('game') as { hat: unknown }).hat).toBe('ribbon')
+
+  await shop.press({ key: 'dress-ribbon' })
+  expect(toasts.at(-1)).toBe('リボン をはずしたよ')
+  expect(await textOf(shop, /リボン をかぶる/)).toBeDefined()
+  expect((held.get('game') as { hat: unknown }).hat).toBeNull()
+
+  expect(await textOf(shop, /フィーバー延長 Lv5 MAX/)).toBeDefined()
+  await shop.press({ key: 'buy-feverTime' })
+  expect(toasts.at(-1)).toBe('フィーバー延長 はもう最大だよ')
+  expect(await textOf(shop, /フィーバー延長 Lv5 MAX/)).toBeDefined()
 })
 
 test('贈り物：お礼を言ってごきげんになり、夢のプレゼントはずっと飾られる', async ($, on) => {
-  const clock = mock.clock(on, { now: 1_000 })
   const fresh = ['gift1', 'dream1']
-  mock.store(on, { pets: 10, game: { hearts: 100_000, achievements: ACHIEVEMENTS.map(a => a.id).filter(id => !fresh.includes(id)) } })
-  const toasts: string[] = []
-  on('ui.toast', async (_$, e) => {
-    toasts.push(e.text)
-    return { value: undefined }
+  const { clock, toasts } = boot(on, {
+    store: { pets: 10, game: { hearts: 100_000, achievements: ALL_ACHIEVEMENTS.filter(id => !fresh.includes(id)) } },
   })
-  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-
-  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+  await startSession($, 'desktop')
   await clock.advance(400)
-  const ui = await $.ui.mount({ ...band(120, 20), surface: 'desktop' })
-  const shop = await $.ui.mount({
-    plugin: 'clawd-parade',
-    surface: 'desktop',
-    component: 'Pane',
-    requestId: 'parade-shop',
-    props: { title: 'なでなでショップ', isFocused: false, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 80 }, view: {} },
-  })
-  const svg = async () => ((await ui.find({ type: 'Svg' }))?.props as { source: string }).source
+  const ui = await mountBand($, 'desktop')
+  const shop = await mountShop($)
 
   // ケーキをあげると、お礼を言ってケーキをかかえ、ごきげんになる
   await shop.press({ key: 'gift-cake' })
   expect(toasts).toContain('🎁 いちごのショートケーキ をあげたよ！')
   expect(toasts).toContain('🏆 実績「はじめてのプレゼント」ゲット！')
   await clock.advance(200)
-  expect((await ui.find({ text: /ケーキ！？いいの！？/ }))?.text).toBeDefined()
-  expect((await ui.find({ text: /ごきげん 0:40/ }))?.text).toBeDefined()
-  expect(await svg()).toContain('#ff4d6d')
-  expect((await shop.find({ text: /なかよし度「ともだち」/ }))?.text).toBeDefined()
+  expect(await textOf(ui, /ケーキ！？いいの！？/)).toBeDefined()
+  expect(await textOf(ui, /ごきげん 0:40/)).toBeDefined()
+  expect(await svgOf(ui)).toContain('#ff4d6d')
+  expect(await textOf(shop, /なかよし度「ともだち」/)).toBeDefined()
 
   // 夢のプレゼントは 1 回きりで、庭に旗が立ちつづける
   await shop.press({ key: 'gift-greenTests' })
   expect(toasts).toContain('🎁 全部グリーンのテスト を贈ったよ！')
   expect(toasts).toContain('🏆 実績「夢をひとつ」ゲット！')
   await clock.advance(10_000)
-  expect(await svg()).toContain('#3fbf5f')
-  expect((await shop.find({ text: /全部グリーンのテスト ✓/ }))?.text).toBeDefined()
+  expect(await svgOf(ui)).toContain('#3fbf5f')
+  expect(await textOf(shop, /全部グリーンのテスト ✓/)).toBeDefined()
   await shop.press({ key: 'gift-greenTests' })
   expect(toasts.at(-1)).toBe('全部グリーンのテスト はもう飾ってあるよ')
 
@@ -254,34 +334,31 @@ test('贈り物：お礼を言ってごきげんになり、夢のプレゼン�
   expect(toasts.at(-1)).toMatch(/足りないよ/)
 })
 
-// ほかのセッションも書きこむ store。いま入っているものを外から見たり書き換えたりできる
-const sharedStore = (on: On, entries: Record<string, unknown>) => {
-  const held = new Map(Object.entries(entries))
-  on('store.get', async (_$, e) => ({ value: held.get(e.key) }))
-  on('store.set', async (_$, e) => {
-    held.set(e.key, e.value)
-    return { value: undefined }
-  })
-  return held
-}
+// ---- 保存 ----
+
+test('読み込み直し（ホットリロード）では、保存から読み直さずセッションのぶんを使う', async ($, on) => {
+  const { clock, held } = boot(on, { store: veteran({ hearts: 100 }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+
+  // 保存が外で変わっても、もう一度 session.start が来たときは、セッションに残っている ♡ のまま
+  held.set('game', { ...(held.get('game') as object), hearts: 5_000 })
+  await startSession($, 'desktop')
+  await clock.advance(200)
+  const ui = await mountBand($, 'desktop')
+  expect(await textOf(ui, /♡ 100 /)).toBeDefined()
+
+  // 外の変化は、次の保存（5 秒たったあとの、1 秒ごとの見回り）で差分として取り込まれる
+  await clock.advance(6_000)
+  expect(await textOf(ui, /♡ 5,000 /)).toBeDefined()
+})
 
 test('複数のセッション：ほかのセッションの稼ぎや買い物を上書きで消さない', async ($, on) => {
-  const clock = mock.clock(on, { now: 1_000 })
-  const all = ACHIEVEMENTS.map(a => a.id)
-  const held = sharedStore(on, { pets: 100, game: { hearts: 1_000, achievements: all } })
-  on('ui.toast', async () => ({ value: undefined }))
-  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-
-  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+  const { clock, held } = boot(on, { store: veteran({ hearts: 1_000 }, { pets: 100 }) })
+  await startSession($, 'desktop')
   await clock.advance(400)
-  const ui = await $.ui.mount({ ...band(120, 20), surface: 'desktop' })
-  await ui.resize({ columns: 120, rows: 7, in: 'touch' })
-  for (let i = 0; i < 3; i++) {
-    await ui.pointer({ in: 'touch', type: 'down', x: 8, y: 3, button: 'left' })
-    await ui.pointer({ in: 'touch', type: 'up', x: 8, y: 3, button: 'left' })
-    await clock.advance(200)
-  }
+  const ui = await mountTouchBand($)
+  await petLeader(ui, clock, 3)
 
   // そのあいだに、別のセッションが ♡ を 5,000 稼いで王冠を買い、50 回なでて保存した
   const other = held.get('game') as Record<string, unknown>
@@ -297,19 +374,13 @@ test('複数のセッション：ほかのセッションの稼ぎや買い物�
   expect(saved.hat).toBe('crown')
   expect(held.get('pets')).toBe(153)
   // 別のセッションのぶんがこちらの帯にも映る
-  expect((await ui.find({ text: /♡ 6,0\d\d / }))?.text).toBeDefined()
+  expect(await textOf(ui, /♡ 6,0\d\d /)).toBeDefined()
 })
 
 test('複数のセッション：放置収入はいくつ開いていても 1 つぶん', async ($, on) => {
-  const clock = mock.clock(on, { now: 1_000 })
-  const all = ACHIEVEMENTS.map(a => a.id)
   // 星のかけら Lv1 で、放置の ♡ は 2/秒
-  const held = sharedStore(on, { idlePaidAt: 1_000, game: { hearts: 0, levels: { stardust: 1 }, achievements: all } })
-  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-  on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))
-
-  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+  const { clock, held } = boot(on, { store: veteran({ levels: { stardust: 1 } }, { idlePaidAt: 1_000 }) })
+  await startSession($, 'desktop')
   // 別のセッションも 0.7 秒ごとに、最後に払われた時刻からのぶんを払う
   let now = 1_000
   let otherPaid = 0
@@ -320,7 +391,7 @@ test('複数のセッション：放置収入はいくつ開いていても 1 �
     otherPaid += ((now - paidAt) / 1000) * 2
     held.set('idlePaidAt', now)
   }
-  await $.session.end({ sessionId: 's1', reason: 'exit' })
+  await endSession($)
 
   // 21 秒で、2 つのセッションを合わせて ♡ 42（二重に払っていれば 84 近く）
   const mine = (held.get('game') as { hearts: number }).hearts
@@ -331,18 +402,11 @@ test('複数のセッション：放置収入はいくつ開いていても 1 �
 })
 
 test('複数のセッション：別のセッションで贈った贈り物も、届いてから 6 秒かかえてお礼を言う', async ($, on) => {
-  const clock = mock.clock(on, { now: 1_000 })
-  const all = ACHIEVEMENTS.map(a => a.id)
-  const held = sharedStore(on, { game: { hearts: 1_000, achievements: all } })
-  on('ui.toast', async () => ({ value: undefined }))
-  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-
-  await $.session.start({ cwd: 'C:/tmp', surface: 'desktop', isInteractive: true })
+  const { clock, held } = boot(on, { store: veteran({ hearts: 1_000 }) })
+  await startSession($, 'desktop')
   await clock.advance(400)
-  const ui = await $.ui.mount({ ...band(120, 20), surface: 'desktop' })
-  const svg = async () => ((await ui.find({ type: 'Svg' }))?.props as { source: string }).source
-  const thanks = async () => (await ui.find({ text: /ケーキ！？いいの！？/ }))?.text
+  const ui = await mountBand($, 'desktop')
+  const thanks = () => textOf(ui, /ケーキ！？いいの！？/)
 
   // 1.4 秒のときに、別のセッションでケーキを贈った
   const other = held.get('game') as Record<string, unknown>
@@ -354,11 +418,11 @@ test('複数のセッション：別のセッションで贈った贈り物も�
   expect(await thanks()).toBeDefined()
   await clock.advance(4_000)
   expect(await thanks()).toBeDefined()
-  expect(await svg()).toContain('#ff4d6d')
+  expect(await svgOf(ui)).toContain('#ff4d6d')
   await clock.advance(2_000)
   expect(await thanks()).toBeUndefined()
-  expect(await svg()).not.toContain('#ff4d6d')
+  expect(await svgOf(ui)).not.toContain('#ff4d6d')
   // ごきげんも届いている。贈った時刻は書き換えないので、別のセッションでまたかかえだしたりしない
-  expect((await ui.find({ text: /ごきげん/ }))?.text).toBeDefined()
+  expect(await textOf(ui, /ごきげん/)).toBeDefined()
   expect((held.get('game') as { lastGift: unknown }).lastGift).toEqual(cake)
 })
