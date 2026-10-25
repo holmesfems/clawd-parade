@@ -365,8 +365,10 @@ export function frameOf(surface: 'terminal' | 'desktop', cells: number): Frame {
   }
 }
 
-// 夢のプレゼントを飾る、行進の右にあいた庭（ドットの列）
-export type Yard = { left: number; right: number }
+// 夢のプレゼントを飾る、行進の右にあいた庭（ドットの列）。
+// 地面の飾りは right に右寄せで並べ、入りきらないぶんだけ絵の右端（far）まではみ出す。
+// 広いデスクトップでは、はみ出たぶんが夜空のセリフと少し重なる（セリフは右寄せなので、左側はたいてい空いている）
+export type Yard = { left: number; right: number; far: number }
 export type Layout = {
   leader: { x: number; w: number }
   friends: { id: string; x: number; w: number }[]
@@ -381,21 +383,22 @@ export function layout(columns: number, paradeColumns: number, friends: Friend[]
   const isClawd = character === 'clawd'
   const friendW = isClawd ? 11 : 10
   const leaderW = isClawd ? 18 : 14
-  const W = Math.max(20, Math.min(Math.max(20, columns), paradeColumns))
+  const full = Math.max(20, columns)
+  const W = Math.max(20, Math.min(full, paradeColumns))
   const room = Math.max(0, Math.floor((W - leaderW - 2 - 22) / (friendW + GAP)))
   const shown = friends.slice(-room)
   const x = 2 + shown.length * (friendW + GAP)
-  const yard = { left: x + leaderW + YARD_GAP, right: W - 2 }
+  const yard = { left: x + leaderW + YARD_GAP, right: W - 2, far: full - 2 }
   return {
     leader: { x, w: leaderW },
     friends: shown.map((f, i) => ({ id: f.id, x: 2 + i * (friendW + GAP), w: friendW })),
-    yard: yard.right - yard.left >= YARD_MIN ? yard : null,
+    yard: yard.far - yard.left >= YARD_MIN ? yard : null,
     hearts: [x + leaderW + 1, x - 4, x + leaderW + 5],
   }
 }
 
 const GAP = 1
-// 庭はリーダーの右、小物（！や ♡、かかえた贈り物）の場所をあけたところから。狭すぎるときは飾らない
+// 庭はリーダーの右、小物（！や ♡、かかえた贈り物）の場所をあけたところから。絵の右端まで狭すぎるときは飾らない
 const YARD_GAP = 12
 const YARD_MIN = 10
 
@@ -497,7 +500,7 @@ export function drawScene({
   const spots = layout(W, paradeColumns, friends, character)
   const { yard } = spots
   const dreams = yard ? look.dreams : []
-  if (yard && dreams.includes('noBugs')) drawRainbow(g, yard, ground)
+  if (yard && dreams.includes('noBugs')) drawRainbow(g, groundDecos(yard, dreams).right, ground)
 
   // 空の星。遠くにあるので歩いても動かさない
   starsOf(W, 6 + sky).forEach(({ x, y }, i) => {
@@ -813,22 +816,36 @@ const GROUND_DECOS: [DreamId, keyof typeof DECOS][] = [
   ['greenTests', 'flag'],
 ]
 
+// 地面の飾りの並び。yard.right に右寄せで並べ、入りきらなければ入るまで yard.far のほうへずらす。
+// right は並びの右端（虹をかける場所）。far まで使っても入らないぶんは飾らない
+export function groundDecos(yard: Yard, dreams: DreamId[]): { right: number; placed: { dream: DreamId; x: number }[] } {
+  const owned = GROUND_DECOS.filter(([dream]) => dreams.includes(dream))
+  const widthOf = (deco: keyof typeof DECOS) => DECOS[deco][0]?.length ?? 0
+  const need = owned.reduce((sum, [, deco]) => sum + widthOf(deco) + 1, -1)
+  const right = Math.min(yard.far, Math.max(yard.right, yard.left + need))
+  const placed: { dream: DreamId; x: number }[] = []
+  let x = right
+  for (const [dream, deco] of owned) {
+    x -= widthOf(deco)
+    if (x < yard.left) break
+    placed.push({ dream, x })
+    x -= 1
+  }
+  return { right, placed }
+}
+
 function drawYard(g: Grid, dreams: DreamId[], yard: Yard, ground: number, tick: number) {
-  let right = yard.right
-  for (const [dream, deco] of GROUND_DECOS) {
-    if (!dreams.includes(dream)) continue
+  for (const { dream, x } of groundDecos(yard, dreams).placed) {
+    const deco = GROUND_DECOS.find(([d]) => d === dream)![1]
     const rows = deco === 'rocket' && tick % 2 ? DECOS.rocket.map(row => row.replace(/F/g, 'f')) : DECOS[deco]
-    const w = rows[0]?.length ?? 0
-    if (right - w < yard.left) break
-    stampDeco(g, rows, right - w, ground - rows.length)
-    right -= w + 1
+    stampDeco(g, rows, x, ground - rows.length)
   }
 }
 
-// バグのない世界：庭の右（おうちの上）にかかる、少し落ち着いた色の小さな虹
-function drawRainbow(g: Grid, yard: Yard, ground: number) {
+// バグのない世界：地面の飾りの右（おうちの上）にかかる、少し落ち着いた色の小さな虹
+function drawRainbow(g: Grid, right: number, ground: number) {
   const colors = [0xa8454f, 0xb07a3c, 0xb8a64a, 0x4f9a5c, 0x456fa8, 0x6f55a0]
-  const cx = yard.right - 7
+  const cx = right - 7
   const outer = Math.min(10, ground - 2)
   colors.forEach((color, band) => {
     const r = outer - band
