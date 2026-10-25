@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # validate と test はログインも API キーも要らない
+      - name: Claude Code を入れる
+        run: npm install -g @anthropic-ai/claude-code
+      - run: claude --version
+      - name: validate
+        run: claude plugin validate .
+      - name: test
+        run: claude plugin test .
+      # claude plugin test の中では node:fs が読めないので、version の確認はここでやる
+      - name: version と CHANGELOG
+        run: node .github/scripts/check-version.mjs "${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}"
