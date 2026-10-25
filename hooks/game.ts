@@ -118,44 +118,98 @@ const isGiftId = (v: unknown): v is GiftId => TREATS.some(t => t.id === v) || DR
 
 // ---- 保存（セッションをまたいで） --------------------------------------
 
-// 別のセッションも同じ保存を書くので、丸ごと上書きせずに差分を足し込む。
+// 別のセッションも同じ保存を書くので、丸ごと上書きせずに、項目ごとの方針で合わせる。
 // theirs：いま保存されているもの、base：このセッションが前回読んだ（書いた）もの、mine：このセッションの今
 export function mergeGame(theirs: Game, base: Game, mine: Game): Game {
-  const add = (k: 'hearts' | 'earned' | 'given' | 'fevers' | 'workPets' | 'hugs' | 'wakes') => theirs[k] + mine[k] - base[k]
-  const addCounts = <K extends string>(t: Partial<Record<K, number>>, b: Partial<Record<K, number>>, m: Partial<Record<K, number>>) => {
-    const out: Partial<Record<K, number>> = { ...t }
-    for (const k of Object.keys(m) as K[]) {
-      const n = (t[k] ?? 0) + (m[k] ?? 0) - (b[k] ?? 0)
-      if (n > 0) out[k] = n
-      else delete out[k]
+  // 知らない項目（新しい版が書いたもの）は、このセッションでは変えないので向こうの
+  const merged: Record<string, unknown> = unknownOf(theirs)
+  for (const k of MERGE_KEYS) merged[k] = mergeField(MERGE[k], theirs[k], base[k], mine[k])
+  return merged as Game
+}
+
+// 項目ごとのマージの方針
+// - add：このセッションで増えた（減った）ぶんを向こうに足す
+// - spend：add と同じだが、0 未満にはしない（♡ のように使って減るもの）
+// - max：大きいほう
+// - union：両方の要素を合わせる
+// - counts：{ id: 数 } の数ごとに add（0 以下になった id は消す）
+// - latest：このセッションで変えたらこちら、変えていなければ向こうの
+// - mine：このセッションだけのもの。いつもこちらの
+type Policy = 'add' | 'spend' | 'max' | 'union' | 'counts' | 'latest' | 'mine'
+
+// 値の型に使える方針だけを選べるようにする
+type PolicyFor<T> = [T] extends [number]
+  ? 'add' | 'spend' | 'max' | 'latest' | 'mine'
+  : [T] extends [readonly unknown[]]
+    ? 'union' | 'latest' | 'mine'
+    : [T] extends [Partial<Record<string, number>>]
+      ? 'counts' | 'latest' | 'mine'
+      : 'latest' | 'mine'
+
+// Game に項目を足したら、ここに方針を書くまで型エラーになる
+const MERGE: { [K in keyof Game]-?: PolicyFor<Game[K]> } = {
+  v: 'max',
+  hearts: 'spend',
+  earned: 'add',
+  combo: 'mine',
+  comboAt: 'mine',
+  maxCombo: 'max',
+  feverUntil: 'mine',
+  fevers: 'add',
+  workPets: 'add',
+  hugs: 'add',
+  wakes: 'add',
+  levels: 'counts',
+  owned: 'union',
+  hat: 'latest',
+  achievements: 'union',
+  lastUnlock: 'latest',
+  gifts: 'counts',
+  given: 'add',
+  happyUntil: 'max',
+  lastGift: 'latest',
+  passiveAt: 'mine',
+}
+const MERGE_KEYS = Object.keys(MERGE) as (keyof Game)[]
+
+type Counts = Partial<Record<string, number>>
+
+function mergeField(policy: Policy, t: unknown, b: unknown, m: unknown): unknown {
+  switch (policy) {
+    case 'add':
+      return (t as number) + (m as number) - (b as number)
+    case 'spend':
+      return Math.max(0, (t as number) + (m as number) - (b as number))
+    case 'max':
+      return Math.max(t as number, m as number)
+    case 'union':
+      return [...(t as unknown[]), ...(m as unknown[]).filter(x => !(t as unknown[]).includes(x))]
+    case 'counts': {
+      const [tc, bc, mc] = [t, b, m] as [Counts, Counts, Counts]
+      const out: Counts = { ...tc }
+      // このセッションで消した id も数える
+      for (const k of new Set([...Object.keys(mc), ...Object.keys(bc)])) {
+        const n = (tc[k] ?? 0) + (mc[k] ?? 0) - (bc[k] ?? 0)
+        if (n > 0) out[k] = n
+        else delete out[k]
+      }
+      return out
     }
-    return out
+    case 'latest':
+      return isSame(m, b) ? t : m
+    case 'mine':
+      return m
   }
-  const union = <T>(t: T[], m: T[]) => [...t, ...m.filter(x => !t.includes(x))]
-  // このセッションで変えたものはこちら、変えていなければ向こうの
-  const latest = <T>(t: T, b: T, m: T) => (JSON.stringify(m) !== JSON.stringify(b) ? m : t)
-  return {
-    ...mine,
-    // 知らない項目は、このセッションでは変えないので向こうの
-    ...unknownOf(theirs),
-    v: Math.max(theirs.v, mine.v),
-    hearts: Math.max(0, add('hearts')),
-    earned: add('earned'),
-    given: add('given'),
-    fevers: add('fevers'),
-    workPets: add('workPets'),
-    hugs: add('hugs'),
-    wakes: add('wakes'),
-    maxCombo: Math.max(theirs.maxCombo, mine.maxCombo),
-    levels: addCounts(theirs.levels, base.levels, mine.levels),
-    owned: union(theirs.owned, mine.owned),
-    achievements: union(theirs.achievements, mine.achievements),
-    gifts: addCounts(theirs.gifts, base.gifts, mine.gifts),
-    happyUntil: Math.max(theirs.happyUntil, mine.happyUntil),
-    hat: latest(theirs.hat, base.hat, mine.hat),
-    lastUnlock: latest(theirs.lastUnlock, base.lastUnlock, mine.lastUnlock),
-    lastGift: latest(theirs.lastGift, base.lastGift, mine.lastGift),
-  }
+}
+
+// 保存したときに同じ中身になるか。object はキーの順番によらず、undefined の項目は無いものとみなす
+export function isSame(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => isSame(x, b[i]))
+  if (!isRecord(a) || !isRecord(b)) return false
+  const keysOf = (o: Record<string, unknown>) => Object.keys(o).filter(k => o[k] !== undefined)
+  const keys = keysOf(a)
+  return keys.length === keysOf(b).length && keys.every(k => isSame(a[k], b[k]))
 }
 
 // ---- お店 ---------------------------------------------------------------
