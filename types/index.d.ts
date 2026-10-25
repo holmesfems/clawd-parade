@@ -58,6 +58,8 @@ export type DreamId = 'greenTests' | 'telescope' | 'house' | 'library' | 'conste
 export type GiftId = TreatId | DreamId
 
 export type Game = {
+  // 保存形式の版。v の無い保存（1.1.2 まで）は v1 として読む
+  v: number
   // 今の ♡ と、これまでに稼いだ ♡（小数のまま持つ）
   hearts: number
   earned: number

@@ -353,6 +353,26 @@ test('読み込み直し（ホットリロード）では、保存から読み�
   expect(await textOf(ui, /♡ 5,000 /)).toBeDefined()
 })
 
+test('壊れた保存を読んでも動き続け、壊れていない項目は残る。保存には v: 1 が付く', async ($, on) => {
+  const { clock, held } = boot(on, {
+    store: veteran({ hearts: 2_000, levels: null, owned: 'crown', gifts: [], hat: 'witch', lastGift: { id: 'pizza', at: 1 } }),
+  })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const ui = await mountTouchBand($)
+  expect(await textOf(ui, /♡ 2,000 /)).toBeDefined()
+  await petLeader(ui, clock, 1)
+  expect(await textOf(ui, /なでなで 1 回目/)).toBeDefined()
+
+  // 1 秒ごとの見回り（放置収入・実績）と保存も止まらない
+  await clock.advance(6_000)
+  const saved = held.get('game') as Record<string, unknown>
+  expect(saved).toMatchObject({ v: 1, levels: {}, owned: [], gifts: {}, hat: null, lastGift: null })
+  expect(saved.hearts).toBeGreaterThan(2_000)
+  const shop = await mountShop($)
+  expect(await textOf(shop, /やわらか手袋 Lv0/)).toBeDefined()
+})
+
 test('複数のセッション：ほかのセッションの稼ぎや買い物を上書きで消さない', async ($, on) => {
   const { clock, held } = boot(on, { store: veteran({ hearts: 1_000 }, { pets: 100 }) })
   await startSession($, 'desktop')
