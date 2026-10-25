@@ -88,6 +88,12 @@ test('夢のプレゼント：入るときは行進の右端に右寄せ、入�
   expect(Math.min(...xs)).toBeGreaterThanOrEqual(crowded.left)
   expect(xs).toEqual([...xs].sort((a, b) => b - a))
 
+  // 行進に使う幅に仲間がひとりも入らないときは、仲間を出さず Clawd を左端に置く（前は全員が残って、Clawd が右へ押し出された）
+  const tight = layout(114, 48, [friend('a'), friend('b')], 'clawd')
+  expect(tight.friends).toEqual([])
+  expect(tight.leader.x).toBe(2)
+  expect(tight.yard!.right - tight.yard!.left).toBeGreaterThanOrEqual(0)
+
   // 端末（行進に使う幅 = 絵の幅）は、はみ出す先が無いので、入らないぶんは前と同じく飾らない
   const terminal = layout(84, 84, [friend('a'), friend('b')], 'clawd').yard!
   expect(terminal.far).toBe(terminal.right)

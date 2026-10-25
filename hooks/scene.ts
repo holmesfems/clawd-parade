@@ -386,7 +386,8 @@ export function layout(columns: number, paradeColumns: number, friends: Friend[]
   const full = Math.max(20, columns)
   const W = Math.max(20, Math.min(full, paradeColumns))
   const room = Math.max(0, Math.floor((W - leaderW - 2 - 22) / (friendW + GAP)))
-  const shown = friends.slice(-room)
+  // room が 0 のとき slice(-0) は全員を返すので、分けて書く
+  const shown = room > 0 ? friends.slice(-room) : []
   const x = 2 + shown.length * (friendW + GAP)
   const yard = { left: x + leaderW + YARD_GAP, right: W - 2, far: full - 2 }
   return {
@@ -507,8 +508,10 @@ export function drawScene({
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
     put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? palette.star : palette.starDim)
   })
-  if (yard && dreams.includes('constellation')) drawConstellation(g, yard, sky, tick, palette)
-  if (yard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
+  // 空の飾りはセリフの空へはみ出さないので、行進の右に YARD_MIN あるときだけ
+  const skyYard = yard && yard.right - yard.left >= YARD_MIN ? yard : null
+  if (skyYard && dreams.includes('constellation')) drawConstellation(g, skyYard, sky, tick, palette)
+  if (skyYard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, skyYard.right - 7, Math.max(0, sky - 3))
   if (look.shootingStars) drawShootingStar(g, tick, palette)
   if (look.fever) drawHeartRain(g, tick)
 
