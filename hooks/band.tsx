@@ -64,7 +64,12 @@ const TONE: Record<MoodKind, string> = {
 // 種類ごとにまとめる（Map.groupBy は型の lib が es2023 なので使わない）
 function groupBy<T, K>(list: T[], keyOf: (one: T) => K): Map<K, T[]> {
   const out = new Map<K, T[]>()
-  for (const one of list) out.set(keyOf(one), [...(out.get(keyOf(one)) ?? []), one])
+  for (const one of list) {
+    const key = keyOf(one)
+    const group = out.get(key)
+    if (group) group.push(one)
+    else out.set(key, [one])
+  }
   return out
 }
 

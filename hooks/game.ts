@@ -287,9 +287,9 @@ export function buyCosmetic(g: Game, id: CosmeticId): Dealt {
   return ok({ ...g, hearts: g.hearts - c.price, owned: [...g.owned, id], hat: c.hat ?? g.hat })
 }
 
-// 持っているぼうしをかぶる（null ではずす）。持っていなければ何も変えない
+// 持っているぼうしをかぶる（null ではずす）
 export function wear(g: Game, hat: Hat | null): Dealt {
-  return ok(hat === null || g.owned.includes(hat) ? { ...g, hat } : g)
+  return hat === null || g.owned.includes(hat) ? ok({ ...g, hat }) : no('そのぼうしはまだ持ってないよ')
 }
 
 // ---- 贈り物 -------------------------------------------------------------

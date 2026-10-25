@@ -328,8 +328,8 @@ test('お店：買えたら ok と新しいゲーム、買えなければ理由'
   // 買ったぼうしはすぐかぶる
   expect(bought(buyCosmetic(rich, 'crown')).hat).toBe('crown')
   expect(buyCosmetic(rich, 'ribbon')).toEqual({ ok: false, reason: 'リボン はもう持ってるよ' })
-  // 持っていないぼうしはかぶれない（ゲームはそのまま）
-  expect(bought(wear(rich, 'santa')).hat).toBeNull()
+  // 持っていないぼうしはかぶれない
+  expect(wear(rich, 'santa')).toEqual({ ok: false, reason: 'そのぼうしはまだ持ってないよ' })
   expect(bought(wear(rich, 'ribbon')).hat).toBe('ribbon')
 })
 
