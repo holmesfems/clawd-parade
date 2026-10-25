@@ -3,17 +3,24 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Game } from '../types'
+import type { Dealt } from '../hooks/game'
 import {
   COMBO_WINDOW_MS,
   FEVER_COMBO,
   FEVER_MS,
+  DREAMS,
+  TREATS,
   UPGRADES,
   affectionOf,
+  buyCosmetic,
+  buyUpgrade,
   formatHearts,
   formatRate,
+  giftOf,
   giveGift,
   idleDue,
   isSame,
+  isDream,
   isMaxed,
   mergeGame,
   newGame,
@@ -21,6 +28,7 @@ import {
   priceOf,
   restore,
   touchGame,
+  wear,
 } from '../hooks/game'
 import type { Scene } from '../hooks/game'
 
@@ -30,6 +38,12 @@ const pet = { kind: 'pet', wasSleeping: false } as const
 const game = (over: Partial<Game> = {}): Game => ({ ...newGame(0, 1_000), ...over })
 
 const upgrade = (id: string) => UPGRADES.find(u => u.id === id)!
+
+// 買えたときのゲーム（断られたらテストを落とす）
+const bought = (dealt: Dealt): Game => {
+  if (!dealt.ok) throw new Error(dealt.reason)
+  return dealt.game
+}
 
 // ---- 保存 ----
 
@@ -131,7 +145,7 @@ test('restore：壊れた保存を読んでも、そのあとの計算で例外�
   const g = restore({ hearts: 10, levels: null, gifts: [], owned: 5, achievements: {} }, newGame(0, 5_000))
   const touched = touchGame(g, 6_000, resting, pet)
   expect(touched.gained).toBe(1.01)
-  expect(typeof giveGift(touched.game, 'cookie', 6_000)).toBe('string')
+  expect(giveGift(touched.game, 'cookie', 6_000).ok).toBe(false)
 })
 
 test('newGame は保存形式の版 v: 1 を持つ', () => {
@@ -181,8 +195,8 @@ test('mergeGame：レベルと贈り物の数は差分を足し、0 以下は消
 
 test('mergeGame：持ち物と実績は合わせ、最大コンボとごきげんは大きいほう', () => {
   const base = game({ owned: ['ribbon'], achievements: ['pets1'], maxCombo: 5, happyUntil: 100 })
-  const theirs = { ...base, owned: ['ribbon', 'crown'] as Game['owned'], achievements: ['pets1', 'fever1'], maxCombo: 12 }
-  const mine = { ...base, owned: ['ribbon', 'aurora'] as Game['owned'], achievements: ['pets1', 'combo10'], happyUntil: 500 }
+  const theirs: Game = { ...base, owned: ['ribbon', 'crown'], achievements: ['pets1', 'fever1'], maxCombo: 12 }
+  const mine: Game = { ...base, owned: ['ribbon', 'aurora'], achievements: ['pets1', 'combo10'], happyUntil: 500 }
   const merged = mergeGame(theirs, base, mine)
   expect(merged.owned).toEqual(['ribbon', 'crown', 'aurora'])
   expect(merged.achievements).toEqual(['pets1', 'fever1', 'combo10'])
@@ -307,6 +321,27 @@ test('priceOf と isMaxed', () => {
   expect(isMaxed(upgrade('glove'), 1_000)).toBe(false)
 })
 
+test('お店：買えたら ok と新しいゲーム、買えなければ理由', () => {
+  const rich = game({ hearts: 10_000, owned: ['ribbon'] })
+  expect(bought(buyUpgrade(rich, 'glove')).levels).toEqual({ glove: 1 })
+  expect(buyUpgrade(game({ levels: { feverTime: 5 } }), 'feverTime')).toEqual({ ok: false, reason: 'フィーバー延長 はもう最大だよ' })
+  // 買ったぼうしはすぐかぶる
+  expect(bought(buyCosmetic(rich, 'crown')).hat).toBe('crown')
+  expect(buyCosmetic(rich, 'ribbon')).toEqual({ ok: false, reason: 'リボン はもう持ってるよ' })
+  // 持っていないぼうしはかぶれない
+  expect(wear(rich, 'santa')).toEqual({ ok: false, reason: 'そのぼうしはまだ持ってないよ' })
+  expect(bought(wear(rich, 'ribbon')).hat).toBe('ribbon')
+})
+
+test('贈り物の表：どの id も引け、小さな贈り物と夢のプレゼントを kind で見分ける', () => {
+  for (const t of TREATS) expect(giftOf(t.id)).toMatchObject({ kind: 'treat', id: t.id })
+  for (const d of DREAMS) expect(giftOf(d.id)).toMatchObject({ kind: 'dream', id: d.id })
+  expect(isDream('house')).toBe(true)
+  expect(isDream('cake')).toBe(false)
+  // お店の並びは表の順
+  expect(TREATS.map(t => t.id)).toEqual(['cookie', 'cocoa', 'cake', 'letter', 'cushion', 'keyboard'])
+})
+
 // ---- なでなで ----
 
 test('touchGame：続けてなでるとコンボが伸び、間があくと 1 から', () => {
@@ -361,26 +396,23 @@ test('touchGame：お仕事中は ♡ 2 倍。ぎゅっ・起こした回数を�
 
 test('giveGift：小さな贈り物は何度でも。ごきげんの時間は積み増す', () => {
   const g = game({ hearts: 1_000 })
-  const once = giveGift(g, 'cookie', 2_000)
-  if (typeof once === 'string') throw new Error(once)
+  const once = bought(giveGift(g, 'cookie', 2_000))
   expect(once.hearts).toBe(950)
   expect(once.given).toBe(50)
   expect(once.gifts).toEqual({ cookie: 1 })
   expect(once.happyUntil).toBe(12_000)
   expect(once.lastGift).toEqual({ id: 'cookie', at: 2_000 })
 
-  const twice = giveGift(once, 'cookie', 3_000)
-  if (typeof twice === 'string') throw new Error(twice)
+  const twice = bought(giveGift(once, 'cookie', 3_000))
   expect(twice.gifts).toEqual({ cookie: 2 })
   expect(twice.happyUntil).toBe(22_000)
 })
 
 test('giveGift：夢のプレゼントは 1 回きりで、ごきげんにはならない。♡ が足りなければ断る', () => {
   const g = game({ hearts: 100_000 })
-  const dream = giveGift(g, 'greenTests', 2_000)
-  if (typeof dream === 'string') throw new Error(dream)
+  const dream = bought(giveGift(g, 'greenTests', 2_000))
   expect(dream.gifts).toEqual({ greenTests: 1 })
   expect(dream.happyUntil).toBe(0)
-  expect(giveGift(dream, 'greenTests', 3_000)).toBe('全部グリーンのテスト はもう飾ってあるよ')
-  expect(giveGift(game({ hearts: 10 }), 'cookie', 2_000)).toBe('♡ が 40 足りないよ')
+  expect(giveGift(dream, 'greenTests', 3_000)).toEqual({ ok: false, reason: '全部グリーンのテスト はもう飾ってあるよ' })
+  expect(giveGift(game({ hearts: 10 }), 'cookie', 2_000)).toEqual({ ok: false, reason: '♡ が 40 足りないよ' })
 })

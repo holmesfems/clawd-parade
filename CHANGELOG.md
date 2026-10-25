@@ -2,6 +2,12 @@
 
 入れている人に届くのは、`.claude-plugin/plugin.json` の version が上がったときだけです（出し方は README の「リリース」）。
 
+## 1.1.7 — 2026-10-25
+
+- 型を締めた（#14）。遊び方と保存の形は変わらない
+  - Client からのメッセージ（`ClientMessage`）、実績の id（`AchievementId`）、お店の結果（`{ ok, game } | { ok, reason }`）
+  - 贈り物は id を鍵にした表から引き、`kind` で小さな贈り物と夢のプレゼントを見分ける
+
 ## 1.1.6 — 2026-10-25
 
 - 帯とショップの描画を、`hooks/band.tsx` と `hooks/shop.tsx` に分けた（#12）。見た目は変わらない

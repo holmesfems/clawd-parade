@@ -3,9 +3,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, Work } from '../types'
+import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, Work } from '../types'
 import { bandView } from './band'
-import type { Scene } from './game'
+import type { Deal, Scene } from './game'
 import {
   FRAME_MS,
   accrue,
@@ -26,9 +26,9 @@ import {
   touchGame,
   unlocked,
 } from './game'
+import { messageOf } from './message'
 import { isMarching } from './scene'
 import { SHOP, shopView } from './shop'
-import type { Deal } from './shop'
 
 const CHARACTER_KEY = 'character'
 const CHARACTERS: Record<string, Character> = { clawd: 'clawd', neko: 'neko', cat: 'neko', ねこ: 'neko', 猫: 'neko' }
@@ -149,7 +149,7 @@ async function award($: EngineInterface, now: number, petsTotal: number, at: Sce
 }
 
 // 端末の Client、デスクトップの手ざわり層、「なでる」ボタンのどれからも呼ぶ
-async function pet($: EngineInterface, kind: Pets['kind'], touch: { hand?: number; friend?: string } = {}) {
+async function pet($: EngineInterface, kind: TouchKind, touch: { hand?: number; friend?: string } = {}) {
   const now = await $.clock.now()
   const after = await update($, pets, (p): Pets => ({
     total: p.total + 1,
@@ -183,13 +183,13 @@ async function buy($: EngineInterface, label: string, deal: Deal) {
   let gave: Game['lastGift'] | undefined
   await update($, game, g => {
     const dealt = deal(g, now)
-    if (typeof dealt === 'string') {
-      refusal = dealt
+    if (!dealt.ok) {
+      refusal = dealt.reason
       return g
     }
     refusal = undefined
-    gave = dealt.lastGift !== g.lastGift ? dealt.lastGift : null
-    return dealt
+    gave = dealt.game.lastGift !== g.lastGift ? dealt.game.lastGift : null
+    return dealt.game
   })
   if (refusal !== undefined) {
     $.ui.toast(refusal)
@@ -313,16 +313,11 @@ export const register: Register = on => {
   })
 
   on('ui.message', async ($, e, next) => {
-    const data = e.data as { kind?: unknown; x?: unknown; id?: unknown } | null
-    const kind = data?.kind
-    if ((e.element !== 'parade' && e.element !== 'touch') || (kind !== 'pet' && kind !== 'stroke' && kind !== 'hug')) {
-      return next(e)
-    }
+    const message = e.element === 'parade' || e.element === 'touch' ? messageOf(e.data) : null
+    if (!message) return next(e)
 
-    await pet($, kind === 'hug' ? 'hug' : 'pet', {
-      ...(typeof data?.x === 'number' ? { hand: data.x } : {}),
-      ...(typeof data?.id === 'string' ? { friend: data.id } : {}),
-    })
+    if (message.kind === 'hug') await pet($, 'hug', message.id !== undefined ? { friend: message.id } : {})
+    else await pet($, 'pet', message.x !== undefined ? { hand: message.x } : {})
 
     return next(e)
   })

@@ -1,7 +1,7 @@
 // なでなでゲームのルール。♡ の稼ぎ方・コンボ・フィーバー・お店・実績を、
 // $ に触らない純粋な関数だけで書く。保存や表示は register.tsx の仕事。
 
-import type { CosmeticId, DreamId, Friend, Game, GiftId, Hat, Holding, Look, Pets, TreatId, UpgradeId, Work } from '../types'
+import type { AchievementId, CosmeticId, DreamId, Friend, Game, GiftId, Hat, Holding, Look, Pets, TouchKind, TreatId, UpgradeId, Work } from '../types'
 
 // ---- 数字 ---------------------------------------------------------------
 
@@ -76,10 +76,10 @@ export function restore(saved: unknown, fallback: Game): Game {
     levels: countsOf(saved.levels) ?? fallback.levels,
     gifts: countsOf(saved.gifts) ?? fallback.gifts,
     owned,
-    achievements: stringsOf(saved.achievements) ?? fallback.achievements,
+    achievements: (stringsOf(saved.achievements) as AchievementId[] | undefined) ?? fallback.achievements,
     // 持っていないぼうしはかぶらない
     hat: saved.hat === null || (isHat(saved.hat) && owned.includes(saved.hat)) ? saved.hat : null,
-    lastUnlock: saved.lastUnlock === null || isStamp(saved.lastUnlock, isString) ? saved.lastUnlock : fallback.lastUnlock,
+    lastUnlock: saved.lastUnlock === null || isStamp(saved.lastUnlock, isAchievementId) ? saved.lastUnlock : fallback.lastUnlock,
     lastGift: saved.lastGift === null || isStamp(saved.lastGift, isGiftId) ? saved.lastGift : fallback.lastGift,
     passiveAt: fallback.passiveAt,
   }
@@ -114,6 +114,9 @@ const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Num
 
 const isString = (v: unknown): v is string => typeof v === 'string'
 
+// 新しい版の実績の id も捨てずに持ち回る（この版の表では見つからないだけ）
+const isAchievementId = (v: unknown): v is AchievementId => typeof v === 'string'
+
 // 配列なら string の要素だけを残す
 const stringsOf = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter(isString) : undefined)
 
@@ -127,7 +130,7 @@ const isStamp = <T>(v: unknown, isId: (id: unknown) => id is T): v is { id: T; a
 
 const isHat = (v: unknown): v is Hat => COSMETICS.some(c => c.hat !== undefined && c.hat === v)
 
-const isGiftId = (v: unknown): v is GiftId => TREATS.some(t => t.id === v) || DREAMS.some(d => d.id === v)
+const isGiftId = (v: unknown): v is GiftId => typeof v === 'string' && Object.hasOwn(GIFTS, v)
 
 // ---- 保存（セッションをまたいで） --------------------------------------
 
@@ -251,69 +254,89 @@ export const COSMETICS: Cosmetic[] = [
   { id: 'aurora', name: 'オーロラ', about: '夜空にオーロラがゆれる', price: 8000 },
 ]
 
+// お店の取り引きの結果：買えたら新しいゲーム、買えなければ断る理由
+export type Dealt = { ok: true; game: Game } | { ok: false; reason: string }
+export type Deal = (g: Game, now: number) => Dealt
+
+const ok = (game: Game): Dealt => ({ ok: true, game })
+const no = (reason: string): Dealt => ({ ok: false, reason })
+const short = (price: number, g: Game) => no(`♡ が ${formatHearts(price - g.hearts)} 足りないよ`)
+
 export const levelOf = (g: Game, id: UpgradeId) => g.levels[id] ?? 0
 
 export const priceOf = (u: Upgrade, level: number) => Math.ceil(u.base * u.growth ** level)
 
 export const isMaxed = (u: Upgrade, level: number) => u.max !== undefined && level >= u.max
 
-export function buyUpgrade(g: Game, id: UpgradeId): Game | string {
+export function buyUpgrade(g: Game, id: UpgradeId): Dealt {
   const u = UPGRADES.find(one => one.id === id)
-  if (!u) return 'そんな商品はないよ'
+  if (!u) return no('そんな商品はないよ')
   const level = levelOf(g, id)
-  if (isMaxed(u, level)) return `${u.name} はもう最大だよ`
+  if (isMaxed(u, level)) return no(`${u.name} はもう最大だよ`)
   const price = priceOf(u, level)
-  if (g.hearts < price) return `♡ が ${formatHearts(price - g.hearts)} 足りないよ`
-  return { ...g, hearts: g.hearts - price, levels: { ...g.levels, [id]: level + 1 } }
+  if (g.hearts < price) return short(price, g)
+  return ok({ ...g, hearts: g.hearts - price, levels: { ...g.levels, [id]: level + 1 } })
 }
 
-export function buyCosmetic(g: Game, id: CosmeticId): Game | string {
+export function buyCosmetic(g: Game, id: CosmeticId): Dealt {
   const c = COSMETICS.find(one => one.id === id)
-  if (!c) return 'そんな商品はないよ'
-  if (g.owned.includes(id)) return `${c.name} はもう持ってるよ`
-  if (g.hearts < c.price) return `♡ が ${formatHearts(c.price - g.hearts)} 足りないよ`
+  if (!c) return no('そんな商品はないよ')
+  if (g.owned.includes(id)) return no(`${c.name} はもう持ってるよ`)
+  if (g.hearts < c.price) return short(c.price, g)
   // 買ったぼうしはすぐかぶる
-  return { ...g, hearts: g.hearts - c.price, owned: [...g.owned, id], hat: c.hat ?? g.hat }
+  return ok({ ...g, hearts: g.hearts - c.price, owned: [...g.owned, id], hat: c.hat ?? g.hat })
 }
 
-export function wear(g: Game, hat: Hat | null): Game {
-  return hat === null || g.owned.includes(hat) ? { ...g, hat } : g
+// 持っているぼうしをかぶる（null ではずす）
+export function wear(g: Game, hat: Hat | null): Dealt {
+  return hat === null || g.owned.includes(hat) ? ok({ ...g, hat }) : no('そのぼうしはまだ持ってないよ')
 }
 
 // ---- 贈り物 -------------------------------------------------------------
 
-export type Treat = { id: TreatId; name: string; price: number; happyMs: number; thanks: string }
-export type Dream = { id: DreamId; name: string; price: number; shows: string; thanks: string }
+type GiftBase = { name: string; price: number; thanks: string }
+export type Treat = GiftBase & { kind: 'treat'; id: TreatId; happyMs: number }
+export type Dream = GiftBase & { kind: 'dream'; id: DreamId; shows: string }
+export type Gift = Treat | Dream
+
+// id を鍵にした表。贈り物の id を足したら、ここに足すまで型エラーになる（表の順がお店の並び）
+const TREAT_TABLE: Record<TreatId, Omit<Treat, 'kind' | 'id'>> = {
+  cookie: { name: 'クッキー', price: 50, happyMs: 10_000, thanks: 'クッキー！サクサク…しあわせ〜' },
+  cocoa: { name: 'あったかいココア', price: 150, happyMs: 20_000, thanks: 'ふぅ…あったかい。ほっとするね' },
+  cake: { name: 'いちごのショートケーキ', price: 400, happyMs: 40_000, thanks: 'ケーキ！？いいの！？いただきまーす♡' },
+  letter: { name: 'ありがとうの手紙', price: 1000, happyMs: 60_000, thanks: '…大事にとっておくね。いつもありがとう' },
+  cushion: { name: 'ふかふかクッション', price: 3000, happyMs: 120_000, thanks: 'ふかふか〜…ちょっとだけおひるね…' },
+  keyboard: { name: '新しいキーボード', price: 10_000, happyMs: 300_000, thanks: 'カタカタ…打ち心地さいこう！もっとがんばれちゃう' },
+}
+
+const DREAM_TABLE: Record<DreamId, Omit<Dream, 'kind' | 'id'>> = {
+  greenTests: { name: '全部グリーンのテスト', price: 30_000, shows: '地面に緑の旗', thanks: 'ぜんぶ…通ってる…！こんなにうれしいことないよ！' },
+  telescope: { name: '望遠鏡', price: 80_000, shows: '星を見る望遠鏡', thanks: 'これで星がもっとよく見える！いっしょに見よ？' },
+  house: { name: '小さなおうち', price: 250_000, shows: 'あかりのつくおうち', thanks: 'おうち…！？ただいま、って言ってもいい？' },
+  library: { name: '世界中の本がある図書館', price: 800_000, shows: '本でいっぱいの本棚', thanks: '世界中の本…ぜんぶ読んでいいの？しあわせ…' },
+  constellation: { name: 'Clawd 座', price: 3_000_000, shows: '夜空に Clawd の星座', thanks: '空に Clawd 座が…！ずっと見ててね' },
+  moonTrip: { name: '月への旅', price: 12_000_000, shows: '月とロケット', thanks: '月まで行けちゃう！おみやげ持って帰るね' },
+  noBugs: { name: 'バグのない世界', price: 100_000_000, shows: '空に虹', thanks: '…夢みたい。でも、きみといっしょに直す時間も好きだったよ' },
+}
+
+const entries = <K extends string, V>(table: Record<K, V>) => Object.entries(table) as [K, V][]
 
 // 小さな贈り物：何度でもあげられて、もらったらしばらくごきげん（♡×1.5）
-export const TREATS: Treat[] = [
-  { id: 'cookie', name: 'クッキー', price: 50, happyMs: 10_000, thanks: 'クッキー！サクサク…しあわせ〜' },
-  { id: 'cocoa', name: 'あったかいココア', price: 150, happyMs: 20_000, thanks: 'ふぅ…あったかい。ほっとするね' },
-  { id: 'cake', name: 'いちごのショートケーキ', price: 400, happyMs: 40_000, thanks: 'ケーキ！？いいの！？いただきまーす♡' },
-  { id: 'letter', name: 'ありがとうの手紙', price: 1000, happyMs: 60_000, thanks: '…大事にとっておくね。いつもありがとう' },
-  { id: 'cushion', name: 'ふかふかクッション', price: 3000, happyMs: 120_000, thanks: 'ふかふか〜…ちょっとだけおひるね…' },
-  { id: 'keyboard', name: '新しいキーボード', price: 10_000, happyMs: 300_000, thanks: 'カタカタ…打ち心地さいこう！もっとがんばれちゃう' },
-]
+export const TREATS: Treat[] = entries(TREAT_TABLE).map(([id, t]) => ({ kind: 'treat', id, ...t }))
 
 // 夢のプレゼント：1 回きり。ずっと飾られて、ひとつごとに ♡ の稼ぎが +10%
-export const DREAMS: Dream[] = [
-  { id: 'greenTests', name: '全部グリーンのテスト', price: 30_000, shows: '地面に緑の旗', thanks: 'ぜんぶ…通ってる…！こんなにうれしいことないよ！' },
-  { id: 'telescope', name: '望遠鏡', price: 80_000, shows: '星を見る望遠鏡', thanks: 'これで星がもっとよく見える！いっしょに見よ？' },
-  { id: 'house', name: '小さなおうち', price: 250_000, shows: 'あかりのつくおうち', thanks: 'おうち…！？ただいま、って言ってもいい？' },
-  { id: 'library', name: '世界中の本がある図書館', price: 800_000, shows: '本でいっぱいの本棚', thanks: '世界中の本…ぜんぶ読んでいいの？しあわせ…' },
-  { id: 'constellation', name: 'Clawd 座', price: 3_000_000, shows: '夜空に Clawd の星座', thanks: '空に Clawd 座が…！ずっと見ててね' },
-  { id: 'moonTrip', name: '月への旅', price: 12_000_000, shows: '月とロケット', thanks: '月まで行けちゃう！おみやげ持って帰るね' },
-  { id: 'noBugs', name: 'バグのない世界', price: 100_000_000, shows: '空に虹', thanks: '…夢みたい。でも、きみといっしょに直す時間も好きだったよ' },
-]
+export const DREAMS: Dream[] = entries(DREAM_TABLE).map(([id, d]) => ({ kind: 'dream', id, ...d }))
+
+// 全部の贈り物を id で引く表（TREAT_TABLE と DREAM_TABLE がそろっているので、どの id もある）
+const GIFTS = Object.fromEntries([...TREATS, ...DREAMS].map(g => [g.id, g])) as Record<GiftId, Gift>
 
 export const GIFT_SHOW_MS = 6000
 const HAPPY_RATE = 1.5
 const DREAM_BONUS = 0.1
 
-export const giftOf = (id: GiftId): Treat | Dream | undefined =>
-  TREATS.find(t => t.id === id) ?? DREAMS.find(d => d.id === id)
+export const giftOf = (id: GiftId): Gift => GIFTS[id]
 
-export const isDream = (id: GiftId): id is DreamId => DREAMS.some(d => d.id === id)
+export const isDream = (id: GiftId): id is DreamId => GIFTS[id].kind === 'dream'
 
 export const isHappy = (g: Game, now: number) => now < g.happyUntil
 
@@ -323,20 +346,19 @@ export const dreamsOf = (g: Game): DreamId[] => DREAMS.filter(d => (g.gifts[d.id
 export const giftRate = (g: Game, now: number) =>
   (isHappy(g, now) ? HAPPY_RATE : 1) * (1 + DREAM_BONUS * dreamsOf(g).length)
 
-export function giveGift(g: Game, id: GiftId, now: number): Game | string {
+export function giveGift(g: Game, id: GiftId, now: number): Dealt {
   const gift = giftOf(id)
-  if (!gift) return 'そんな贈り物はないよ'
-  if (isDream(id) && (g.gifts[id] ?? 0) > 0) return `${gift.name} はもう飾ってあるよ`
-  if (g.hearts < gift.price) return `♡ が ${formatHearts(gift.price - g.hearts)} 足りないよ`
-  const happyMs = 'happyMs' in gift ? gift.happyMs : 0
-  return {
+  if (gift.kind === 'dream' && (g.gifts[id] ?? 0) > 0) return no(`${gift.name} はもう飾ってあるよ`)
+  if (g.hearts < gift.price) return short(gift.price, g)
+  const happyMs = gift.kind === 'treat' ? gift.happyMs : 0
+  return ok({
     ...g,
     hearts: g.hearts - gift.price,
     given: g.given + gift.price,
     gifts: { ...g.gifts, [id]: (g.gifts[id] ?? 0) + 1 },
     happyUntil: happyMs > 0 ? Math.max(now, g.happyUntil) + happyMs : g.happyUntil,
     lastGift: { id, at: now },
-  }
+  })
 }
 
 // なかよし度：贈った ♡ の合計で上がる
@@ -379,7 +401,7 @@ const workPerSecond = (g: Game, at: Scene, now: number) =>
 
 export const perSecond = (g: Game, at: Scene, now = g.passiveAt) => idlePerSecond(g, now) + workPerSecond(g, at, now)
 
-export type Touch = { kind: 'pet' | 'hug'; wasSleeping: boolean }
+export type Touch = { kind: TouchKind; wasSleeping: boolean }
 
 // 1 回なでた（ぎゅっとした）ぶん。フィーバー中はコンボを数えず、明けたら 1 から
 export function touchGame(g: Game, now: number, at: Scene, touch: Touch): { game: Game; gained: number; isFeverStart: boolean } {
@@ -433,11 +455,12 @@ export const liveCombo = (g: Game, now: number) => (now - g.comboAt <= COMBO_WIN
 
 export type Facts = { game: Game; pets: number; rate: number }
 
-export type Achievement = { id: string; name: string; about: string; test: (f: Facts) => boolean }
+type AchievementSpec = { id: AchievementId; name: string; about: string; test: (f: Facts) => boolean }
 
 const spent = (g: Game) => Object.values(g.levels).reduce((n, l) => n + (l ?? 0), 0) + g.owned.length
 
-export const ACHIEVEMENTS: Achievement[] = [
+// id は保存（achievements・lastUnlock）に入るので、変えないこと
+export const ACHIEVEMENTS = [
   { id: 'pets1', name: 'はじめてのなでなで', about: '1 回なでる', test: f => f.pets >= 1 },
   { id: 'pets100', name: 'なでなで見習い', about: '100 回なでる', test: f => f.pets >= 100 },
   { id: 'pets1k', name: 'なでなで職人', about: '1,000 回なでる', test: f => f.pets >= 1_000 },
@@ -471,11 +494,17 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'dream1', name: '夢をひとつ', about: '夢のプレゼントを贈る', test: f => dreamsOf(f.game).length >= 1 },
   { id: 'dreamAll', name: '夢をぜんぶ', about: '夢のプレゼントを全部贈る', test: f => dreamsOf(f.game).length === DREAMS.length },
   { id: 'bff', name: 'しんゆう', about: 'なかよし度を「しんゆう」にする', test: f => f.game.given >= 300_000 },
-]
+] as const satisfies readonly AchievementSpec[]
+
+export type Achievement = (typeof ACHIEVEMENTS)[number]
+
+// types の AchievementId が全部この表にあるか（足りないと型エラー）
+const EVERY_ACHIEVEMENT: Exclude<AchievementId, Achievement['id']> extends never ? true : never = true
+void EVERY_ACHIEVEMENT
 
 // まだ持っていない実績のうち、条件を満たしたもの
 export function unlocked(f: Facts): Achievement[] {
-  return ACHIEVEMENTS.filter(a => !f.game.achievements.includes(a.id) && a.test(f))
+  return ACHIEVEMENTS.filter((a: Achievement) => !f.game.achievements.includes(a.id) && a.test(f))
 }
 
 export function grant(g: Game, list: Achievement[], now: number): Game {

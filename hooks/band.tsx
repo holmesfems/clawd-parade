@@ -61,6 +61,18 @@ const TONE: Record<MoodKind, string> = {
   sleeping: '#9ec9ff',
 }
 
+// 種類ごとにまとめる（Map.groupBy は型の lib が es2023 なので使わない）
+function groupBy<T, K>(list: T[], keyOf: (one: T) => K): Map<K, T[]> {
+  const out = new Map<K, T[]>()
+  for (const one of list) {
+    const key = keyOf(one)
+    const group = out.get(key)
+    if (group) group.push(one)
+    else out.set(key, [one])
+  }
+  return out
+}
+
 // 帯に出す文字を作るのに使う状態
 export type BandState = { mood: Mood; work: Work; friends: Friend[]; pets: Pets; game: Game; holding: Holding; tick: Tick }
 
@@ -201,7 +213,7 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
   )
 
   // 夜空に重ねる版：右端に寄せ、空の高さに収まるよう仲間は色つきの名札 1 行にまとめる
-  const crews = [...Map.groupBy(list, f => f.type)]
+  const crews = [...groupBy(list, f => f.type)]
   const skyWords = (
     <Box key="words" flexDirection="column" alignItems="flex-end" paddingRight={2}>
       {lines}

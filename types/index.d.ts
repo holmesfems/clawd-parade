@@ -31,12 +31,24 @@ export type Work = {
   isRunning: boolean
 }
 
+// なでる（Clawd）か、ぎゅっとする（仲間）か
+export type TouchKind = 'pet' | 'hug'
+
+// Client（端末のパレード・デスクトップの手ざわり層）からフックへ post するメッセージ
+export type ClientMessage =
+  // Clawd をなではじめた。x はさわった絵のドットの列（手ざわり層だけが送る）
+  | { kind: 'pet'; x?: number }
+  // 押したまま、なでた 1 回ぶん動かした
+  | { kind: 'stroke'; x?: number }
+  // 仲間をぎゅっとした。id はその仲間（手ざわり層だけが送る）
+  | { kind: 'hug'; id?: string }
+
 export type Pets = {
   total: number
   // いちばん最近さわった時刻と、続けてなでている間の始まり
   at: number
   from: number
-  kind: 'pet' | 'hug'
+  kind: TouchKind
   // デスクトップの手ざわり層から：手のあるドットの列、ぎゅっとした仲間
   hand: number | null
   friend: string | null
@@ -57,6 +69,38 @@ export type TreatId = 'cookie' | 'cocoa' | 'cake' | 'letter' | 'cushion' | 'keyb
 export type DreamId = 'greenTests' | 'telescope' | 'house' | 'library' | 'constellation' | 'moonTrip' | 'noBugs'
 export type GiftId = TreatId | DreamId
 
+// 実績の id（hooks/game.ts の ACHIEVEMENTS と同じ並び）。保存に入るので、変えないこと。
+// plugin.json の types は 1 ファイルで閉じている決まりなので、game.ts から引かずにここに並べる
+export type AchievementId =
+  | 'pets1'
+  | 'pets100'
+  | 'pets1k'
+  | 'pets10k'
+  | 'pets100k'
+  | 'pets1m'
+  | 'combo10'
+  | 'fever1'
+  | 'fever10'
+  | 'fever100'
+  | 'work100'
+  | 'work1k'
+  | 'hug10'
+  | 'wake'
+  | 'earned10k'
+  | 'earned1m'
+  | 'earned100m'
+  | 'shop1'
+  | 'glove25'
+  | 'idle10'
+  | 'hat'
+  | 'collector'
+  | 'gift1'
+  | 'sweets10'
+  | 'letter'
+  | 'dream1'
+  | 'dreamAll'
+  | 'bff'
+
 export type Game = {
   // 保存形式の版。v の無い保存（1.1.2 まで）は v1 として読む
   v: number
@@ -75,8 +119,9 @@ export type Game = {
   levels: Partial<Record<UpgradeId, number>>
   owned: CosmeticId[]
   hat: Hat | null
-  achievements: string[]
-  lastUnlock: { id: string; at: number } | null
+  // 新しい版の実績の id が入っていることもある（この版では見つからないだけ）
+  achievements: AchievementId[]
+  lastUnlock: { id: AchievementId; at: number } | null
   // あげた贈り物の数、贈った ♡ の合計（なかよし度）、ごきげんが続く時刻、最後の贈り物
   gifts: Partial<Record<GiftId, number>>
   given: number
@@ -100,8 +145,8 @@ export type Look = {
   aurora: boolean
   fever: boolean
   // 今 Clawd が抱えている贈り物（夢のプレゼントは箱で）、飾ってある夢のプレゼント
-  gift?: TreatId | 'box' | null
-  dreams?: DreamId[]
+  gift: TreatId | 'box' | null
+  dreams: DreamId[]
 }
 
 declare module 'claude-code' {

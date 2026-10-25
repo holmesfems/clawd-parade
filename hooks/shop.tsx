@@ -3,7 +3,7 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
 import type { Character, Game } from '../types'
-import type { Scene } from './game'
+import type { Deal, Scene } from './game'
 
 import {
   ACHIEVEMENTS,
@@ -28,9 +28,6 @@ import {
 } from './game'
 
 export const SHOP = 'parade-shop'
-
-// お店の取り引き：買えたら新しいゲーム、買えなければ断る理由
-export type Deal = (g: Game, now: number) => Game | string
 
 export type ShopInput = {
   game: Game
