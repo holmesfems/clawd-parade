@@ -5,7 +5,7 @@
 import type { ClientModule } from 'claude-code'
 
 import type { Character, Friend, Look, MoodKind } from '../types'
-import { drawScene, layout, putHeart, toRuns } from './scene'
+import { drawScene, hitTest, layout, putHeart, strokeMeter, toRuns } from './scene'
 
 export type ViewProps = {
   columns: number
@@ -23,7 +23,8 @@ const FRAME_MS = 100
 const PET_FRAMES = 12
 const HOP_FRAMES = 8
 const HEART_LIFE = 12
-const STROKE_PER_HEART = 3
+// なでている手が、これだけドット動くごとにハートを 1 つ出す
+const DOTS_PER_HEART = 3
 
 // Client は 1 つしか置かないので、手の状態はモジュールに持つ
 let current: ViewProps | undefined
@@ -32,10 +33,8 @@ let version = 0
 let petUntil = -1
 let sway = 0
 let isHolding = false
-let lastX = 0
-let lastY = 0
-let travel = 0
-let strokes = 0
+let toHeart = 0
+const meter = strokeMeter()
 let hearts: Heart[] = []
 const hops = new Map<string, number>()
 
@@ -60,41 +59,39 @@ const ParadeView: ClientModule<ViewProps, number> = (props, surface) => {
     surface.onPointer(ev => {
       const now = current
       if (!now) return
-      const spots = layout(now.columns, now.friends, now.character)
+      const spots = layout(now.columns, now.columns, now.friends, now.character)
       const { x: lx, w: lw } = spots.leader
-      const isOnLeader = ev.x >= lx - 1 && ev.x <= lx + lw
+      // 端末は 1 マスが横 1 ドット、1 行が縦 2 ドット
+      const dotY = ev.y * 2
 
       if (ev.type === 'down' && ev.button === 'left') {
-        if (isOnLeader) {
+        const hit = hitTest(spots, ev.x)
+        if (hit?.kind === 'leader') {
           isHolding = true
-          lastX = ev.x
-          lastY = ev.y
-          travel = 0
+          meter.start(ev.x, dotY)
+          toHeart = 0
           petUntil = frame + PET_FRAMES
           addHeart(ev.x, ev.y)
           surface.post({ kind: 'pet' })
+        } else if (hit?.kind === 'friend') {
+          const friend = spots.friends.find(f => f.id === hit.id)!
+          hops.set(friend.id, frame + HOP_FRAMES)
+          addHeart(friend.x + 4, 1)
+          surface.post({ kind: 'hug' })
         } else {
-          const friend = spots.friends.find(f => ev.x >= f.x && ev.x < f.x + f.w)
-          if (friend) {
-            hops.set(friend.id, frame + HOP_FRAMES)
-            addHeart(friend.x + 4, 1)
-            surface.post({ kind: 'hug' })
-          }
+          return
         }
       } else if (ev.type === 'move' && isHolding && ev.button === 'left') {
-        const moved = Math.abs(ev.x - lastX) + Math.abs(ev.y - lastY)
+        const { moved, isStroke } = meter.move(ev.x, dotY)
         if (moved === 0) return
-        travel += moved
-        lastX = ev.x
-        lastY = ev.y
         sway = Math.max(-2, Math.min(2, Math.round((ev.x - (lx + lw / 2)) / 3)))
         petUntil = frame + PET_FRAMES
-        if (travel >= STROKE_PER_HEART) {
-          travel = 0
-          strokes += 1
+        toHeart += moved
+        if (toHeart >= DOTS_PER_HEART) {
+          toHeart = 0
           addHeart(ev.x, ev.y)
-          if (strokes % 3 === 0) surface.post({ kind: 'stroke' })
         }
+        if (isStroke) surface.post({ kind: 'stroke' })
       } else if (ev.type === 'up') {
         isHolding = false
       } else {

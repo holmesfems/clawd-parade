@@ -5,12 +5,14 @@
 import type { ClientModule } from 'claude-code'
 
 import type { Character, Friend } from '../types'
-import { layout } from './scene'
+import { hitTest, layout, strokeMeter } from './scene'
 
 export type TouchProps = {
   columns: number
   // 行進に使う左側のドット数（drawScene と同じ並びで当たり判定する）
   paradeColumns: number
+  // 絵の高さ（ドット）。縦の動きも絵のドット数で数える
+  dotRows: number
   // 層の高さ（行）。デスクトップは中身の高さで層の高さが決まるので、この行数ぶん空行で埋める
   rows: number
   // /parade debug 中は、層のふちと大きさを描いて見えるようにする
@@ -19,14 +21,10 @@ export type TouchProps = {
   character: Character
 }
 
-// これだけドットを動かすごとに「なでなで」を 1 回送る
-const STROKE_PER_POST = 3
-
 // Client は 1 つしか置かないので、手の状態はモジュールに持つ
 let current: TouchProps | undefined
 let isHolding = false
-let lastX = 0
-let travel = 0
+const meter = strokeMeter()
 
 const TouchPad: ClientModule<TouchProps, number> = (props, surface) => {
   current = props
@@ -38,27 +36,20 @@ const TouchPad: ClientModule<TouchProps, number> = (props, surface) => {
       if (!now || surface.columns === 0) return
       // 層は SVG と同じマス数の幅なので、マスの位置を絵のドット数に比例させる
       const px = Math.floor(((ev.x + 0.5) * now.columns) / surface.columns)
-      const spots = layout(now.paradeColumns, now.friends, now.character)
-      const { x: lx, w: lw } = spots.leader
-      const isOnLeader = px >= lx - 1 && px <= lx + lw
+      const py = surface.rows > 0 ? Math.floor(((ev.y + 0.5) * now.dotRows) / surface.rows) : 0
+      const spots = layout(now.columns, now.paradeColumns, now.friends, now.character)
 
       if (ev.type === 'down' && ev.button === 'left') {
-        if (isOnLeader) {
+        const hit = hitTest(spots, px)
+        if (hit?.kind === 'leader') {
           isHolding = true
-          lastX = px
-          travel = 0
+          meter.start(px, py)
           surface.post({ kind: 'pet', x: px })
-        } else {
-          const friend = spots.friends.find(f => px >= f.x && px < f.x + f.w)
-          if (friend) surface.post({ kind: 'hug', id: friend.id })
+        } else if (hit?.kind === 'friend') {
+          surface.post({ kind: 'hug', id: hit.id })
         }
       } else if (ev.type === 'move' && isHolding && ev.button === 'left') {
-        travel += Math.abs(px - lastX)
-        lastX = px
-        if (travel >= STROKE_PER_POST) {
-          travel = 0
-          surface.post({ kind: 'stroke', x: px })
-        }
+        if (meter.move(px, py).isStroke) surface.post({ kind: 'stroke', x: px })
       } else if (ev.type === 'up') {
         isHolding = false
       }

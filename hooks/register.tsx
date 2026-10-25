@@ -43,7 +43,7 @@ import {
 } from './game'
 import type { ViewProps } from './parade-view'
 import type { TouchProps } from './touch-pad'
-import { SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, hex, isMarching, kaomoji, layout, putHeart, toSvg } from './scene'
+import { SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, isMarching, kaomoji, layout, putHeart, toSvg } from './scene'
 
 const mood = atom({ plugin: 'clawd-parade', key: 'mood' } as const, { kind: 'idle', at: 0 } as Mood)
 const friends = atom({ plugin: 'clawd-parade', key: 'friends' } as const, [] as Friend[])
@@ -92,14 +92,6 @@ const ACCRUE_EVERY = 5
 const SAVE_EVERY_MS = 5000
 // 取った実績を帯に出しておく時間
 const UNLOCK_SHOW_MS = 5000
-// デスクトップの絵は「マス」で場所を取り、SVG をその幅いっぱいに縮めて描く。
-// 手ざわり層も同じマス数にするので、絵と層の幅が px を知らなくても揃う
-const DESKTOP_DOTS_PER_CELL = 1.5
-const DESKTOP_MAX_COLUMNS = 600
-// デスクトップは Clawd の上に空を足して、ぼうしや流れ星の場所にする
-const DESKTOP_HEADROOM = 4
-// 広いデスクトップで、夜空の右側にセリフを重ねる幅（マス）
-const SKY_WORDS_CELLS = 44
 // デスクトップの星は大きく見えてせわしないので、またたきを 1/4 の速さにする
 const DESKTOP_TWINKLE_TICKS = 4
 // SVG 本来の 1 ドットの大きさ。舞台の幅まで縮められるよう、大きめにしておく
@@ -564,15 +556,10 @@ export const register: Register = on => {
     )
 
     const cols = e.props.bodyColumns
-    const isWide = cols >= 76
-    const room = SCENE_ROWS + (isWide ? 0 : 3 + list.length)
-
     // デスクトップは夜空を帯の幅いっぱいに広げ、広いときは右側の空をセリフに空けておく
-    const sceneColumns = isDesktop
-      ? Math.min(DESKTOP_MAX_COLUMNS, Math.floor(cols * DESKTOP_DOTS_PER_CELL))
-      : Math.min(512, isWide ? cols - 36 : cols - 1)
-    const paradeColumns =
-      isDesktop && isWide ? sceneColumns - Math.ceil(SKY_WORDS_CELLS * DESKTOP_DOTS_PER_CELL) : sceneColumns
+    const frame = frameOf(isDesktop ? 'desktop' : 'terminal', cols)
+    const { isWide, columns: sceneColumns, paradeColumns, headroom } = frame
+    const room = SCENE_ROWS + (isWide ? 0 : 3 + list.length)
     const sceneProps: ViewProps = { columns: sceneColumns, mood: m.kind, tick: t.n, friends: list, character: who, look }
     // デスクトップの絵は px で描くので、行数の余裕は見ない
     const canDraw = cols >= 40 && (isDesktop || (e.surface === 'terminal' && e.props.maxRows >= room))
@@ -582,22 +569,23 @@ export const register: Register = on => {
       const age = Math.floor((t.at - petted.from) / FRAME_MS)
       const isStroked = isPetted && petted.kind === 'pet'
       const hugged = isPetted && petted.kind === 'hug' && petted.friend !== null && age < HOP_FRAMES ? [petted.friend] : []
-      const { x, w } = layout(paradeColumns, list, who).leader
+      const spots = layout(sceneColumns, paradeColumns, list, who)
+      const { x, w } = spots.leader
       const sway = petted.hand !== null ? Math.round((petted.hand - (x + w / 2)) / 3) : [0, 1, 0, -1][age % 4] ?? 0
       const g = drawScene({
         ...sceneProps,
         paradeColumns,
         twinkleTicks: DESKTOP_TWINKLE_TICKS,
-        headroom: DESKTOP_HEADROOM,
+        headroom,
         petted: isStroked ? { sway } : null,
         hopping: hugged,
       })
       if (isStroked) {
-        // なでている間は 2 コマごとにハートを出し、顔にかからないよう両脇から昇らせる
-        const spots = [x + w + 1, x - 4, x + w + 5]
+        // なでている間は 2 コマごとにハートを出し、両脇から昇らせる
+        const { hearts } = spots
         const lastTouch = Math.floor((petted.at - petted.from) / FRAME_MS)
         for (let k = Math.max(0, Math.ceil((age - 11) / 2)); k * 2 <= Math.min(age, lastTouch + 4); k++) {
-          putHeart(g, spots[k % spots.length]!, DESKTOP_HEADROOM + 8 - (age - k * 2), k % 2 === 0)
+          putHeart(g, hearts[k % hearts.length]!, headroom + 8 - (age - k * 2), k % 2 === 0)
         }
       }
       return toSvg(g, DESKTOP_MARKUP_PIXEL)
@@ -613,6 +601,7 @@ export const register: Register = on => {
           const touchProps: TouchProps = {
             columns: sceneColumns,
             paradeColumns,
+            dotRows: SCENE_ROWS * 2 + headroom,
             rows: TOUCH_ROWS,
             friends: list,
             character: who,
@@ -636,7 +625,7 @@ export const register: Register = on => {
                   top={0}
                   bottom={0}
                   right={0}
-                  width={SKY_WORDS_CELLS}
+                  width={frame.wordsCells}
                   flexDirection="column"
                   justifyContent="center"
                   overflow="hidden"

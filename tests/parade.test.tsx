@@ -161,7 +161,7 @@ test('端末ではパレードの Client で、直接なでて・ぎゅっとで
   expect(await textOf(ui, /なでなで 1 回目/)).toBeDefined()
   expect(await textOf(ui, /えへへ/)).toBeDefined()
 
-  // 押したままなでると、9 マス動くごとに 1 回
+  // 押したままなでると、絵の 6 ドット（端末は 6 マス）動くごとに 1 回
   for (const x of [11, 14, 17]) await ui.pointer({ in: 'parade', type: 'move', x, y: 3, button: 'left' })
   await ui.pointer({ in: 'parade', type: 'up', x: 17, y: 3, button: 'left' })
   await clock.advance(200)
@@ -220,8 +220,9 @@ test('デスクトップでは絵に重ねた手ざわり層で、直接なで�
   await clock.advance(200)
   expect(await textOf(ui, /なでなで 1 回目/)).toBeDefined()
 
-  for (const x of [16, 17]) await ui.pointer({ in: 'touch', type: 'move', x, y: 5, button: 'left' })
-  await ui.pointer({ in: 'touch', type: 'up', x: 17, y: 5, button: 'left' })
+  // 押したままなでると、絵の 6 ドット（デスクトップは 4 マス）動くごとに 1 回
+  for (const x of [16, 17, 18, 19]) await ui.pointer({ in: 'touch', type: 'move', x, y: 5, button: 'left' })
+  await ui.pointer({ in: 'touch', type: 'up', x: 19, y: 5, button: 'left' })
   await clock.advance(200)
   expect(await textOf(ui, /なでなで 2 回目/)).toBeDefined()
 
@@ -237,6 +238,51 @@ test('デスクトップでは絵に重ねた手ざわり層で、直接なで�
   await runParade($, 'debug')
   await clock.advance(200)
   expect(await textOf(ui, /手ざわり層 120×7 マス/, { in: 'touch' })).toBeDefined()
+})
+
+test('端末でもデスクトップでも、Clawd と仲間の端まで当たり、同じ距離なでると 1 回', async ($, on) => {
+  const { clock } = boot(on, { store: veteran() })
+  await startSession($, 'terminal')
+  await $.turn.start({ text: 'しらべて', turnId: 't1' })
+  await spawnFriend($)
+  await clock.advance(200)
+  let total = 0
+  const count = async (ui: Parameters<typeof textOf>[0]) => {
+    await clock.advance(200)
+    return Number((await textOf(ui, /なでなで \d+ 回目/))?.match(/\d+/)?.[0] ?? 0)
+  }
+
+  // どちらも絵のドットでは、仲間が 2〜12、Clawd が 14〜31（両脇 1 ドットまで当たる）
+  const surfaces = [
+    // 端末は 1 マス 1 ドット
+    { surface: 'terminal' as const, layer: 'parade', size: { columns: 84, rows: 7 }, friendEnd: 12, leader: [13, 32], miss: 33, stroke: 6 },
+    // デスクトップは 1 マス 1.5 ドット：マス 8 は 12 ドット、9 は 14、21 は 32、22 は 33
+    { surface: 'desktop' as const, layer: 'touch', size: { columns: 120, rows: 7 }, friendEnd: 8, leader: [9, 21], miss: 22, stroke: 4 },
+  ]
+  for (const { surface, layer, size, friendEnd, leader, miss, stroke } of surfaces) {
+    const ui = await mountBand($, surface)
+    await ui.resize({ ...size, in: layer })
+    const tap = (x: number) => ui.pointer({ in: layer, type: 'down', x, y: 3, button: 'left' }).then(() => ui.pointer({ in: layer, type: 'up', x, y: 3, button: 'left' }))
+
+    for (const x of leader) {
+      await tap(x)
+      expect(await count(ui)).toBe(++total)
+    }
+    await tap(friendEnd)
+    expect(await count(ui)).toBe(++total)
+    expect(await textOf(ui, /なかまもよろこんでる/)).toBeDefined()
+    await tap(miss)
+    expect(await count(ui)).toBe(total)
+
+    // 押したまま絵の 6 ドット動かすと、1 回なでたことになる
+    await ui.pointer({ in: layer, type: 'down', x: 15, y: 3, button: 'left' })
+    for (let x = 16; x < 15 + stroke; x++) await ui.pointer({ in: layer, type: 'move', x, y: 3, button: 'left' })
+    expect(await count(ui)).toBe(++total)
+    await ui.pointer({ in: layer, type: 'move', x: 15 + stroke, y: 3, button: 'left' })
+    expect(await count(ui)).toBe(++total)
+    await ui.pointer({ in: layer, type: 'up', x: 15 + stroke, y: 3, button: 'left' })
+    await ui.unmount()
+  }
 })
 
 // ---- なでなでゲーム ----
