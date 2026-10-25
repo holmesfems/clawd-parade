@@ -153,7 +153,7 @@ test('newGame は保存形式の版 v: 1 を持つ', () => {
   expect(newGame(0, 0).v).toBe(1)
 })
 
-test('mergeGame：数は差分を足し、♡ は 0 で止める', () => {
+test('mergeGame：数は差分を足す', () => {
   const base = game({ hearts: 100, earned: 100, fevers: 1, workPets: 5, hugs: 2, wakes: 1, given: 0 })
   const theirs = { ...base, hearts: 150, earned: 150, fevers: 2 }
   const mine = { ...base, hearts: 130, earned: 130, workPets: 8, hugs: 3, wakes: 2 }
@@ -165,14 +165,81 @@ test('mergeGame：数は差分を足し、♡ は 0 で止める', () => {
   expect(merged.hugs).toBe(3)
   expect(merged.wakes).toBe(2)
 
-  // 両方で使ったら、負にはならず 0 で止まる
-  expect(mergeGame({ ...base, hearts: 10 }, base, { ...base, hearts: 20 }).hearts).toBe(0)
+  // 両方で使って足りなくなったら、負（借金）になる
+  expect(mergeGame({ ...base, hearts: 10 }, base, { ...base, hearts: 20 }).hearts).toBe(-70)
 })
 
-test('mergeGame：♡ だけは 0 で止め、ほかの数は差分をそのまま足す', () => {
+// ---- 同時に買ったとき（#10） ----
+
+test('同時の買い物：♡ が足りないのに両方で買えたら、♡ は借金として負のまま', () => {
+  // 1,000 ♡ のとき、2 つのセッションで同時に 800 ♡ と 500 ♡ の買い物をした
+  const base = game({ hearts: 1_000 })
+  const merged = mergeGame({ ...base, hearts: 200, levels: { stardust: 1 } }, base, { ...base, hearts: 500, levels: { fan: 1 } })
+  expect(merged.hearts).toBe(-300)
+  expect(merged.levels).toEqual({ stardust: 1, fan: 1 })
+  // 借金があるあいだは何も買えない
+  expect(buyUpgrade(merged, 'glove')).toEqual({ ok: false, reason: '♡ が 315 足りないよ' })
+  expect(formatHearts(merged.hearts)).toBe('-300')
+})
+
+test('同時の買い物：上限のある強化は上限で止め、超えたぶんを返す', () => {
+  const base = game({ hearts: 0, levels: { feverTime: 4 } })
+  const paid = priceOf(upgrade('feverTime'), 4)
+  const merged = mergeGame({ ...base, levels: { feverTime: 5 } }, base, { ...base, levels: { feverTime: 5 } })
+  expect(merged.levels).toEqual({ feverTime: 5 })
+  expect(merged.hearts).toBe(paid)
+})
+
+test('同時の買い物：同じ Lv を両方で買ったら、片方は次の Lv の値段になる', () => {
+  const glove = upgrade('glove')
+  const base = game({ hearts: 1_000, levels: { glove: 10 } })
+  const once = bought(buyUpgrade(base, 'glove'))
+  const merged = mergeGame(once, base, once)
+  expect(merged.levels).toEqual({ glove: 12 })
+  // Lv10→11 と Lv11→12 の値段を払ったことになる
+  expect(merged.hearts).toBe(1_000 - priceOf(glove, 10) - priceOf(glove, 11))
+})
+
+test('同時の買い物：上限まで何 Lv か上げたら、本当の値段との差だけ返す', () => {
+  const fever = upgrade('feverTime')
+  // Lv3 から、両方のセッションで Lv5 まで上げた
+  const base = game({ hearts: 0, levels: { feverTime: 3 } })
+  const both = { ...base, levels: { feverTime: 5 } }
+  const merged = mergeGame(both, base, both)
+  expect(merged.levels).toEqual({ feverTime: 5 })
+  expect(merged.hearts).toBe(priceOf(fever, 3) + priceOf(fever, 4))
+})
+
+test('同時の買い物：同じきせかえを両方で買ったら、1 つぶん返す', () => {
+  const base = game({ hearts: 5_000 })
+  const theirs = bought(buyCosmetic(base, 'crown'))
+  const mine = bought(buyCosmetic(base, 'crown'))
+  const merged = mergeGame(theirs, base, mine)
+  expect(merged.owned).toEqual(['crown'])
+  expect(merged.hearts).toBe(0)
+  // 片方だけが買ったものは、そのまま
+  const one = mergeGame(theirs, base, bought(buyCosmetic(base, 'ribbon')))
+  expect(one.owned).toEqual(['crown', 'ribbon'])
+  expect(one.hearts).toBe(5_000 - 5_000 - 300)
+})
+
+test('同時の買い物：同じ夢のプレゼントを両方で贈ったら、1 つぶん返す', () => {
+  const base = game({ hearts: 100_000 })
+  const theirs = bought(giveGift(base, 'greenTests', 2_000))
+  const mine = bought(giveGift(base, 'greenTests', 2_100))
+  const merged = mergeGame(theirs, base, mine)
+  expect(merged.gifts).toEqual({ greenTests: 1 })
+  expect(merged.given).toBe(30_000)
+  expect(merged.hearts).toBe(70_000)
+  // 次に合わせるときに、もう一度返したりしない
+  const later = mergeGame(merged, merged, { ...merged, hearts: merged.hearts + 1 })
+  expect(later.hearts).toBe(70_001)
+})
+
+test('mergeGame：ほかの数は差分をそのまま足す', () => {
   const base = game({ hearts: 10, earned: 10 })
   const merged = mergeGame({ ...base, hearts: 0, earned: 0 }, base, { ...base, hearts: 5, earned: 5 })
-  expect(merged.hearts).toBe(0)
+  expect(merged.hearts).toBe(-5)
   expect(merged.earned).toBe(-5)
 })
 
@@ -292,7 +359,10 @@ test('payIdle：応援うちわと星のかけらのぶんを足す', () => {
 
 test('formatHearts：1 万未満は 3 桁区切り、それ以上は万・億', () => {
   expect(formatHearts(0)).toBe('0')
-  expect(formatHearts(-5)).toBe('0')
+  // 負（借金）は - をつける。1 に満たないぶんは 0
+  expect(formatHearts(-5)).toBe('-5')
+  expect(formatHearts(-12_000)).toBe('-1.2万')
+  expect(formatHearts(-0.5)).toBe('0')
   expect(formatHearts(999.9)).toBe('999')
   expect(formatHearts(1_234)).toBe('1,234')
   expect(formatHearts(12_000)).toBe('1.2万')

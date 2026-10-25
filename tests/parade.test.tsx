@@ -492,3 +492,81 @@ test('複数のセッション：別のセッションで贈った贈り物も�
   expect(await textOf(ui, /ごきげん/)).toBeDefined()
   expect((held.get('game') as { lastGift: unknown }).lastGift).toEqual(cake)
 })
+
+// ---- 同時の保存・買い物（#10） ----
+
+test('複数のセッション：同じ王冠を同時に買ったら、払いすぎた ♡ を返す', async ($, on) => {
+  const { clock, held, toasts } = boot(on, { store: veteran({ hearts: 10_000 }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const shop = await mountShop($)
+
+  // 別のセッションが同じ 10,000 ♡ から王冠を買って保存した。こちらはまだそれを読んでいない
+  const other = held.get('game') as Record<string, unknown>
+  held.set('game', { ...other, hearts: 5_000, owned: ['crown'], hat: 'crown' })
+
+  await shop.press({ key: 'dress-crown' })
+  expect(toasts).toContain('王冠 を買ったよ！')
+  const saved = held.get('game') as { hearts: number; owned: string[] }
+  expect(saved.owned).toEqual(['crown'])
+  // 2 回払った 5,000 ♡ のうち 1 回ぶんが返る（放置収入などの端数は無い）
+  expect(Math.round(saved.hearts)).toBe(5_000)
+})
+
+test('複数のセッション：同時に買って ♡ が足りなくなったら、借金になって買えない', async ($, on) => {
+  const { clock, held, toasts } = boot(on, { store: veteran({ hearts: 1_000 }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const shop = await mountShop($)
+  const ui = await mountBand($, 'desktop')
+
+  // 別のセッションが 1,000 ♡ のうち 800 ♡ を使った。こちらは同時に 300 ♡ のリボンを買う
+  const other = held.get('game') as Record<string, unknown>
+  held.set('game', { ...other, hearts: 200, levels: { stardust: 1 } })
+  await shop.press({ key: 'dress-ribbon' })
+
+  expect(Math.round((held.get('game') as { hearts: number }).hearts)).toBe(-100)
+  await clock.advance(200)
+  expect(await textOf(ui, /♡ -100 /)).toBeDefined()
+  await shop.press({ key: 'buy-glove' })
+  expect(toasts.at(-1)).toBe('♡ が 115 足りないよ')
+})
+
+test('複数のセッション：書いた直後に別のセッションが書いたら、そちらを取り込み、二重に足さない', async ($, on) => {
+  const { clock, held, afterSet } = boot(on, { store: veteran({ hearts: 1_000 }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const ui = await mountTouchBand($)
+  await petLeader(ui, clock, 3)
+
+  // こちらが書いた直後に、それを読んだ別のセッションが ♡ を 5,000 足して書いた
+  let raced = false
+  afterSet.run = (key, value) => {
+    if (key !== 'game' || raced) return
+    raced = true
+    held.set('game', { ...(value as object), hearts: (value as { hearts: number }).hearts + 5_000 })
+  }
+  await clock.advance(5_000)
+  expect(raced).toBe(true)
+  const first = (held.get('game') as { hearts: number }).hearts
+  expect(first).toBeGreaterThan(6_000)
+  // 次の保存を待たずに帯に映る
+  expect(await textOf(ui, /♡ 6,0\d\d /)).toBeDefined()
+
+  // 次の保存で、こちらのなでたぶんを二重に足したりしない
+  await clock.advance(5_000)
+  const second = (held.get('game') as { hearts: number }).hearts
+  expect(second - first).toBeLessThan(1)
+})
+
+test('複数のセッション：放置収入を書いた直後に別のセッションが書いたら、こちらは払わない', async ($, on) => {
+  const { clock, held, afterSet } = boot(on, { store: veteran({ levels: { stardust: 1 } }, { idlePaidAt: 1_000 }) })
+  await startSession($, 'desktop')
+  // 同じ時刻を読んだ別のセッションが、すぐあとに書いて（こちらのぶんもまとめて）払う
+  afterSet.run = (key, value) => {
+    if (key === 'idlePaidAt') held.set('idlePaidAt', (value as number) + 1)
+  }
+  await clock.advance(3_000)
+  await endSession($)
+  expect((held.get('game') as { hearts: number }).hearts).toBe(0)
+})

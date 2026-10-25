@@ -140,22 +140,54 @@ export function mergeGame(theirs: Game, base: Game, mine: Game): Game {
   // 知らない項目（新しい版が書いたもの）は、このセッションでは変えないので向こうの
   const merged: Record<string, unknown> = unknownOf(theirs)
   for (const k of MERGE_KEYS) merged[k] = mergeField(MERGE[k], theirs[k], base[k], mine[k])
-  return merged as Game
+  return settle(merged as Game, theirs, base, mine)
+}
+
+// 2 つのセッションが base からほぼ同時に買ったとき、払った ♡ を本当の値段にそろえる。
+// - 強化：両方で上げたら、合わせた Lv（上限まで）を base から順に買った値段との差を返す・もらう。
+//   同じ Lv を両方で買うと、片方は次の Lv の値段になる（安いままでは上がらない）
+// - きせかえ：両方で新しく買ったもの（持つのは 1 つ）は、1 つぶん返す
+// - 夢のプレゼント：2 回贈ったことになったものは 1 回にして返す（贈った ♡ の合計からも引く）
+// ♡ が足りなくなったら負（借金）のまま。ただでは買えず、稼いだら返る
+function settle(g: Game, theirs: Game, base: Game, mine: Game): Game {
+  let out = g
+  for (const u of UPGRADES) {
+    const [b, t, m] = [levelOf(base, u.id), levelOf(theirs, u.id), levelOf(mine, u.id)]
+    if (t <= b || m <= b) continue
+    const level = Math.min(t + m - b, u.max ?? Infinity)
+    const paid = costOf(u, b, t) + costOf(u, b, m)
+    out = { ...out, hearts: out.hearts + paid - costOf(u, b, level), levels: { ...out.levels, [u.id]: level } }
+  }
+  const isNew = (one: Game, id: CosmeticId) => one.owned.includes(id) && !base.owned.includes(id)
+  for (const c of COSMETICS) if (isNew(theirs, c.id) && isNew(mine, c.id)) out = { ...out, hearts: out.hearts + c.price }
+  for (const d of DREAMS) {
+    const extra = (out.gifts[d.id] ?? 0) - 1
+    if (extra <= 0) continue
+    const refund = extra * d.price
+    out = { ...out, hearts: out.hearts + refund, given: out.given - refund, gifts: { ...out.gifts, [d.id]: 1 } }
+  }
+  return out
+}
+
+// Lv from から to まで順に上げる値段
+const costOf = (u: Upgrade, from: number, to: number) => {
+  let sum = 0
+  for (let level = from; level < to; level++) sum += priceOf(u, level)
+  return sum
 }
 
 // 項目ごとのマージの方針
 // - add：このセッションで増えた（減った）ぶんを向こうに足す
-// - spend：add と同じだが、0 未満にはしない（♡ のように使って減るもの）
 // - max：大きいほう
 // - union：両方の要素を合わせる
 // - counts：{ id: 数 } の数ごとに add（0 以下になった id は消す）
 // - latest：このセッションで変えたらこちら、変えていなければ向こうの
 // - mine：このセッションだけのもの。いつもこちらの
-type Policy = 'add' | 'spend' | 'max' | 'union' | 'counts' | 'latest' | 'mine'
+type Policy = 'add' | 'max' | 'union' | 'counts' | 'latest' | 'mine'
 
 // 値の型に使える方針だけを選べるようにする
 type PolicyFor<T> = [T] extends [number]
-  ? 'add' | 'spend' | 'max' | 'latest' | 'mine'
+  ? 'add' | 'max' | 'latest' | 'mine'
   : [T] extends [readonly unknown[]]
     ? 'union' | 'latest' | 'mine'
     : [T] extends [Partial<Record<string, number>>]
@@ -165,7 +197,8 @@ type PolicyFor<T> = [T] extends [number]
 // Game に項目を足したら、ここに方針を書くまで型エラーになる
 const MERGE: { [K in keyof Game]-?: PolicyFor<Game[K]> } = {
   v: 'max',
-  hearts: 'spend',
+  // 両方で使って足りなくなったら負（借金）のまま。settle を見る
+  hearts: 'add',
   earned: 'add',
   combo: 'mine',
   comboAt: 'mine',
@@ -194,8 +227,6 @@ function mergeField(policy: Policy, t: unknown, b: unknown, m: unknown): unknown
   switch (policy) {
     case 'add':
       return (t as number) + (m as number) - (b as number)
-    case 'spend':
-      return Math.max(0, (t as number) + (m as number) - (b as number))
     case 'max':
       return Math.max(t as number, m as number)
     case 'union':
@@ -537,8 +568,10 @@ export function lookOf(g: Game, now: number, holding: Holding): Look {
   }
 }
 
-// 1 万未満は 3 桁区切り、それ以上は「万」「億」で
+// 1 万未満は 3 桁区切り、それ以上は「万」「億」で。負（借金）は - をつける
 export function formatHearts(n: number): string {
+  // 1 に満たない借金は 0 と見せる（-0 にしない）
+  if (n <= -1) return `-${formatHearts(-n)}`
   const v = Math.max(0, n)
   if (v >= 1e8) return `${trim(v / 1e8)}億`
   if (v >= 1e4) return `${trim(v / 1e4)}万`
