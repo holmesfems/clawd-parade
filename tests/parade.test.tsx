@@ -411,23 +411,39 @@ test('帯に出した贈り物を、ワンぽちで贈れる', async ($, on) => 
   await startSession($, 'desktop')
   await clock.advance(400)
   const shop = await mountShop($)
-  const wide = await mountBand($, 'desktop')
+  const wide = await mountTouchBand($)
   const narrow = await mountBand($, 'desktop', 60)
   const terminal = await mountBand($, 'terminal')
   const bands = [wide, narrow, terminal]
+  // 広いデスクトップの札。手ざわり層のマス 67〜75（絵のドット 101〜113）にある
+  const tapGift = async (x = 70) => {
+    await wide.pointer({ in: 'touch', type: 'down', x, y: 1, button: 'left' })
+    await wide.pointer({ in: 'touch', type: 'up', x, y: 1, button: 'left' })
+  }
+  const plain = await svgOf(wide)
 
-  // 選ぶまでは、帯にボタンは無い
+  // 選ぶまでは、帯にボタンも札も無い。札の場所を押しても何も起きない
   for (const ui of bands) expect(await ui.find({ key: 'quick-gift' })).toBeUndefined()
+  await tapGift()
+  expect(toasts.some(t => t.includes('あげたよ'))).toBe(false)
 
   // ショップの ☆ でケーキを帯に出す。選んだものはすぐ保存する
   await shop.press({ key: 'fav-cake' })
   expect(toasts.at(-1)).toBe('🍰 いちごのショートケーキ を帯に出したよ！ワンぽちで贈れるよ')
   expect((held.get('game') as { favorite: unknown }).favorite).toBe('cake')
   await clock.advance(200)
-  for (const ui of bands) expect(await textOf(ui, /🍰 あげる 400♡/)).toBeDefined()
+  for (const ui of [narrow, terminal]) expect(await textOf(ui, /🍰 あげる 400♡/)).toBeDefined()
+  // 広いデスクトップはボタンにせず（♡ の行が見切れないように）、夜空に札で描く
+  expect(await wide.find({ key: 'quick-gift' })).toBeUndefined()
+  expect(await svgOf(wide)).not.toBe(plain)
+  expect(((await wide.find({ type: 'Svg' }))?.props as { alt: string }).alt).toMatch(/🍰 あげる 400♡/)
+  // 札の列の外（Clawd より右の空）は贈らない
+  await tapGift(66)
+  await tapGift(76)
+  expect(toasts.some(t => t.includes('あげたよ'))).toBe(false)
 
-  // 帯のボタンで贈ると、お礼を言ってかかえる（端末からも）
-  await wide.press({ key: 'quick-gift' })
+  // 札を押すと、お礼を言ってかかえる。ほかの帯ではボタンで（端末からも）
+  await tapGift()
   expect(toasts).toContain('🎁 いちごのショートケーキ をあげたよ！')
   await clock.advance(200)
   expect(await textOf(wide, /ケーキ！？いいの！？/)).toBeDefined()
@@ -439,11 +455,17 @@ test('帯に出した贈り物を、ワンぽちで贈れる', async ($, on) => 
   expect(toasts.at(-1)).toMatch(/足りないよ/)
   expect((held.get('game') as { gifts: Record<string, number> }).gifts.cake).toBe(2)
 
-  // もう一度 ★ を押すと、帯から下ろす
+  await tapGift(75)
+  expect(toasts.at(-1)).toMatch(/足りないよ/)
+  expect((held.get('game') as { gifts: Record<string, number> }).gifts.cake).toBe(2)
+
+  // もう一度 ★ を押すと、帯から下ろす。札も消え、その場所を押しても贈らない
   await shop.press({ key: 'fav-cake' })
   expect(toasts.at(-1)).toBe('いちごのショートケーキ を帯から下ろしたよ')
   await clock.advance(200)
   for (const ui of bands) expect(await ui.find({ key: 'quick-gift' })).toBeUndefined()
+  await tapGift()
+  expect(toasts.at(-1)).toBe('いちごのショートケーキ を帯から下ろしたよ')
 })
 
 // ---- 保存 ----

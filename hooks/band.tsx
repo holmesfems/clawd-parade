@@ -6,7 +6,7 @@ import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, TreatId, Work } from '../types'
 import { ACHIEVEMENTS, HOOK_FRAME_MS, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf, treatOf } from './game'
 import type { ViewProps } from './parade-view'
-import { NIGHT, PALETTES, SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, kaomoji, layout, putHeart, timeOfDay, toSvg } from './scene'
+import { NIGHT, PALETTES, QUICK_GIFT_DOTS, SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, kaomoji, layout, putHeart, putQuickGift, quickGiftSpot, timeOfDay, toSvg } from './scene'
 import type { Frame, TimeOfDay } from './scene'
 import type { TouchProps } from './touch-pad'
 
@@ -173,8 +173,9 @@ function giftButtonOf(g: Game): BandText['gift'] {
   return { id: treat.id, label: `${treat.icon} あげる ${formatHearts(treat.price)}♡`, canAfford: g.hearts >= treat.price }
 }
 
-// デスクトップの SVG。さわったぶんのハート・傾き・仲間のジャンプを足して描く
-export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number) {
+// デスクトップの SVG。さわったぶんのハート・傾き・仲間のジャンプと、帯に出した贈り物の札を足して描く。
+// 札を描くときは、frame.paradeColumns をもう QUICK_GIFT_DOTS 引いておく（札はそのすぐ右）
+export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null) {
   const petted = isPetted(p, now)
   const age = Math.floor((now - p.from) / HOOK_FRAME_MS)
   const isStroked = petted && p.kind === 'pet'
@@ -201,6 +202,7 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number)
       putHeart(g, hearts[k % hearts.length]!, frame.headroom + 8 - (age - k * 2), k % 2 === 0)
     }
   }
+  if (gift) putQuickGift(g, quickGiftSpot(frame.paradeColumns).x, gift.id, gift.canAfford)
   return toSvg(g, DESKTOP_MARKUP_PIXEL, palette)
 }
 
@@ -224,15 +226,22 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
 
   const { Box, Text, Button } = ui
   const isDesktop = input.surface === 'desktop'
-
-  // ♡ の行。帯に贈り物を出していれば、その右にワンぽちで贈るボタンを置く
   const { gift } = text
+
+  // デスクトップは夜空を帯の幅いっぱいに広げ、広いときは右側の空をセリフに空けておく
+  const wide = frameOf(isDesktop ? 'desktop' : 'terminal', cols)
+  // 広いデスクトップでは、帯に出した贈り物をボタンにせず、行進とセリフの空のあいだに札で描いて手ざわり層で押す
+  // （ボタンを ♡ の行に並べると、セリフの空に入りきらず ♡ が見切れた）
+  const skyGift = isDesktop && wide.isWide && cols >= MIN_SCENE_CELLS && 'Svg' in ui && 'Client' in ui ? gift : null
+  const frame = skyGift ? { ...wide, paradeColumns: wide.paradeColumns - QUICK_GIFT_DOTS } : wide
+
+  // ♡ の行。帯に贈り物を出していれば（札にしないときは）、その右にワンぽちで贈るボタンを置く
   const scoreText = (
     <Text key="score" color={text.scoreColor} bold={text.isFever} wrap="truncate-end">
       {text.score}
     </Text>
   )
-  const scoreLine = gift ? (
+  const scoreLine = gift && !skyGift ? (
     <Box key="score-row" columnGap={1} alignItems="center">
       {scoreText}
       <Button key="quick-gift" label={gift.label} variant={gift.canAfford ? 'primary' : 'secondary'} onPress={() => input.onGift(gift.id)} />
@@ -288,8 +297,6 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
     </Box>
   )
 
-  // デスクトップは夜空を帯の幅いっぱいに広げ、広いときは右側の空をセリフに空けておく
-  const frame = frameOf(isDesktop ? 'desktop' : 'terminal', cols)
   const { isWide, columns: sceneColumns } = frame
   const room = SCENE_ROWS + (isWide ? 0 : 3 + list.length)
   const sceneProps: ViewProps = {
@@ -309,8 +316,8 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
   const scene =
     canDraw && isDesktop && 'Svg' in ui ? (
       (() => {
-        const svg = desktopSvg(sceneProps, frame, petted, t.at)
-        const alt = `${who === 'clawd' ? 'Clawd' : 'ねこ'}${list.length ? `となかま ${list.length} 匹` : ''}のパレード`
+        const svg = desktopSvg(sceneProps, frame, petted, t.at, skyGift)
+        const alt = `${who === 'clawd' ? 'Clawd' : 'ねこ'}${list.length ? `となかま ${list.length} 匹` : ''}のパレード${skyGift ? `（${skyGift.label}）` : ''}`
         const touchProps: TouchProps = {
           columns: sceneColumns,
           paradeColumns: frame.paradeColumns,
@@ -318,6 +325,7 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
           friends: list,
           character: who,
           isDebug,
+          gift: skyGift ? quickGiftSpot(frame.paradeColumns) : null,
         }
         // 割合（100%）の大きさはデスクトップで効かず層が左上に縮んだので、層も絵も同じマス数で置く。
         // セリフは手ざわり層より後に置き、層の上に重ねる

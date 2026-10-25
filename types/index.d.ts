@@ -42,6 +42,8 @@ export type ClientMessage =
   | { kind: 'stroke'; x?: number }
   // 仲間をぎゅっとした。id はその仲間（手ざわり層だけが送る）
   | { kind: 'hug'; id?: string }
+  // 帯に出した贈り物の札を押した（広いデスクトップの手ざわり層だけが送る）
+  | { kind: 'gift' }
 
 export type Pets = {
   total: number

@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, Work } from '../types'
+import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Work } from '../types'
 import { bandView } from './band'
 import type { Deal, Situation } from './game'
 import {
@@ -26,6 +26,7 @@ import {
   situationOf,
   toolTip,
   touchGame,
+  treatOf,
   unlocked,
 } from './game'
 import { messageOf } from './message'
@@ -218,6 +219,9 @@ async function buy($: EngineInterface, label: string, deal: Deal) {
   await save($, now)
 }
 
+// 帯に出した贈り物を贈る（帯のボタンと、広いデスクトップの札から）
+const giveTreat = ($: EngineInterface, id: TreatId) => buy($, `🎁 ${giftOf(id).name} をあげたよ！`, (one, when) => giveGift(one, id, when))
+
 let timer: { cancel: () => void } | undefined
 let beat = 0
 let isStepping = false
@@ -329,7 +333,11 @@ export const register: Register = on => {
     const message = e.element === 'parade' || e.element === 'touch' ? messageOf(e.data) : null
     if (!message) return next(e)
 
-    if (message.kind === 'hug') await pet($, 'hug', message.id !== undefined ? { friend: message.id } : {})
+    if (message.kind === 'gift') {
+      // 札は帯に出した贈り物。押したあとに下ろされていたら何もしない
+      const { favorite } = await read($, game)
+      if (favorite !== null && treatOf(favorite)) await giveTreat($, favorite)
+    } else if (message.kind === 'hug') await pet($, 'hug', message.id !== undefined ? { friend: message.id } : {})
     else await pet($, 'pet', message.x !== undefined ? { hand: message.x } : {})
 
     return next(e)
@@ -446,7 +454,7 @@ export const register: Register = on => {
       character: who,
       isDebug,
       onPet: () => void pet($, 'pet'),
-      onGift: id => void buy($, `🎁 ${giftOf(id).name} をあげたよ！`, (one, when) => giveGift(one, id, when)),
+      onGift: id => void giveTreat($, id),
     })
   })
 
