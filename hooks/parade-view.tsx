@@ -6,6 +6,7 @@ import type { ClientModule } from 'claude-code'
 
 import type { Character, ClientMessage, Friend, Look, MoodKind } from '../types'
 import { drawScene, hitTest, layout, putHeart, strokeMeter, toRuns } from './scene'
+import type { Palette } from './scene'
 
 export type ViewProps = {
   columns: number
@@ -15,6 +16,8 @@ export type ViewProps = {
   character: Character
   // なでなでゲームで買ったぼうしや夜空の飾り
   look?: Look
+  // 時間帯の空・地面・星の色（端末は空を塗らないので、星と地面だけが変わる）
+  palette?: Palette
 }
 
 type Heart = { x: number; y: number; age: number; isBig: boolean }

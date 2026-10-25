@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { DreamId, Friend } from '../types'
-import { STROKE_DOTS, drawScene, frameOf, groundDecos, hitTest, layout, starsOf, strokeMeter } from '../hooks/scene'
+import { NIGHT, PALETTES, STROKE_DOTS, drawScene, frameOf, groundDecos, hitTest, layout, starsOf, strokeMeter, timeOfDay, toSvg } from '../hooks/scene'
 
 const STAR = 0xffe38a
 const STAR_DIM = 0x8a86c9
@@ -38,6 +38,50 @@ test('星は歩いても動かず、長く歩いても消えない', () => {
     // またたきは 7 コマ、歩く Clawd の上下は 2 コマで一巡りするので、14 の倍数のコマどうしは同じ絵になる。
     // 前は数分歩くと星の x が負になって、ひとつずつ消えていった
     for (const tick of [14, 1_400, 14_000, 140_000, 1_400_000]) expect(at(tick)).toEqual(first)
+  }
+})
+
+test('時間帯：「時」から朝・昼・夕方・夜・深夜を決める', () => {
+  const byHour = Array.from({ length: 24 }, (_, hour) => timeOfDay(hour))
+  expect(byHour).toEqual([
+    'night',
+    ...Array(4).fill('lateNight'),
+    ...Array(5).fill('morning'),
+    ...Array(6).fill('day'),
+    ...Array(3).fill('evening'),
+    ...Array(5).fill('night'),
+  ])
+  expect(PALETTES.night).toBe(NIGHT)
+})
+
+test('時間帯で空の色と星の数が変わる。昼は星が出ない', () => {
+  const draw = (time: keyof typeof PALETTES, tick = 0) =>
+    drawScene({ columns: 180, headroom: 4, mood: 'idle', tick, friends: [], character: 'clawd', palette: PALETTES[time] })
+  const countStars = (time: keyof typeof PALETTES) => {
+    const { star, starDim } = PALETTES[time]
+    return draw(time).slice(0, 10).flat().filter(c => c === star || c === starDim).length
+  }
+  const night = countStars('night')
+  expect(night).toBeGreaterThan(0)
+  expect(countStars('lateNight')).toBe(night)
+  expect(countStars('day')).toBe(0)
+  for (const time of ['morning', 'evening'] as const) {
+    expect(countStars(time)).toBeGreaterThan(0)
+    expect(countStars(time)).toBeLessThan(night)
+  }
+  // 残す星の割合は、広い空ではおおよそ palette.stars（朝 3 割）
+  const wide = (time: keyof typeof PALETTES) => {
+    const { star, starDim } = PALETTES[time]
+    const g = drawScene({ columns: 600, headroom: 4, mood: 'idle', tick: 0, friends: [], character: 'clawd', palette: PALETTES[time] })
+    return g.slice(0, 10).flat().filter(c => c === star || c === starDim).length
+  }
+  const share = wide('morning') / wide('night')
+  expect(share).toBeGreaterThan(0.15)
+  expect(share).toBeLessThan(0.45)
+  // SVG の背景は時間帯の空の色
+  for (const time of Object.keys(PALETTES) as (keyof typeof PALETTES)[]) {
+    const sky = '#' + PALETTES[time].sky.toString(16).padStart(6, '0')
+    expect(toSvg(draw(time), 16, PALETTES[time]).source).toContain(`fill="${sky}"`)
   }
 })
 

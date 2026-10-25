@@ -18,6 +18,8 @@ const state = (over: Partial<BandState> = {}): BandState => ({
   game: { ...newGame(1_234, NOW), achievements: [] },
   holding: null,
   tick: { n: 0, at: NOW },
+  // 夜 9 時（夜のセリフは前と同じ）
+  hour: 21,
   ...over,
 })
 
@@ -91,6 +93,28 @@ test('帯に出した贈り物：ワンぽちのボタンの文字と、♡ が�
   expect(bandText(state({ game: { ...cake, favorite: 'keyboard' } })).gift?.label).toBe('💻 あげる 1万♡')
   // 新しい版で選んだ、この版の知らない贈り物は出さない
   expect(bandText(state({ game: { ...cake, favorite: 'tea' as TreatId } })).gift).toBeNull()
+})
+
+test('時間帯でセリフが変わる。無い表情はふだんのまま', () => {
+  const at = (hour: number, kind: BandState['mood']['kind'] = 'idle', n = 0) =>
+    bandText(state({ hour, mood: { kind, at: 0 }, tick: { n, at: NOW } })).say
+  expect(at(7)).toBe('おはよう！今日もよろしくね')
+  expect(at(7, 'idle', 25)).toBe('おはよ〜…コーヒーいれよっか？')
+  expect(at(12)).toBe('こんにちは！なんでも言ってね')
+  expect(at(17)).toBe('こんばんは！もうひとがんばり？')
+  expect(at(0)).toBe('よろしくね！なんでも言ってね')
+  expect(at(3, 'idle', 25)).toBe('もう寝ようぜ…つづきは明日にしよ？')
+  expect(at(3, 'done')).toBe('おわったよ…ほめて…そして寝よ？')
+  expect(at(3, 'working')).toBe('ねむいけど…がんばる…')
+  // 時間帯のセリフが無い表情は、どの時間帯もふだんのセリフ
+  for (const hour of [7, 12, 17, 21, 3]) expect(at(hour, 'permission')).toBe('これ、やってもいい？おねがい〜')
+
+  // なでられたときも、表情ごとのセリフが無ければ時間帯のひとこと
+  const petted = { ...untouched, at: NOW - 1_000 }
+  expect(bandText(state({ hour: 7, pets: petted })).say).toBe('おはようのなでなで…♡ 元気でた！')
+  expect(bandText(state({ hour: 3, pets: petted })).say).toBe('むにゃ…なでなで…ねむくなっちゃう…♡')
+  expect(bandText(state({ hour: 12, pets: petted })).say).toBe('えへへ…♡ もっとなでて〜')
+  expect(bandText(state({ hour: 3, pets: petted, mood: { kind: 'error', at: 0 } })).say).toBe('ぐすん…なぐさめてくれるの？♡')
 })
 
 test('isPetted と clockText', () => {

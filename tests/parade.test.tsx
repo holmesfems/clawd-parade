@@ -109,6 +109,32 @@ test('画像を貼った下書きの間は、帯をほかのプラグインに�
   expect(await textOf(plain, /よろしくね/)).toBeDefined()
 })
 
+test('時間帯で空とあいさつが変わる', async ($, on) => {
+  // テストの時計は UTC なので、朝 7 時から始める
+  const { clock } = boot(on, { now: 7 * 3_600_000, store: veteran() })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const morning = await mountBand($, 'desktop')
+  expect(await textOf(morning, /おはよう！今日もよろしくね/)).toBeDefined()
+  expect(await svgOf(morning)).toContain('fill="#2a3560"')
+  const terminal = await mountBand($, 'terminal')
+  expect(await textOf(terminal, /おはよう/)).toBeDefined()
+  // 端末の Client にも、朝の色（星と地面）を渡す
+  const parade = (await terminal.find({ key: 'parade' }))?.props as { props: { palette?: { sky: number } } }
+  expect(parade.props.palette?.sky).toBe(0x2a3560)
+})
+
+test('昼は青空で、星が出ない', async ($, on) => {
+  const { clock } = boot(on, { now: 13 * 3_600_000, store: veteran() })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const day = await mountBand($, 'desktop')
+  expect(await textOf(day, /こんにちは！なんでも言ってね/)).toBeDefined()
+  const svg = await svgOf(day)
+  expect(svg).toContain('fill="#1d3d63"')
+  expect(svg).not.toContain('fill="#c4d8ef"')
+})
+
 // ---- コマンド ----
 
 test('/parade でキャラを切り替え、隠し、また呼べる。キャラは保存に残る', async ($, on) => {

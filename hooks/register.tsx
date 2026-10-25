@@ -428,7 +428,11 @@ export const register: Register = on => {
       read($, touchDebug),
       read($, holding),
     ])
+    // フックの中の Date は使う人のタイムゾーンで動く（claude plugin test の中は UTC）。
+    // tick.at は始めのコマまで 0 なので、時計から読む
+    const hour = new Date(await $.clock.now()).getHours()
     return bandView($.ui.resolve(e), {
+      hour,
       mood: m,
       work: w,
       friends: list,
