@@ -9,6 +9,7 @@ import type { Deal, Situation } from './game'
 import {
   HOOK_FRAME_MS,
   accrue,
+  giftOf,
   giveGift,
   grant,
   heldGift,
@@ -25,7 +26,6 @@ import {
   situationOf,
   toolTip,
   touchGame,
-  treatOf,
   unlocked,
 } from './game'
 import { messageOf } from './message'
@@ -442,7 +442,7 @@ export const register: Register = on => {
       character: who,
       isDebug,
       onPet: () => void pet($, 'pet'),
-      onGift: id => void buy($, `🎁 ${treatOf(id).name} をあげたよ！`, (one, when) => giveGift(one, id, when)),
+      onGift: id => void buy($, `🎁 ${giftOf(id).name} をあげたよ！`, (one, when) => giveGift(one, id, when)),
     })
   })
 

@@ -135,8 +135,8 @@ export function bandText(s: BandState): BandText {
 }
 
 function giftButtonOf(g: Game): BandText['gift'] {
-  if (g.favorite === null) return null
-  const treat = treatOf(g.favorite)
+  const treat = g.favorite === null ? undefined : treatOf(g.favorite)
+  if (!treat) return null
   return { id: treat.id, label: `${treat.icon} あげる ${formatHearts(treat.price)}♡`, canAfford: g.hearts >= treat.price }
 }
 

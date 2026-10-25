@@ -2,7 +2,7 @@
 
 import { expect, test } from 'claude-code/testing'
 
-import type { Game } from '../types'
+import type { Game, TreatId } from '../types'
 import type { Dealt } from '../hooks/game'
 import {
   COMBO_WINDOW_MS,
@@ -29,6 +29,7 @@ import {
   priceOf,
   restore,
   touchGame,
+  treatOf,
   unlocked,
   wear,
 } from '../hooks/game'
@@ -137,8 +138,8 @@ test('restore：形の合う hat・lastUnlock・lastGift は残す', () => {
 })
 
 test('restore：知らない項目（新しい版が書いたもの）と、新しい版の v は残す', () => {
-  const g = restore({ hearts: 1, v: 2, favorite: 'cake' }, newGame(0, 5_000)) as Game & { favorite?: unknown }
-  expect(g.favorite).toBe('cake')
+  const g = restore({ hearts: 1, v: 2, futureKey: 'x' }, newGame(0, 5_000)) as Game & { futureKey?: unknown }
+  expect(g.futureKey).toBe('x')
   expect(g.v).toBe(2)
   expect(restore({ hearts: 1, v: 'x' }, newGame(0, 5_000)).v).toBe(1)
 })
@@ -291,8 +292,10 @@ test('帯に出す贈り物：小さな贈り物だけを読み、別のセッ�
   // 前の版の保存（favorite が無い）は、出さない
   expect(restore({ hearts: 1 }, game()).favorite).toBeNull()
   expect(restore({ hearts: 1, favorite: 'cake' }, game()).favorite).toBe('cake')
-  // 夢のプレゼント・知らない id・型の違うものは読まない
-  for (const broken of ['house', 'pizza', 3, { id: 'cake' }]) expect(restore({ hearts: 1, favorite: broken }, game()).favorite).toBeNull()
+  // 知らない id（新しい版の贈り物かもしれない）も、選び直されるまで持ち回る。型の違うものは読まない
+  expect(restore({ hearts: 1, favorite: 'tea' }, game()).favorite as string).toBe('tea')
+  for (const broken of [3, { id: 'cake' }]) expect(restore({ hearts: 1, favorite: broken }, game()).favorite).toBeNull()
+  expect(treatOf('tea' as TreatId)).toBeUndefined()
 
   const base = game({ favorite: 'cake' })
   const theirs = { ...base, favorite: 'cookie' as const }
@@ -326,10 +329,10 @@ test('isSame：中身で比べ、object のキーの順番によらない', () =
 })
 
 test('mergeGame：知らない項目（新しい版が書いたもの）は、向こうの値を残す', () => {
-  const base = { ...game(), favorite: 'cookie' } as Game
-  const theirs = { ...base, favorite: 'cake', v: 2 } as Game
-  const merged = mergeGame(theirs, base, { ...base, hearts: 5 }) as Game & { favorite?: unknown }
-  expect(merged.favorite).toBe('cake')
+  const base = { ...game(), futureKey: 'a' } as Game
+  const theirs = { ...base, futureKey: 'b', v: 2 } as Game
+  const merged = mergeGame(theirs, base, { ...base, hearts: 5 }) as Game & { futureKey?: unknown }
+  expect(merged.futureKey).toBe('b')
   expect(merged.v).toBe(2)
   expect(merged.hearts).toBe(5)
 })

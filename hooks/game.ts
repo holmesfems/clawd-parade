@@ -82,7 +82,7 @@ export function restore(saved: unknown, fallback: Game): Game {
     hat: saved.hat === null || (isHat(saved.hat) && owned.includes(saved.hat)) ? saved.hat : null,
     lastUnlock: saved.lastUnlock === null || isStamp(saved.lastUnlock, isAchievementId) ? saved.lastUnlock : fallback.lastUnlock,
     lastGift: saved.lastGift === null || isStamp(saved.lastGift, isGiftId) ? saved.lastGift : fallback.lastGift,
-    favorite: saved.favorite === null || isTreatId(saved.favorite) ? saved.favorite : fallback.favorite,
+    favorite: saved.favorite === null || isFavoriteId(saved.favorite) ? saved.favorite : fallback.favorite,
     passiveAt: fallback.passiveAt,
   }
 }
@@ -134,7 +134,9 @@ const isHat = (v: unknown): v is Hat => COSMETICS.some(c => c.hat !== undefined 
 
 const isGiftId = (v: unknown): v is GiftId => typeof v === 'string' && Object.hasOwn(GIFTS, v)
 
-const isTreatId = (v: unknown): v is TreatId => typeof v === 'string' && Object.hasOwn(TREAT_TABLE, v)
+// 新しい版の贈り物の id も捨てずに持ち回る（この版の表では見つからず、帯に出ないだけ）。
+// 捨てると、同時に開いている古い版のセッションが、新しい版で選んだものを null で上書きする
+const isFavoriteId = (v: unknown): v is TreatId => typeof v === 'string'
 
 // ---- 保存（セッションをまたいで） --------------------------------------
 
@@ -374,7 +376,8 @@ const DREAM_BONUS = 0.1
 
 export const giftOf = (id: GiftId): Gift => GIFTS[id]
 
-export const treatOf = (id: TreatId): Treat => TREATS.find(t => t.id === id)!
+// 帯に出した贈り物を引く。新しい版の贈り物の id は、この版では見つからない
+export const treatOf = (id: TreatId): Treat | undefined => TREATS.find(t => t.id === id)
 
 export const isDream = (id: GiftId): id is DreamId => GIFTS[id].kind === 'dream'
 
