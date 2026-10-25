@@ -69,8 +69,15 @@ test('時間帯で空の色と星の数が変わる。昼は星が出ない', ()
     expect(countStars(time)).toBeGreaterThan(0)
     expect(countStars(time)).toBeLessThan(night)
   }
-  // 残す星は毎コマ同じ（またたき 7・きらめき 9・まばたき 17 コマの倍数たつと、また同じ絵）
-  expect(draw('morning', 2 + 7 * 9 * 17)).toEqual(draw('morning', 2))
+  // 残す星の割合は、広い空ではおおよそ palette.stars（朝 3 割）
+  const wide = (time: keyof typeof PALETTES) => {
+    const { star, starDim } = PALETTES[time]
+    const g = drawScene({ columns: 600, headroom: 4, mood: 'idle', tick: 0, friends: [], character: 'clawd', palette: PALETTES[time] })
+    return g.slice(0, 10).flat().filter(c => c === star || c === starDim).length
+  }
+  const share = wide('morning') / wide('night')
+  expect(share).toBeGreaterThan(0.15)
+  expect(share).toBeLessThan(0.45)
   // SVG の背景は時間帯の空の色
   for (const time of Object.keys(PALETTES) as (keyof typeof PALETTES)[]) {
     const sky = '#' + PALETTES[time].sky.toString(16).padStart(6, '0')

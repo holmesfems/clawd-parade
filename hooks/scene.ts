@@ -63,14 +63,15 @@ export function timeOfDay(hour: number): TimeOfDay {
   return 'night'
 }
 
-// 時間帯ごとの空の色。デスクトップでは空の上にセリフを重ねるので、どの空も文字が読める暗さにする
+// 時間帯ごとの空の色。デスクトップでは空の上にセリフを重ねるので、どの空も、ふだんのセリフの色（#d97757）との
+// コントラスト比が 3.5 以上になる暗さにする（夜は 5.1）
 export const PALETTES: Record<TimeOfDay, Palette> = {
   // 明けがたの藍色。星が少し残る
-  morning: { sky: 0x3a4a7c, ground: 0x5f5a66, grass: 0x7ccf7c, flower: 0xffc4dd, star: 0xfff0c2, starDim: 0x9da3d6, stars: 0.3 },
+  morning: { sky: 0x2a3560, ground: 0x5f5a66, grass: 0x7ccf7c, flower: 0xffc4dd, star: 0xfff0c2, starDim: 0x9da3d6, stars: 0.3 },
   // 昼の青空。星は見えない
-  day: { sky: 0x2d5a8c, ground: 0x6b6b6b, grass: 0x80d880, flower: 0xffb3d1, star: 0xffffff, starDim: 0xc4d8ef, stars: 0 },
+  day: { sky: 0x1d3d63, ground: 0x6b6b6b, grass: 0x80d880, flower: 0xffb3d1, star: 0xffffff, starDim: 0xc4d8ef, stars: 0 },
   // 夕やけのむらさき。一番星が出はじめる
-  evening: { sky: 0x5e3555, ground: 0x5e4c50, grass: 0x6aa86a, flower: 0xffa8a8, star: 0xffd27a, starDim: 0xc792b0, stars: 0.25 },
+  evening: { sky: 0x43243d, ground: 0x5e4c50, grass: 0x6aa86a, flower: 0xffa8a8, star: 0xffd27a, starDim: 0xc792b0, stars: 0.25 },
   night: NIGHT,
   // 深夜は空がいちばん暗い
   lateNight: { sky: 0x14152a, ground: 0x4a4a4a, grass: 0x5a9f5a, flower: 0xd99ab4, star: 0xffe38a, starDim: 0x6f6ba8, stars: 1 },
@@ -534,8 +535,8 @@ export function drawScene({
 
   // 空の星。遠くにあるので歩いても動かさない
   starsOf(W, 6 + sky).forEach(({ x, y }, i) => {
-    // 星が少ない時間帯は、決まった星だけを残す（毎コマ同じ星）
-    if (palette.stars < 1 && hash(i * 2 + 7) >= palette.stars) return
+    // 星が少ない時間帯は、決まった星だけを残す（毎コマ同じ星）。星の場所の hash（i * 2、i * 2 + 1）とは別の値で決める
+    if (palette.stars < 1 && hash(-1 - i) >= palette.stars) return
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
     put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? palette.star : palette.starDim)
   })
