@@ -14,6 +14,7 @@ import {
   affectionOf,
   buyCosmetic,
   buyUpgrade,
+  clockText,
   formatHearts,
   formatRate,
   giveGift,
@@ -25,7 +26,6 @@ import {
   priceOf,
   wear,
 } from './game'
-import { clockText } from './band'
 
 export const SHOP = 'parade-shop'
 
@@ -46,7 +46,7 @@ export type ShopInput = {
 // ショップを描く（ui は $.ui.resolve(e) の部品）
 export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderElement {
   const { Box, Text, Button } = ui
-  const { game: g, at, character: who, buy: deal } = input
+  const { game: g, at, character: who, buy } = input
   // 放置収入は 1 秒ごとに足されるので、その時刻を「いま」とみなす
   const now = g.passiveAt
 
@@ -83,7 +83,7 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
             <Button
               key={`buy-${u.id}`}
               variant={!isTop && g.hearts >= price ? 'primary' : 'secondary'}
-              onPress={deal(`${u.name} を Lv${level + 1} にしたよ！`, one => buyUpgrade(one, u.id))}
+              onPress={buy(`${u.name} を Lv${level + 1} にしたよ！`, one => buyUpgrade(one, u.id))}
             >
               {u.name} Lv{level} <Text dimColor>{isTop ? 'MAX' : `${formatHearts(price)}♡`}</Text>
             </Button>
@@ -100,9 +100,9 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
         const isWorn = c.hat !== undefined && g.hat === c.hat
         const label = !isOwned ? `${c.name} ${formatHearts(c.price)}♡` : isWorn ? `${c.name} ✓かぶってる` : c.hat ? `${c.name} をかぶる` : `${c.name} ✓`
         const press = !isOwned
-          ? deal(`${c.name} を買ったよ！`, one => buyCosmetic(one, c.id))
+          ? buy(`${c.name} を買ったよ！`, one => buyCosmetic(one, c.id))
           : c.hat
-            ? deal(isWorn ? `${c.name} をはずしたよ` : `${c.name} をかぶったよ！`, one => wear(one, isWorn ? null : c.hat ?? null))
+            ? buy(isWorn ? `${c.name} をはずしたよ` : `${c.name} をかぶったよ！`, one => wear(one, isWorn ? null : c.hat ?? null))
             : input.say(`${c.name} はもう夜空にあるよ`)
         const about = c.id === 'catEars' && who === 'neko' ? 'ねこはもとからねこみみ（Clawd だけ）' : c.about
         return (
@@ -131,7 +131,7 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
             <Button
               key={`gift-${treat.id}`}
               variant={g.hearts >= treat.price ? 'primary' : 'secondary'}
-              onPress={deal(`🎁 ${treat.name} をあげたよ！`, (one, when) => giveGift(one, treat.id, when))}
+              onPress={buy(`🎁 ${treat.name} をあげたよ！`, (one, when) => giveGift(one, treat.id, when))}
             >
               {treat.name} <Text dimColor>{formatHearts(treat.price)}♡</Text>
             </Button>
@@ -156,7 +156,7 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
               <Button
                 key={`gift-${dream.id}`}
                 variant={g.hearts >= dream.price ? 'primary' : 'secondary'}
-                onPress={deal(`🎁 ${dream.name} を贈ったよ！`, (one, when) => giveGift(one, dream.id, when))}
+                onPress={buy(`🎁 ${dream.name} を贈ったよ！`, (one, when) => giveGift(one, dream.id, when))}
               >
                 {dream.name} <Text dimColor>{formatHearts(dream.price)}♡</Text>
               </Button>

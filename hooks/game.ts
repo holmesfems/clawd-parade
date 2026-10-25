@@ -1,7 +1,7 @@
 // なでなでゲームのルール。♡ の稼ぎ方・コンボ・フィーバー・お店・実績を、
 // $ に触らない純粋な関数だけで書く。保存や表示は register.tsx の仕事。
 
-import type { CosmeticId, DreamId, Game, GiftId, Hat, Holding, Look, TreatId, UpgradeId } from '../types'
+import type { CosmeticId, DreamId, Friend, Game, GiftId, Hat, Holding, Look, Pets, TreatId, UpgradeId, Work } from '../types'
 
 // ---- 数字 ---------------------------------------------------------------
 
@@ -19,6 +19,19 @@ export const SAVE_VERSION = 1
 
 // いま何が起きているか（Claude が働いているか、働いている仲間の数）
 export type Scene = { isWorking: boolean; workers: number }
+
+export const sceneOf = (w: Work, list: Friend[]): Scene => ({
+  isWorking: w.isRunning,
+  workers: list.filter(f => f.doneAt === null).length,
+})
+
+// フックが 1 コマ進める間隔（見回りと描き直し）
+export const FRAME_MS = 200
+// なでられてから、とろけた顔とハートを見せておく時間
+const PET_SHOW_MS = 4000
+
+// いまなでられている（なでられてから PET_SHOW_MS のあいだ）
+export const isPetted = (p: Pets, now: number) => p.at > 0 && now - p.at < PET_SHOW_MS
 
 export function newGame(hearts: number, now: number): Game {
   return {
@@ -501,5 +514,11 @@ export function formatHearts(n: number): string {
 }
 
 const trim = (v: number) => (v >= 100 ? String(Math.floor(v)) : v.toFixed(v >= 10 ? 1 : 2).replace(/\.?0+$/, ''))
+
+// 分:秒
+export const clockText = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
 
 export const formatRate = (n: number) => (n >= 100 ? formatHearts(n) : n.toFixed(1).replace(/\.0$/, ''))

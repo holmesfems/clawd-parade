@@ -4,17 +4,12 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
 import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, Work } from '../types'
-import type { Scene } from './game'
-import { ACHIEVEMENTS, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, liveCombo, lookOf, perSecond } from './game'
+import { ACHIEVEMENTS, FRAME_MS, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, sceneOf } from './game'
 import type { ViewProps } from './parade-view'
 import { SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, kaomoji, layout, putHeart, toSvg } from './scene'
 import type { Frame } from './scene'
 import type { TouchProps } from './touch-pad'
 
-// フックの 1 コマ（見回りと描き直し）
-export const FRAME_MS = 200
-// なでられてから、とろけた顔とハートを見せておく時間
-const PET_SHOW_MS = 4000
 // 取った実績を帯に出しておく時間
 const UNLOCK_SHOW_MS = 5000
 // デスクトップの星は大きく見えてせわしないので、またたきを 1/4 の速さにする
@@ -66,20 +61,6 @@ const TONE: Record<MoodKind, string> = {
   sleeping: '#9ec9ff',
 }
 
-// いまなでられている（なでられてから PET_SHOW_MS のあいだ）
-export const isPetted = (p: Pets, now: number) => p.at > 0 && now - p.at < PET_SHOW_MS
-
-// ゲームから見た今のようす：Claude が働いているか、働いている仲間の数
-export const sceneOf = (w: Work, list: Friend[]): Scene => ({
-  isWorking: w.isRunning,
-  workers: list.filter(f => f.doneAt === null).length,
-})
-
-export const clockText = (ms: number) => {
-  const s = Math.max(0, Math.round(ms / 1000))
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-}
-
 // 帯に出す文字を作るのに使う状態
 export type BandState = { mood: Mood; work: Work; friends: Friend[]; pets: Pets; game: Game; holding: Holding; tick: Tick }
 
@@ -96,9 +77,10 @@ export type BandText = {
   isFever: boolean
 }
 
-// 帯のセリフ・info・♡ の行。now は帯を描くときの時刻（tick.at）
-export function bandText(s: BandState, now: number): BandText {
+// 帯のセリフ・info・♡ の行。時刻は最後のコマ（tick.at）
+export function bandText(s: BandState): BandText {
   const { mood: m, work: w, pets: p, game: g } = s
+  const now = s.tick.at
   const petted = isPetted(p, now)
   // 贈り物をもらった直後は、なにより先にその贈り物へのお礼を言う
   const holdingId = heldGift(s.holding, now)
@@ -179,11 +161,16 @@ export type BandInput = BandState & {
 // 入力欄の上の帯を描く（ui は $.ui.resolve(e) の部品）
 export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderElement {
   const { mood: m, friends: list, tick: t, character: who, pets: petted, game: g, holding: held, isDebug, cols } = input
-  const text = bandText(input, t.at)
+  const text = bandText(input)
 
   const { Box, Text, Button } = ui
   const isDesktop = input.surface === 'desktop'
 
+  const scoreLine = (
+    <Text key="score" color={text.scoreColor} bold={text.isFever} wrap="truncate-end">
+      {text.score}
+    </Text>
+  )
   // セリフ・info・♡ の行。横に並べる版と、夜空に重ねる版で同じものを使う
   const lines = [
     <Text key="say" color={text.sayColor} bold wrap="truncate-end">
@@ -194,9 +181,7 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
         {text.info}
       </Text>
     ),
-    <Text key="score" color={text.scoreColor} bold={text.isFever} wrap="truncate-end">
-      {text.score}
-    </Text>,
+    scoreLine,
   ]
 
   const legend = list.map(f => (
@@ -327,7 +312,7 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
         <Text color={text.tone}>{text.say}</Text>
       </Box>
       {text.info !== '' && <Text dimColor>{text.info}</Text>}
-      {lines[2]}
+      {scoreLine}
       {isDesktop && (
         <Box key="pet-row" paddingTop={1}>
           <Button key="pet" label="なでる ♡" onPress={input.onPet} />

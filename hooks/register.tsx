@@ -4,21 +4,24 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, Work } from '../types'
-import { FRAME_MS, bandView, isPetted, sceneOf } from './band'
+import { bandView } from './band'
 import type { Scene } from './game'
 import {
+  FRAME_MS,
   accrue,
   grant,
   heldGift,
   idleDue,
   idlePerSecond,
   isFever,
+  isPetted,
   isSame,
   mergeGame,
   newGame,
   payIdle,
   perSecond,
   restore,
+  sceneOf,
   toolTip,
   touchGame,
   unlocked,
@@ -173,7 +176,7 @@ async function pet($: EngineInterface, kind: Pets['kind'], touch: { hand?: numbe
 }
 
 // 買い物：足りなければ理由をトーストで、買えたら知らせて実績も見て、すぐ保存する。
-// 贈り物なら、Clawd がかかえてお礼を言う。ショップからも帯からも呼ぶ
+// 贈り物なら、Clawd がかかえてお礼を言う。いまはショップのボタンから呼ぶ（帯のボタンからも呼べる形にしてある）
 async function buy($: EngineInterface, label: string, deal: Deal) {
   const now = await $.clock.now()
   let refusal: string | undefined
