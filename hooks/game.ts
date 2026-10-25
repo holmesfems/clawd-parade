@@ -18,15 +18,15 @@ const PASSIVE_CAP_MS = 60_000
 export const SAVE_VERSION = 1
 
 // いま何が起きているか（Claude が働いているか、働いている仲間の数）
-export type Scene = { isWorking: boolean; workers: number }
+export type Situation = { isWorking: boolean; workers: number }
 
-export const sceneOf = (w: Work, list: Friend[]): Scene => ({
+export const situationOf = (w: Work, list: Friend[]): Situation => ({
   isWorking: w.isRunning,
   workers: list.filter(f => f.doneAt === null).length,
 })
 
-// フックが 1 コマ進める間隔（見回りと描き直し）
-export const FRAME_MS = 200
+// フックが 1 コマ（tick）進める間隔（見回りと描き直し）
+export const HOOK_FRAME_MS = 200
 // なでられてから、とろけた顔とハートを見せておく時間
 const PET_SHOW_MS = 4000
 
@@ -370,7 +370,10 @@ const AFFECTION = [
   { name: 'しんゆう', at: 300_000 },
   { name: 'あいぼう', at: 3_000_000 },
   { name: 'ずっといっしょ', at: 100_000_000 },
-]
+] as const
+
+// なかよし度の段に届く、贈った ♡ の合計
+const affectionAt = (name: (typeof AFFECTION)[number]['name']) => AFFECTION.find(a => a.name === name)!.at
 
 export function affectionOf(given: number): { name: string; next?: { name: string; at: number } } {
   const reached = AFFECTION.filter(a => given >= a.at)
@@ -384,9 +387,9 @@ export const isFever = (g: Game, now: number) => now < g.feverUntil
 
 const comboRate = (g: Game, combo: number) => 1 + Math.min(combo, 100) * 0.01 * (1 + 0.5 * levelOf(g, 'brush'))
 
-const workRate = (g: Game, at: Scene) => (at.isWorking ? 2 + 0.5 * levelOf(g, 'coffee') : 1)
+const workRate = (g: Game, at: Situation) => (at.isWorking ? 2 + 0.5 * levelOf(g, 'coffee') : 1)
 
-export function perPet(g: Game, at: Scene, now: number, combo = g.combo): number {
+export function perPet(g: Game, at: Situation, now: number, combo = g.combo): number {
   const fever = isFever(g, now) ? FEVER_RATE : 1
   return (1 + levelOf(g, 'glove')) * comboRate(g, combo) * workRate(g, at) * fever * giftRate(g, now)
 }
@@ -396,15 +399,15 @@ export const idlePerSecond = (g: Game, now = g.passiveAt) =>
   (0.2 * levelOf(g, 'fan') + 2 * levelOf(g, 'stardust')) * giftRate(g, now)
 
 // お仕事中は Clawd にもお給料（♡ +1/秒）が出る。こちらは働いているセッションごとに入る
-const workPerSecond = (g: Game, at: Scene, now: number) =>
+const workPerSecond = (g: Game, at: Situation, now: number) =>
   ((at.isWorking ? 1 : 0) + at.workers * levelOf(g, 'allowance')) * giftRate(g, now)
 
-export const perSecond = (g: Game, at: Scene, now = g.passiveAt) => idlePerSecond(g, now) + workPerSecond(g, at, now)
+export const perSecond = (g: Game, at: Situation, now = g.passiveAt) => idlePerSecond(g, now) + workPerSecond(g, at, now)
 
 export type Touch = { kind: TouchKind; wasSleeping: boolean }
 
 // 1 回なでた（ぎゅっとした）ぶん。フィーバー中はコンボを数えず、明けたら 1 から
-export function touchGame(g: Game, now: number, at: Scene, touch: Touch): { game: Game; gained: number; isFeverStart: boolean } {
+export function touchGame(g: Game, now: number, at: Situation, touch: Touch): { game: Game; gained: number; isFeverStart: boolean } {
   const inFever = isFever(g, now)
   const combo = inFever ? 0 : now - g.comboAt <= COMBO_WINDOW_MS ? g.combo + 1 : 1
   const isFeverStart = !inFever && combo >= FEVER_COMBO
@@ -425,7 +428,7 @@ export function touchGame(g: Game, now: number, at: Scene, touch: Touch): { game
 }
 
 // 前回から今までのお給料を足す（放置のぶんは payIdle で、セッションをまたいで 1 回だけ払う）
-export function accrue(g: Game, now: number, at: Scene): Game {
+export function accrue(g: Game, now: number, at: Situation): Game {
   const seconds = Math.min(PASSIVE_CAP_MS, Math.max(0, now - g.passiveAt)) / 1000
   const gained = workPerSecond(g, at, now) * seconds
   return { ...g, hearts: g.hearts + gained, earned: g.earned + gained, passiveAt: now }
@@ -493,7 +496,7 @@ export const ACHIEVEMENTS = [
   { id: 'letter', name: 'きもちをこめて', about: 'ありがとうの手紙をあげる', test: f => (f.game.gifts.letter ?? 0) >= 1 },
   { id: 'dream1', name: '夢をひとつ', about: '夢のプレゼントを贈る', test: f => dreamsOf(f.game).length >= 1 },
   { id: 'dreamAll', name: '夢をぜんぶ', about: '夢のプレゼントを全部贈る', test: f => dreamsOf(f.game).length === DREAMS.length },
-  { id: 'bff', name: 'しんゆう', about: 'なかよし度を「しんゆう」にする', test: f => f.game.given >= 300_000 },
+  { id: 'bff', name: 'しんゆう', about: 'なかよし度を「しんゆう」にする', test: f => f.game.given >= affectionAt('しんゆう') },
 ] as const satisfies readonly AchievementSpec[]
 
 export type Achievement = (typeof ACHIEVEMENTS)[number]

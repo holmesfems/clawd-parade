@@ -28,11 +28,12 @@ import {
   priceOf,
   restore,
   touchGame,
+  unlocked,
   wear,
 } from '../hooks/game'
-import type { Scene } from '../hooks/game'
+import type { Situation } from '../hooks/game'
 
-const resting: Scene = { isWorking: false, workers: 0 }
+const resting: Situation = { isWorking: false, workers: 0 }
 const pet = { kind: 'pet', wasSleeping: false } as const
 
 const game = (over: Partial<Game> = {}): Game => ({ ...newGame(0, 1_000), ...over })
@@ -254,6 +255,13 @@ test('mergeGame：セッションだけのもの（コンボ・フィーバー�
   const mine = { ...base, combo: 3, comboAt: 3, feverUntil: 3, passiveAt: 3 }
   const merged = mergeGame(theirs, base, mine)
   expect([merged.combo, merged.comboAt, merged.feverUntil, merged.passiveAt]).toEqual([3, 3, 3, 3])
+})
+
+test('実績「しんゆう」は、なかよし度が「しんゆう」に届いたとき', () => {
+  const ids = (given: number) => unlocked({ game: game({ given }), pets: 0, rate: 0 }).map(a => a.id)
+  expect(affectionOf(300_000).name).toBe('しんゆう')
+  expect(ids(300_000)).toContain('bff')
+  expect(ids(299_999)).not.toContain('bff')
 })
 
 // ---- 放置収入 ----

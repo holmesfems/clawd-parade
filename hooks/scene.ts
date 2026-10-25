@@ -9,6 +9,7 @@ const H = SCENE_ROWS * 2
 type Px = number | null
 type Grid = Px[][]
 
+// Clawd・仲間・小物の色。時間帯では変えない
 const C = {
   body: 0xd97757,
   line: 0x5c2a1c,
@@ -16,11 +17,6 @@ const C = {
   cheek: 0xff8f8f,
   eye: 0x2b1b17,
   white: 0xffffff,
-  ground: 0x5a5a5a,
-  grass: 0x6fbf6f,
-  flower: 0xffb3d1,
-  star: 0xffe38a,
-  starDim: 0x8a86c9,
   heart: 0xff6b9a,
   spark: 0xffe066,
   bang: 0xff7a59,
@@ -29,6 +25,40 @@ const C = {
   tear: 0x6ec6ff,
   nope: 0xff5c5c,
   feverGlow: 0xffb347,
+}
+
+// 場面の色（空・地面・星）。時間帯で切り替えられるよう、drawScene と toSvg が受け取る
+export type Palette = {
+  // SVG の背景（端末は塗らない）
+  sky: number
+  ground: number
+  grass: number
+  flower: number
+  star: number
+  starDim: number
+}
+
+export const NIGHT: Palette = {
+  sky: 0x1f2033,
+  ground: 0x5a5a5a,
+  grass: 0x6fbf6f,
+  flower: 0xffb3d1,
+  star: 0xffe38a,
+  starDim: 0x8a86c9,
+}
+
+// 文字の表を絵に押すときの、文字 → 色。表に無い文字は透明
+type Ink = Readonly<Record<string, number>>
+
+// ink で文字の表を押す関数を作る。isFlipped で左右反転。絵からはみ出たところは描かない
+function stampWith(ink: Ink) {
+  return (g: Grid, rows: readonly string[], x: number, y: number, isFlipped = false) =>
+    rows.forEach((row, dy) =>
+      [...row].forEach((ch, dx) => {
+        const color = ink[ch]
+        if (color !== undefined) dot(g, isFlipped ? x + row.length - 1 - dx : x + dx, y + dy, color)
+      }),
+    )
 }
 
 // 仲間の毛色。サブエージェントの種類ごとに決まる
@@ -102,19 +132,9 @@ function sprite(rows: string[], coat: number): Sprite {
   return { w, h, px }
 }
 
-// 顔のパーツ。座標はシルエット基準（輪郭ぶん +1 して置く）
+// 顔のパーツ。座標はスプライトの中のドット（輪郭のあるスプライトは輪郭を含めて数える）
 type Stamp = string[]
-const PAL: Record<string, number> = { k: C.eye, w: C.white, c: C.cheek, b: C.tear }
-
-function stamp(s: Sprite, at: [number, number], rows: Stamp, pad = 1) {
-  rows.forEach((row, dy) =>
-    [...row].forEach((ch, dx) => {
-      const color = PAL[ch]
-      const line = s.px[at[1] + dy + pad]
-      if (color !== undefined && line && at[0] + dx + pad < s.w) line[at[0] + dx + pad] = color
-    }),
-  )
-}
+const stampFace = stampWith({ k: C.eye, w: C.white, c: C.cheek, b: C.tear })
 
 type Eyes = 'open' | 'blink' | 'happy' | 'wide' | 'sad' | 'x'
 type Mouth = 'smile' | 'open' | 'flat' | 'frown' | 'tiny'
@@ -137,14 +157,14 @@ const MOUTHS: Record<Mouth, Stamp> = {
 
 function leader(eyes: Eyes, mouth: Mouth, step: number, tears: number | null): Sprite {
   const s = sprite([...LEADER, LEADER_FEET[step % 2]!], C.body)
-  stamp(s, [2, 4], EYES[eyes][0])
-  stamp(s, [7, 4], EYES[eyes][1])
-  stamp(s, [4, 6], MOUTHS[mouth])
-  stamp(s, [1, 6], ['c'])
-  stamp(s, [10, 6], ['c'])
+  stampFace(s.px, EYES[eyes][0], 3, 5)
+  stampFace(s.px, EYES[eyes][1], 8, 5)
+  stampFace(s.px, MOUTHS[mouth], 5, 7)
+  stampFace(s.px, ['c'], 2, 7)
+  stampFace(s.px, ['c'], 11, 7)
   if (tears !== null) {
-    stamp(s, [2, 6 + (tears % 2)], ['b'])
-    stamp(s, [9, 6 + ((tears + 1) % 2)], ['b'])
+    stampFace(s.px, ['b'], 3, 7 + (tears % 2))
+    stampFace(s.px, ['b'], 10, 7 + ((tears + 1) % 2))
   }
   return s
 }
@@ -152,11 +172,11 @@ function leader(eyes: Eyes, mouth: Mouth, step: number, tears: number | null): S
 function kitten(coat: number, step: number, isDone: boolean): Sprite {
   const s = sprite([...KITTEN, KITTEN_FEET[step % 2]!], coat)
   if (isDone) {
-    stamp(s, [1, 3], ['kk...kk'])
+    stampFace(s.px, ['kk...kk'], 2, 4)
   } else {
-    stamp(s, [2, 2], ['k..k', 'k..k'])
+    stampFace(s.px, ['k..k', 'k..k'], 3, 3)
   }
-  stamp(s, [1, 4], ['c....c'])
+  stampFace(s.px, ['c....c'], 2, 5)
   return s
 }
 
@@ -217,17 +237,17 @@ const BLUSHING: MoodKind[] = ['done', 'plan', 'permission', 'waiting']
 
 function clawd(mood: MoodKind, eyes: Eyes, step: number, tick: number, reach = 0): Sprite {
   const s = flat([...CLAWD, ...walkLegs(CLAWD_LEG, 3 + reach, CLAWD_LIFT[step] ?? null)], C.body)
-  stamp(s, [4, 1], CLAWD_EYES[eyes][0], 0)
-  stamp(s, [10, 1], CLAWD_EYES[eyes][1], 0)
+  stampFace(s.px, CLAWD_EYES[eyes][0], 4, 1)
+  stampFace(s.px, CLAWD_EYES[eyes][1], 10, 1)
   const mouth = CLAWD_MOUTHS[mood]
-  if (mouth) stamp(s, [7, 5], mouth, 0)
+  if (mouth) stampFace(s.px, mouth, 7, 5)
   if (BLUSHING.includes(mood)) {
-    stamp(s, [3, 4], ['cc'], 0)
-    stamp(s, [13, 4], ['cc'], 0)
+    stampFace(s.px, ['cc'], 3, 4)
+    stampFace(s.px, ['cc'], 13, 4)
   }
   if (mood === 'error') {
-    stamp(s, [5, 4 + (tick % 2)], ['b'], 0)
-    stamp(s, [12, 4 + ((tick + 1) % 2)], ['b'], 0)
+    stampFace(s.px, ['b'], 5, 4 + (tick % 2))
+    stampFace(s.px, ['b'], 12, 4 + ((tick + 1) % 2))
   }
   return s
 }
@@ -235,11 +255,11 @@ function clawd(mood: MoodKind, eyes: Eyes, step: number, tick: number, reach = 0
 function miniClawd(coat: number, step: number, isDone: boolean, reach = 0): Sprite {
   const s = flat([...MINI, ...walkLegs(MINI_LEG, 2 + reach, MINI_LIFT[step] ?? null)], coat)
   if (isDone) {
-    stamp(s, [2, 1], ['.k.', 'k.k'], 0)
-    stamp(s, [6, 1], ['.k.', 'k.k'], 0)
+    stampFace(s.px, ['.k.', 'k.k'], 2, 1)
+    stampFace(s.px, ['.k.', 'k.k'], 6, 1)
   } else {
-    stamp(s, [3, 1], ['k', 'k'], 0)
-    stamp(s, [7, 1], ['k', 'k'], 0)
+    stampFace(s.px, ['k', 'k'], 3, 1)
+    stampFace(s.px, ['k', 'k'], 7, 1)
   }
   return s
 }
@@ -260,12 +280,7 @@ const GLYPHS: Record<string, string[]> = {
 }
 
 function put(g: Grid, glyph: string, x: number, y: number, color: number) {
-  GLYPHS[glyph]?.forEach((row, dy) =>
-    [...row].forEach((ch, dx) => {
-      const line = g[y + dy]
-      if (ch === '#' && line && x + dx >= 0 && x + dx < line.length) line[x + dx] = color
-    }),
-  )
+  stampWith({ '#': color })(g, GLYPHS[glyph] ?? [], x, y)
 }
 
 function blit(g: Grid, s: Sprite, x: number, y: number) {
@@ -289,7 +304,10 @@ export type SceneInput = {
   headroom?: number
   // ぼうし・流れ星・オーロラ・フィーバー
   look?: Look
+  // 空・地面・星の色
+  palette?: Palette
   mood: MoodKind
+  // フックの何コマ目か（時刻ではない）。歩く・またたく・跳ねるのに使う
   tick: number
   friends: Friend[]
   character: Character
@@ -453,6 +471,7 @@ export function drawScene({
   twinkleTicks = 1,
   headroom = 0,
   look = PLAIN,
+  palette = NIGHT,
   mood,
   tick,
   friends,
@@ -480,24 +499,24 @@ export function drawScene({
   // 空の星。遠くにあるので歩いても動かさない
   starsOf(W, 6 + sky).forEach(({ x, y }, i) => {
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
-    put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? C.star : C.starDim)
+    put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? palette.star : palette.starDim)
   })
-  if (yard && dreams.includes('constellation')) drawConstellation(g, yard, sky, tick)
+  if (yard && dreams.includes('constellation')) drawConstellation(g, yard, sky, tick, palette)
   if (yard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
-  if (look.shootingStars) drawShootingStar(g, tick)
+  if (look.shootingStars) drawShootingStar(g, tick, palette)
   if (look.fever) drawHeartRain(g, tick)
 
   // 地面と草花（左へ流れる）
   for (let x = 0; x < W; x++) {
     const at = x + scroll
-    if (at % 6 < 3) g[ground]![x] = C.ground
+    if (at % 6 < 3) g[ground]![x] = palette.ground
     if (at % 29 === 0) {
-      g[ground - 1]![x] = C.grass
-      g[ground]![x] = C.grass
+      g[ground - 1]![x] = palette.grass
+      g[ground]![x] = palette.grass
     }
     if (at % 47 === 13) {
-      g[ground - 2]![x] = C.flower
-      g[ground - 1]![x] = C.grass
+      g[ground - 2]![x] = palette.flower
+      g[ground - 1]![x] = palette.grass
     }
   }
 
@@ -626,7 +645,7 @@ function dot(g: Grid, x: number, y: number, color: number) {
 }
 
 // ぼうしのドット。o は毛の色、e は耳の内側
-const HAT_PAL: Record<string, number> = {
+const stampHat = stampWith({
   p: C.heart,
   k: 0xc2416b,
   r: 0xe0464b,
@@ -635,22 +654,13 @@ const HAT_PAL: Record<string, number> = {
   j: 0x6ec6ff,
   o: C.body,
   e: C.ear,
-}
+})
 // sink は頭に何行めりこませるか。ears は左右に 1 つずつ（右は左右反転）
 const HATS: Record<Hat, { rows: string[]; sink: number; at: 'center' | 'right' | 'ears' }> = {
   ribbon: { rows: ['pp.pp', 'ppkpp', 'pp.pp'], sink: 2, at: 'right' },
   catEars: { rows: ['o..', 'oo.', 'oeo'], sink: 0, at: 'ears' },
   santa: { rows: ['...rr..w', '..rrrrr.', '.rrrrrr.', 'wwwwwwww'], sink: 1, at: 'center' },
   crown: { rows: ['g..g..g', 'ggggggg', 'gjgrgjg'], sink: 0, at: 'center' },
-}
-
-function stampRows(g: Grid, rows: string[], x: number, y: number, isFlipped = false) {
-  rows.forEach((row, dy) =>
-    [...row].forEach((ch, dx) => {
-      const color = HAT_PAL[ch]
-      if (color !== undefined) dot(g, isFlipped ? x + row.length - 1 - dx : x + dx, y + dy, color)
-    }),
-  )
 }
 
 function drawHat(g: Grid, hat: Hat, isClawd: boolean, leaderX: number, top: number) {
@@ -663,12 +673,12 @@ function drawHat(g: Grid, hat: Hat, isClawd: boolean, leaderX: number, top: numb
   const w = spec.rows[0]?.length ?? 0
   const y = headTop - spec.rows.length + spec.sink
   if (spec.at === 'ears') {
-    stampRows(g, spec.rows, left + 1, y)
-    stampRows(g, spec.rows, right - w, y, true)
+    stampHat(g, spec.rows, left + 1, y)
+    stampHat(g, spec.rows, right - w, y, true)
   } else if (spec.at === 'right') {
-    stampRows(g, spec.rows, right - w + 2, y)
+    stampHat(g, spec.rows, right - w + 2, y)
   } else {
-    stampRows(g, spec.rows, Math.floor((left + right + 1 - w) / 2), y)
+    stampHat(g, spec.rows, Math.floor((left + right + 1 - w) / 2), y)
   }
 }
 
@@ -683,14 +693,14 @@ function drawAurora(g: Grid, tick: number) {
   }
 }
 
-function drawShootingStar(g: Grid, tick: number) {
+function drawShootingStar(g: Grid, tick: number, palette: Palette) {
   const W = g[0]?.length ?? 0
   const period = 40
   const phase = tick % period
   if (phase >= 9) return
   const n = Math.floor(tick / period)
   const hx = W - 6 - ((n * 53) % Math.max(1, Math.floor(W * 0.6))) - phase * 3
-  const trail = [C.white, C.star, C.star, C.star, C.starDim, C.starDim, C.starDim]
+  const trail = [C.white, palette.star, palette.star, palette.star, palette.starDim, palette.starDim, palette.starDim]
   trail.forEach((color, j) => dot(g, hx + j, phase - Math.floor(j / 3), color))
 }
 
@@ -716,7 +726,7 @@ function glow(g: Grid, s: Sprite, x: number, y: number, color: number) {
 
 // ---- 贈り物と夢のプレゼント ------------------------------------------------
 
-const ICON_PAL: Record<string, number> = {
+const stampIcon = stampWith({
   c: 0xd9a066,
   k: 0x5c3a1c,
   m: 0xf2f2f2,
@@ -734,7 +744,7 @@ const ICON_PAL: Record<string, number> = {
   q: 0x3a3d4a,
   x: 0xd8dbe8,
   b: 0x6ec6ff,
-}
+})
 
 // Clawd がかかえる贈り物（夢のプレゼントはリボンのかかった箱）
 const GIFT_ICONS: Record<NonNullable<Look['gift']>, string[]> = {
@@ -747,16 +757,7 @@ const GIFT_ICONS: Record<NonNullable<Look['gift']>, string[]> = {
   box: ['.h.h.', '..h..', 'bbhbb', 'bbhbb', 'bbhbb'],
 }
 
-function stampIcon(g: Grid, rows: string[], x: number, y: number) {
-  rows.forEach((row, dy) =>
-    [...row].forEach((ch, dx) => {
-      const color = ICON_PAL[ch]
-      if (color !== undefined) dot(g, x + dx, y + dy, color)
-    }),
-  )
-}
-
-const DECO_PAL: Record<string, number> = {
+const stampDeco = stampWith({
   R: 0xb5523b,
   W: 0xf4e3c1,
   L: 0xffe38a,
@@ -778,7 +779,7 @@ const DECO_PAL: Record<string, number> = {
   F: 0xffb347,
   f: 0xffe066,
   M: 0xfff1a8,
-}
+})
 
 const DECOS = {
   flag: ['PGGGGG', 'PGGGGK', 'PKGGKG', 'PGKKGG', 'PGGGGG', 'P.....', 'P.....'],
@@ -798,15 +799,6 @@ const DECOS = {
   library: ['OOOOOOOO', 'O123451O', 'O123451O', 'OOOOOOOO', 'O345123O', 'O345123O', 'OOOOOOOO', 'O......O'],
   rocket: ['..rr..', '.TTTT.', '.TBBT.', '.TBBT.', '.TTTT.', '.TTTT.', 'rTTTTr', 'rr..rr', '..FF..'],
   moon: ['..MMM.', '.MM...', 'MM....', 'MM....', '.MM...', '..MMM.'],
-}
-
-function stampDeco(g: Grid, rows: string[], x: number, y: number) {
-  rows.forEach((row, dy) =>
-    [...row].forEach((ch, dx) => {
-      const color = DECO_PAL[ch]
-      if (color !== undefined) dot(g, x + dx, y + dy, color)
-    }),
-  )
 }
 
 // 地面の飾りを庭の右から順に置く。入りきらないものは左から順にあきらめる
@@ -867,7 +859,7 @@ const CONSTELLATION_LINES: [number, number][] = [
   [4, 7],
 ]
 
-function drawConstellation(g: Grid, yard: Yard, sky: number, tick: number) {
+function drawConstellation(g: Grid, yard: Yard, sky: number, tick: number, palette: Palette) {
   const ox = Math.floor((yard.left + yard.right) / 2) - 6
   const oy = Math.max(0, sky - 3)
   for (const [a, b] of CONSTELLATION_LINES) {
@@ -878,7 +870,7 @@ function drawConstellation(g: Grid, yard: Yard, sky: number, tick: number) {
       dot(g, ox + Math.round(x0 + ((x1 - x0) * i) / n), oy + Math.round(y0 + ((y1 - y0) * i) / n), 0x3d4270)
     }
   }
-  CONSTELLATION.forEach(([x, y], i) => dot(g, ox + x, oy + y, (tick + i) % 5 === 0 ? C.white : C.star))
+  CONSTELLATION.forEach(([x, y], i) => dot(g, ox + x, oy + y, (tick + i) % 5 === 0 ? C.white : palette.star))
 }
 
 // ---- 端末セルへの変換 ----------------------------------------------------
@@ -973,9 +965,7 @@ export function clawdText(mood: MoodKind, tick: number): string {
 // デスクトップはコードフォントの行の高さが半角ブロックと揃わず縞になるので、
 // ドット絵は 1 ピクセル = 1 マスの SVG にして、夜空の窓に入れて描く
 
-const SKY = 0x1f2033
-
-export function toSvg(g: Grid, pixel: number): { source: string; width: number; height: number } {
+export function toSvg(g: Grid, pixel: number, palette = NIGHT): { source: string; width: number; height: number } {
   const w = g[0]?.length ?? 0
   const h = g.length
   // 色ごとに 1 本の path にまとめる（横に続く同じ色は 1 つの長方形）
@@ -998,7 +988,7 @@ export function toSvg(g: Grid, pixel: number): { source: string; width: number; 
   const height = h * pixel
   const source =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${width}" height="${height}" shape-rendering="crispEdges">` +
-    `<rect width="${w}" height="${h}" rx="1.5" fill="${hex(SKY)}"/>${body}</svg>`
+    `<rect width="${w}" height="${h}" rx="1.5" fill="${hex(palette.sky)}"/>${body}</svg>`
   return { source, width, height }
 }
 

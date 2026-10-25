@@ -19,9 +19,11 @@ export type ViewProps = {
 
 type Heart = { x: number; y: number; age: number; isBig: boolean }
 
-const FRAME_MS = 100
+// この Client は、フック（HOOK_FRAME_MS）より細かい自分のコマで動く
+const VIEW_FRAME_MS = 100
 const PET_FRAMES = 12
-const HOP_FRAMES = 8
+// ぎゅっとされた仲間が跳ねている、この Client のコマ数
+const VIEW_HOP_FRAMES = 8
 const HEART_LIFE = 12
 // なでている手が、これだけマス動くごとにハートを 1 つ出す
 const CELLS_PER_HEART = 3
@@ -53,7 +55,7 @@ const ParadeView: ClientModule<ViewProps, number> = (props, surface) => {
   if (surface.state === undefined) {
     const send = (message: ClientMessage) => surface.post(message)
     surface.setState(0)
-    surface.every(FRAME_MS, () => {
+    surface.every(VIEW_FRAME_MS, () => {
       const wasLively = isLively()
       frame += 1
       hearts = hearts.map(h => ({ ...h, age: h.age + 1 })).filter(h => h.age < HEART_LIFE)
@@ -77,7 +79,7 @@ const ParadeView: ClientModule<ViewProps, number> = (props, surface) => {
           send({ kind: 'pet' })
         } else if (hit?.kind === 'friend') {
           const friend = hit.spot
-          hops.set(friend.id, frame + HOP_FRAMES)
+          hops.set(friend.id, frame + VIEW_HOP_FRAMES)
           addHeart(friend.x + 4, 1)
           send({ kind: 'hug' })
         } else {
