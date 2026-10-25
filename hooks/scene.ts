@@ -299,26 +299,117 @@ export type SceneInput = {
   hopping?: string[]
 }
 
+// ---- 並び（描画と当たり判定で同じものを使う） ------------------------
+
+// 帯の幅（マス）が、これ以上なら「広い」。端末はセリフを絵の右に、デスクトップは夜空の右側に置く
+export const WIDE_CELLS = 76
+// 端末は 1 マスが 1 ドット（縦は 1 行が 2 ドット）。広いときは右の 36 マスをセリフに空ける
+const TERMINAL_MAX_COLUMNS = 512
+const TERMINAL_SIDE_CELLS = 36
+// デスクトップの絵は「マス」で場所を取り、SVG をその幅いっぱいに縮めて描く。
+// 手ざわり層も同じマス数にするので、絵と層の幅が px を知らなくても揃う
+const DESKTOP_DOTS_PER_CELL = 1.5
+const DESKTOP_MAX_COLUMNS = 600
+// デスクトップは Clawd の上に空を足して、ぼうしや流れ星の場所にする
+const DESKTOP_HEADROOM = 4
+// 広いデスクトップで、夜空の右側にセリフを重ねる幅（マス）
+const SKY_WORDS_CELLS = 44
+
+// 帯の幅から決まる、絵の大きさ
+export type Frame = {
+  isWide: boolean
+  // 絵の幅（ドット）と、そのうち行進に使う左側の幅（右の残りはセリフを重ねる空）
+  columns: number
+  paradeColumns: number
+  // 地面の並びはそのままで上に足す空のドット数
+  headroom: number
+  // 夜空に重ねるセリフの幅（マス）。0 は重ねない
+  wordsCells: number
+}
+
+export function frameOf(surface: 'terminal' | 'desktop', cells: number): Frame {
+  const isWide = cells >= WIDE_CELLS
+  if (surface === 'terminal') {
+    const columns = Math.min(TERMINAL_MAX_COLUMNS, isWide ? cells - TERMINAL_SIDE_CELLS : cells - 1)
+    return { isWide, columns, paradeColumns: columns, headroom: 0, wordsCells: 0 }
+  }
+  const columns = Math.min(DESKTOP_MAX_COLUMNS, Math.floor(cells * DESKTOP_DOTS_PER_CELL))
+  const wordsCells = isWide ? SKY_WORDS_CELLS : 0
+  return {
+    isWide,
+    columns,
+    paradeColumns: columns - Math.ceil(wordsCells * DESKTOP_DOTS_PER_CELL),
+    headroom: DESKTOP_HEADROOM,
+    wordsCells,
+  }
+}
+
+// 夢のプレゼントを飾る、行進の右にあいた庭（ドットの列）
+export type Yard = { left: number; right: number }
 export type Layout = {
   leader: { x: number; w: number }
   friends: { id: string; x: number; w: number }[]
+  // 庭が狭すぎて飾れないときは null
+  yard: Yard | null
+  // なでている間にハートが湧く列。顔にかからないよう両脇から
+  hearts: number[]
 }
 
-// 誰がどの列にいるか。描画と当たり判定で同じものを使う
-export function layout(columns: number, friends: Friend[], character: Character): Layout {
+// 誰がどの列にいるか。columns は絵の幅、paradeColumns はそのうち行進に使う左側（どちらもドット）
+export function layout(columns: number, paradeColumns: number, friends: Friend[], character: Character): Layout {
   const isClawd = character === 'clawd'
   const friendW = isClawd ? 11 : 10
   const leaderW = isClawd ? 18 : 14
-  const W = Math.max(20, columns)
+  const W = Math.max(20, Math.min(Math.max(20, columns), paradeColumns))
   const room = Math.max(0, Math.floor((W - leaderW - 2 - 22) / (friendW + GAP)))
   const shown = friends.slice(-room)
+  const x = 2 + shown.length * (friendW + GAP)
+  const yard = { left: x + leaderW + YARD_GAP, right: W - 2 }
   return {
-    leader: { x: 2 + shown.length * (friendW + GAP), w: leaderW },
+    leader: { x, w: leaderW },
     friends: shown.map((f, i) => ({ id: f.id, x: 2 + i * (friendW + GAP), w: friendW })),
+    yard: yard.right - yard.left >= YARD_MIN ? yard : null,
+    hearts: [x + leaderW + 1, x - 4, x + leaderW + 5],
   }
 }
 
 const GAP = 1
+// 庭はリーダーの右、小物（！や ♡、かかえた贈り物）の場所をあけたところから。狭すぎるときは飾らない
+const YARD_GAP = 12
+const YARD_MIN = 10
+
+export type Hit = { kind: 'leader' } | { kind: 'friend'; spot: Layout['friends'][number] } | null
+
+// 絵のドットの列 x をさわったら、だれに当たるか。リーダーは両脇 1 ドットまでおまけする
+export function hitTest(l: Layout, x: number): Hit {
+  if (x >= l.leader.x - 1 && x <= l.leader.x + l.leader.w) return { kind: 'leader' }
+  const friend = l.friends.find(f => x >= f.x && x < f.x + f.w)
+  return friend ? { kind: 'friend', spot: friend } : null
+}
+
+// 押したままなでた手の横の動き（絵のドット数）を数え、STROKE_DOTS 動くごとに 1 回なでたことにする。
+// 端末もデスクトップも同じ距離で 1 回なので、♡ の貯まる速さがそろう。
+// 縦は、デスクトップの 1 行が絵の何ドットかが分からないので数えない
+export const STROKE_DOTS = 6
+
+export function strokeMeter() {
+  let lastX = 0
+  let travel = 0
+  return {
+    start(x: number) {
+      lastX = x
+      travel = 0
+    },
+    // 手が x まで来た。なでた回数を返す（端数は次に持ち越す）
+    move(x: number): number {
+      travel += Math.abs(x - lastX)
+      lastX = x
+      const strokes = Math.floor(travel / STROKE_DOTS)
+      travel -= strokes * STROKE_DOTS
+      return strokes
+    },
+  }
+}
 
 const WORKING: MoodKind[] = ['working', 'permission', 'question', 'plan']
 
@@ -381,18 +472,18 @@ export function drawScene({
   if (look.aurora) drawAurora(g, tick)
 
   // 並びを先に決めて、行進の右にあいた「庭」に夢のプレゼントを飾る
-  const spots = layout(Math.min(W, paradeColumns), friends, character)
-  const yard = { left: spots.leader.x + spots.leader.w + YARD_GAP, right: Math.min(W, paradeColumns) - 2 }
-  const dreams = yard.right - yard.left >= YARD_MIN ? look.dreams ?? [] : []
-  if (dreams.includes('noBugs')) drawRainbow(g, yard, ground)
+  const spots = layout(W, paradeColumns, friends, character)
+  const { yard } = spots
+  const dreams = (yard && look.dreams) || []
+  if (yard && dreams.includes('noBugs')) drawRainbow(g, yard, ground)
 
   // 空の星。遠くにあるので歩いても動かさない
   starsOf(W, 6 + sky).forEach(({ x, y }, i) => {
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
     put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? C.star : C.starDim)
   })
-  if (dreams.includes('constellation')) drawConstellation(g, yard, sky, tick)
-  if (dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
+  if (yard && dreams.includes('constellation')) drawConstellation(g, yard, sky, tick)
+  if (yard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
   if (look.shootingStars) drawShootingStar(g, tick)
   if (look.fever) drawHeartRain(g, tick)
 
@@ -410,7 +501,7 @@ export function drawScene({
     }
   }
 
-  drawYard(g, dreams, yard, ground, tick)
+  if (yard) drawYard(g, dreams, yard, ground, tick)
 
   // 並び：いちばん新しい仲間がリーダーのすぐ後ろ
   const byId = new Map(friends.map(f => [f.id, f]))
@@ -624,12 +715,6 @@ function glow(g: Grid, s: Sprite, x: number, y: number, color: number) {
 }
 
 // ---- 贈り物と夢のプレゼント ------------------------------------------------
-
-// 庭はリーダーの右、小物（！や ♡、かかえた贈り物）の場所をあけたところから。狭すぎるときは飾らない
-const YARD_GAP = 12
-const YARD_MIN = 10
-
-type Yard = { left: number; right: number }
 
 const ICON_PAL: Record<string, number> = {
   c: 0xd9a066,
