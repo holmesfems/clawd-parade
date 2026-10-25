@@ -103,7 +103,28 @@ test('太陽：朝は右から昇り、昼は上に小さく、夕方は左に�
     for (const { y } of noon) expect(y).toBeLessThan(6)
     // 夕日は左の端
     for (const { x } of set) expect(x).toBeLessThan(10)
-    for (const time of ['night', 'lateNight'] as const) expect(PALETTES[time].sun).toBeNull()
+  }
+  for (const time of ['night', 'lateNight'] as const) expect(PALETTES[time].sun).toBeNull()
+})
+
+test('太陽は空のいちばん奥：夢のプレゼント・地面・みんなを上書きしない', () => {
+  const dreams: DreamId[] = ['house', 'library', 'moonTrip', 'telescope', 'greenTests', 'constellation', 'noBugs']
+  const look = { hat: 'crown' as const, shootingStars: false, aurora: false, fever: false, gift: null, dreams }
+  const crew = [friend('a'), friend('b')]
+  for (const [columns, paradeColumns, headroom] of [[84, 84, 0], [90, 90, 4], [180, 114, 4]] as const) {
+    for (const time of ['morning', 'day', 'evening'] as const) {
+      const draw = (palette: (typeof PALETTES)[typeof time]) =>
+        drawScene({ columns, paradeColumns, headroom, mood: 'idle', tick: 1, friends: crew, character: 'clawd', look, palette })
+      const withSun = draw(PALETTES[time])
+      const without = draw({ ...PALETTES[time], sun: null })
+      const { star, starDim } = PALETTES[time]
+      // 太陽が無いときに描かれるもの（星を除く）は、太陽があっても同じ色のまま
+      without.forEach((row, y) =>
+        row.forEach((c, x) => {
+          if (c !== null && c !== star && c !== starDim) expect(withSun[y]![x]).toBe(c)
+        }),
+      )
+    }
   }
 })
 
