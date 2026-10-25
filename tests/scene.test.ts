@@ -85,6 +85,28 @@ test('時間帯で空の色と星の数が変わる。昼は星が出ない', ()
   }
 })
 
+test('太陽：朝は右から昇り、昼は上に小さく、夕方は左に沈む。夜と深夜は出ない', () => {
+  // 太陽のドット（芯の色）の x と y
+  const sunDots = (time: keyof typeof PALETTES, columns: number, paradeColumns: number, headroom: number) => {
+    const g = drawScene({ columns, paradeColumns, headroom, mood: 'idle', tick: 0, friends: [], character: 'clawd', palette: PALETTES[time] })
+    const core = { morning: 0xffd98a, day: 0xfff8d6, evening: 0xffa25e }[time as 'morning' | 'day' | 'evening']
+    return g.flatMap((row, y) => row.flatMap((c, x) => (c === core ? [{ x, y }] : [])))
+  }
+  for (const [columns, paradeColumns, headroom] of [[84, 84, 0], [180, 114, 4]] as const) {
+    const rise = sunDots('morning', columns, paradeColumns, headroom)
+    const noon = sunDots('day', columns, paradeColumns, headroom)
+    const set = sunDots('evening', columns, paradeColumns, headroom)
+    for (const dots of [rise, noon, set]) expect(dots.length).toBeGreaterThan(0)
+    // 朝日は行進の右の端（広いデスクトップでも、セリフの空にはかからない）
+    for (const { x } of rise) expect(x > paradeColumns * 0.8 && x < paradeColumns).toBe(true)
+    // 昼は空の上のほう
+    for (const { y } of noon) expect(y).toBeLessThan(6)
+    // 夕日は左の端
+    for (const { x } of set) expect(x).toBeLessThan(10)
+    for (const time of ['night', 'lateNight'] as const) expect(PALETTES[time].sun).toBeNull()
+  }
+})
+
 const friend = (id: string): Friend => ({ id, type: 'Explore', label: '', tool: null, doneAt: null })
 
 test('帯の幅から絵の大きさを決める', () => {
