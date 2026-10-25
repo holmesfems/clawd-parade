@@ -95,7 +95,7 @@ claude plugin enable clawd-parade@clawd-parade
 claude plugin update clawd-parade@clawd-parade
 ```
 
-`$.store` の `game`・`pets` は遊んでいる人の実データです。保存形式を変えるときは、古い形を読めるようにしてから出します。
+`$.store` の `game`・`pets` は遊んでいる人の実データです。保存形式を変えるときは、`hooks/game.ts` の `SAVE_VERSION` を上げ、`restore` で古い形を読めるようにしてから出します。
 
 ## English
 

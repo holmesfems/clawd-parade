@@ -184,8 +184,8 @@ async function saveNow($: EngineInterface, now: number) {
   const [g, p, base] = await Promise.all([read($, game), read($, pets), read($, synced)])
   if (g.passiveAt === 0) return
   savedAt = now
-  const stored = await $.store.get(GAME_KEY)
-  const theirs = isSaved(stored) ? restore(stored, 0, now) : base.game
+  // まだ保存が無い・壊れている項目は、前回読んだ（書いた）ものとみなす
+  const theirs = restore(await $.store.get(GAME_KEY), base.game)
   const merged = mergeGame(theirs, base.game, g)
   const total = (Number(await $.store.get(PETS_KEY)) || 0) + p.total - base.pets
   await $.store.set(GAME_KEY, merged)
@@ -200,8 +200,6 @@ async function saveNow($: EngineInterface, now: number) {
   }
   await update($, pets, one => ({ ...one, total: total + one.total - p.total }))
 }
-
-const isSaved = (v: unknown) => typeof v === 'object' && v !== null && typeof (v as Game).hearts === 'number'
 
 // 放置収入は、開いているセッションのどれか 1 つが払う。最後に払った時刻を store で分け合う
 async function payIdleIncome($: EngineInterface, now: number) {
@@ -309,7 +307,7 @@ export const register: Register = on => {
     if ((await read($, game)).passiveAt === 0) {
       const total = Number(await $.store.get(PETS_KEY)) || 0
       await update($, pets, p => ({ ...p, total }))
-      const loaded = restore(await $.store.get(GAME_KEY), total, now)
+      const loaded = restore(await $.store.get(GAME_KEY), newGame(total, now))
       await update($, game, () => loaded)
       await update($, synced, () => ({ game: loaded, pets: total }))
     }

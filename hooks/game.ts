@@ -12,11 +12,15 @@ const FEVER_RATE = 3
 // 放置収入は 1 分ぶんまで（別のセッションのあいだに貯まったりはしない）
 const PASSIVE_CAP_MS = 60_000
 
+// 保存形式の版。形を変えたら上げて、restore で古い形を読めるようにする
+export const SAVE_VERSION = 1
+
 // いま何が起きているか（Claude が働いているか、働いている仲間の数）
 export type Scene = { isWorking: boolean; workers: number }
 
 export function newGame(hearts: number, now: number): Game {
   return {
+    v: SAVE_VERSION,
     hearts,
     earned: hearts,
     combo: 0,
@@ -40,12 +44,68 @@ export function newGame(hearts: number, now: number): Game {
   }
 }
 
-// 保存してあったものを今の形にそろえる（足りない項目は新しいゲームの値で埋める）
-export function restore(saved: unknown, hearts: number, now: number): Game {
-  const fresh = newGame(hearts, now)
-  if (typeof saved !== 'object' || saved === null || typeof (saved as Game).hearts !== 'number') return fresh
-  return { ...fresh, ...(saved as Partial<Game>), passiveAt: now }
+// 保存してあったものを今の形にそろえる。型が合わない項目と足りない項目は fallback の値にし、
+// 知らない項目（新しい版が書いたもの）は捨てずに残す。保存が object でなければ fallback のまま。
+// 読み込むとき：fallback はなでた回数から作った新しいゲーム（♡ が壊れていたら、なでた回数から作り直す）
+export function restore(saved: unknown, fallback: Game): Game {
+  if (!isRecord(saved)) return fallback
+  const num = (k: CountKey) => (isFiniteNumber(saved[k]) ? saved[k] : fallback[k])
+  const nums = Object.fromEntries(COUNT_KEYS.map(k => [k, num(k)])) as Pick<Game, CountKey>
+  return {
+    ...fallback,
+    ...saved,
+    ...nums,
+    // 新しい版が書いた保存なら、その版のまま持ち回る
+    v: isFiniteNumber(saved.v) && saved.v > SAVE_VERSION ? saved.v : SAVE_VERSION,
+    levels: countsOf(saved.levels) ?? fallback.levels,
+    gifts: countsOf(saved.gifts) ?? fallback.gifts,
+    owned: (stringsOf(saved.owned) as CosmeticId[] | undefined) ?? fallback.owned,
+    achievements: stringsOf(saved.achievements) ?? fallback.achievements,
+    hat: saved.hat === null || isHat(saved.hat) ? saved.hat : fallback.hat,
+    lastUnlock: saved.lastUnlock === null || isStamp(saved.lastUnlock, isString) ? saved.lastUnlock : fallback.lastUnlock,
+    lastGift: saved.lastGift === null || isStamp(saved.lastGift, isGiftId) ? saved.lastGift : fallback.lastGift,
+    passiveAt: fallback.passiveAt,
+  }
 }
+
+type CountKey = { [K in keyof Game]: Game[K] extends number ? K : never }[keyof Game]
+
+// v と passiveAt は restore が別に決める
+const COUNT_KEYS = [
+  'hearts',
+  'earned',
+  'combo',
+  'comboAt',
+  'maxCombo',
+  'feverUntil',
+  'fevers',
+  'workPets',
+  'hugs',
+  'wakes',
+  'given',
+  'happyUntil',
+] as const satisfies readonly Exclude<CountKey, 'v' | 'passiveAt'>[]
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+const isString = (v: unknown): v is string => typeof v === 'string'
+
+// 配列なら string の要素だけを残す
+const stringsOf = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter(isString) : undefined)
+
+// record なら 0 以上の数の項目だけを残す
+const countsOf = (v: unknown): Record<string, number> | undefined =>
+  isRecord(v) ? Object.fromEntries(Object.entries(v).filter((e): e is [string, number] => isFiniteNumber(e[1]) && e[1] >= 0)) : undefined
+
+// { id, at } の形で、id が合っているか
+const isStamp = <T>(v: unknown, isId: (id: unknown) => id is T): v is { id: T; at: number } =>
+  isRecord(v) && isId(v.id) && isFiniteNumber(v.at)
+
+const isHat = (v: unknown): v is Hat => COSMETICS.some(c => c.hat !== undefined && c.hat === v)
+
+const isGiftId = (v: unknown): v is GiftId => TREATS.some(t => t.id === v) || DREAMS.some(d => d.id === v)
 
 // ---- 保存（セッションをまたいで） --------------------------------------
 
@@ -67,6 +127,7 @@ export function mergeGame(theirs: Game, base: Game, mine: Game): Game {
   const latest = <T>(t: T, b: T, m: T) => (JSON.stringify(m) !== JSON.stringify(b) ? m : t)
   return {
     ...mine,
+    v: Math.max(theirs.v, mine.v),
     hearts: Math.max(0, add('hearts')),
     earned: add('earned'),
     given: add('given'),
