@@ -122,23 +122,24 @@ const isGiftId = (v: unknown): v is GiftId => TREATS.some(t => t.id === v) || DR
 // theirs：いま保存されているもの、base：このセッションが前回読んだ（書いた）もの、mine：このセッションの今
 export function mergeGame(theirs: Game, base: Game, mine: Game): Game {
   // 知らない項目（新しい版が書いたもの）は、このセッションでは変えないので向こうの
-  const merged: Record<string, unknown> = { ...unknownOf(mine), ...unknownOf(theirs) }
-  for (const k of Object.keys(MERGE) as (keyof Game)[]) merged[k] = mergeField(MERGE[k], theirs[k], base[k], mine[k])
+  const merged: Record<string, unknown> = unknownOf(theirs)
+  for (const k of MERGE_KEYS) merged[k] = mergeField(MERGE[k], theirs[k], base[k], mine[k])
   return merged as Game
 }
 
 // 項目ごとのマージの方針
-// - add：このセッションで増えた（減った）ぶんを向こうに足す（0 未満にはしない）
+// - add：このセッションで増えた（減った）ぶんを向こうに足す
+// - spend：add と同じだが、0 未満にはしない（♡ のように使って減るもの）
 // - max：大きいほう
 // - union：両方の要素を合わせる
 // - counts：{ id: 数 } の数ごとに add（0 以下になった id は消す）
 // - latest：このセッションで変えたらこちら、変えていなければ向こうの
 // - mine：このセッションだけのもの。いつもこちらの
-type Policy = 'add' | 'max' | 'union' | 'counts' | 'latest' | 'mine'
+type Policy = 'add' | 'spend' | 'max' | 'union' | 'counts' | 'latest' | 'mine'
 
 // 値の型に使える方針だけを選べるようにする
 type PolicyFor<T> = [T] extends [number]
-  ? 'add' | 'max' | 'latest' | 'mine'
+  ? 'add' | 'spend' | 'max' | 'latest' | 'mine'
   : [T] extends [readonly unknown[]]
     ? 'union' | 'latest' | 'mine'
     : [T] extends [Partial<Record<string, number>>]
@@ -148,7 +149,7 @@ type PolicyFor<T> = [T] extends [number]
 // Game に項目を足したら、ここに方針を書くまで型エラーになる
 const MERGE: { [K in keyof Game]-?: PolicyFor<Game[K]> } = {
   v: 'max',
-  hearts: 'add',
+  hearts: 'spend',
   earned: 'add',
   combo: 'mine',
   comboAt: 'mine',
@@ -169,12 +170,15 @@ const MERGE: { [K in keyof Game]-?: PolicyFor<Game[K]> } = {
   lastGift: 'latest',
   passiveAt: 'mine',
 }
+const MERGE_KEYS = Object.keys(MERGE) as (keyof Game)[]
 
 type Counts = Partial<Record<string, number>>
 
 function mergeField(policy: Policy, t: unknown, b: unknown, m: unknown): unknown {
   switch (policy) {
     case 'add':
+      return (t as number) + (m as number) - (b as number)
+    case 'spend':
       return Math.max(0, (t as number) + (m as number) - (b as number))
     case 'max':
       return Math.max(t as number, m as number)
@@ -183,7 +187,8 @@ function mergeField(policy: Policy, t: unknown, b: unknown, m: unknown): unknown
     case 'counts': {
       const [tc, bc, mc] = [t, b, m] as [Counts, Counts, Counts]
       const out: Counts = { ...tc }
-      for (const k of Object.keys(mc)) {
+      // このセッションで消した id も数える
+      for (const k of new Set([...Object.keys(mc), ...Object.keys(bc)])) {
         const n = (tc[k] ?? 0) + (mc[k] ?? 0) - (bc[k] ?? 0)
         if (n > 0) out[k] = n
         else delete out[k]
@@ -197,15 +202,15 @@ function mergeField(policy: Policy, t: unknown, b: unknown, m: unknown): unknown
   }
 }
 
-// 中身が同じか。object はキーの順番によらずに比べる
+// 保存したときに同じ中身になるか。object はキーの順番によらず、undefined の項目は無いものとみなす
 export function isSame(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true
-  if (!isObject(a) || !isObject(b) || Array.isArray(a) !== Array.isArray(b)) return false
-  const keys = Object.keys(a)
-  return keys.length === Object.keys(b).length && keys.every(k => Object.hasOwn(b, k) && isSame(a[k], b[k]))
+  if (a === b) return true
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => isSame(x, b[i]))
+  if (!isRecord(a) || !isRecord(b)) return false
+  const keysOf = (o: Record<string, unknown>) => Object.keys(o).filter(k => o[k] !== undefined)
+  const keys = keysOf(a)
+  return keys.length === keysOf(b).length && keys.every(k => isSame(a[k], b[k]))
 }
-
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
 
 // ---- お店 ---------------------------------------------------------------
 

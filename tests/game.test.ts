@@ -154,6 +154,19 @@ test('mergeGame：数は差分を足し、♡ は 0 で止める', () => {
   expect(mergeGame({ ...base, hearts: 10 }, base, { ...base, hearts: 20 }).hearts).toBe(0)
 })
 
+test('mergeGame：♡ だけは 0 で止め、ほかの数は差分をそのまま足す', () => {
+  const base = game({ hearts: 10, earned: 10 })
+  const merged = mergeGame({ ...base, hearts: 0, earned: 0 }, base, { ...base, hearts: 5, earned: 5 })
+  expect(merged.hearts).toBe(0)
+  expect(merged.earned).toBe(-5)
+})
+
+test('mergeGame：このセッションで消した id も、差分として数える', () => {
+  const base = game({ gifts: { cake: 2 } })
+  const merged = mergeGame({ ...base, gifts: { cake: 3 } }, base, { ...base, gifts: {} })
+  expect(merged.gifts).toEqual({ cake: 1 })
+})
+
 test('mergeGame：レベルと贈り物の数は差分を足し、0 以下は消す', () => {
   const base = game({ levels: { glove: 1, fan: 1 }, gifts: { cake: 1 } })
   const theirs = { ...base, levels: { glove: 2, fan: 1 }, gifts: { cake: 1, cookie: 1 } }
@@ -201,13 +214,15 @@ test('mergeGame：キーの順番が違うだけなら、変えていないと�
 test('isSame：中身で比べ、object のキーの順番によらない', () => {
   expect(isSame({ id: 'cake', at: 5 }, { at: 5, id: 'cake' })).toBe(true)
   expect(isSame({ id: 'cake', at: 5 }, { id: 'cake', at: 6 })).toBe(false)
-  expect(isSame({ id: 'cake' }, { id: 'cake', at: undefined })).toBe(false)
+  // 保存すると undefined の項目は消えるので、無いのと同じ
+  expect(isSame({ id: 'cake' }, { id: 'cake', at: undefined })).toBe(true)
+  expect(isSame({ id: 'cake', at: 5 }, { id: 'cake', at: undefined })).toBe(false)
   expect(isSame(null, null)).toBe(true)
   expect(isSame(null, {})).toBe(false)
   expect(isSame(['a', 'b'], ['a', 'b'])).toBe(true)
   expect(isSame(['a', 'b'], ['b', 'a'])).toBe(false)
   expect(isSame([], {})).toBe(false)
-  expect(isSame(NaN, NaN)).toBe(true)
+  expect(isSame(0, -0)).toBe(true)
 })
 
 test('mergeGame：知らない項目（新しい版が書いたもの）は、向こうの値を残す', () => {
