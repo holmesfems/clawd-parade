@@ -1,49 +1,50 @@
+// フックの登録と、セッションの状態（atom）。帯は band.tsx、ショップは shop.tsx が描く
+
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, Work } from '../types'
+import { bandView } from './band'
 import type { Scene } from './game'
 import {
-  ACHIEVEMENTS,
-  COSMETICS,
-  DREAMS,
-  TREATS,
-  UPGRADES,
+  FRAME_MS,
   accrue,
-  affectionOf,
-  buyCosmetic,
-  buyUpgrade,
-  formatHearts,
-  formatRate,
-  giftOf,
-  giveGift,
   grant,
   heldGift,
   idleDue,
   idlePerSecond,
-  isDream,
   isFever,
-  isHappy,
-  isMaxed,
+  isPetted,
   isSame,
-  levelOf,
-  liveCombo,
-  lookOf,
   mergeGame,
   newGame,
   payIdle,
-  perPet,
   perSecond,
-  priceOf,
   restore,
+  sceneOf,
   toolTip,
   touchGame,
   unlocked,
-  wear,
 } from './game'
-import type { ViewProps } from './parade-view'
-import type { TouchProps } from './touch-pad'
-import { SCENE_ROWS, clawdText, coatOf, drawScene, encodeCells, frameOf, hex, isMarching, kaomoji, layout, putHeart, toSvg } from './scene'
+import { isMarching } from './scene'
+import { SHOP, shopView } from './shop'
+import type { Deal } from './shop'
+
+const CHARACTER_KEY = 'character'
+const CHARACTERS: Record<string, Character> = { clawd: 'clawd', neko: 'neko', cat: 'neko', ねこ: 'neko', 猫: 'neko' }
+const SHOP_WORDS = ['shop', 'game', 'ショップ', 'みせ', 'おみせ', 'ゲーム']
+
+// 落ち着いている間は 3 コマに 1 回だけ描き直す
+const CALM_EVERY = 3
+// 放置収入は 5 コマ（1 秒）ごとに足す
+const ACCRUE_EVERY = 5
+const SLEEP_AFTER_MS = 3 * 60 * 1000
+const GOODBYE_MS = 2500
+
+const ASKING: MoodKind[] = ['permission', 'question', 'plan']
+
+// 最後の段落が問いかけで終わっていたら「指示待ち」
+const asksBack = (answer: string) => /[?？]\s*[)）」』]*\s*$/.test(answer.trim().split('\n').filter(l => l.trim()).at(-1) ?? '')
 
 const mood = atom({ plugin: 'clawd-parade', key: 'mood' } as const, { kind: 'idle', at: 0 } as Mood)
 const friends = atom({ plugin: 'clawd-parade', key: 'friends' } as const, [] as Friend[])
@@ -74,93 +75,19 @@ const touchDebug = atom({ plugin: 'clawd-parade', key: 'touchDebug' } as const, 
 const synced = atom({ plugin: 'clawd-parade', key: 'synced' } as const, { game: newGame(0, 0), pets: 0 } as Synced)
 const holding = atom({ plugin: 'clawd-parade', key: 'holding' } as const, null as Holding)
 
-const CHARACTER_KEY = 'character'
 const PETS_KEY = 'pets'
 const GAME_KEY = 'game'
 // どのセッションかが最後に放置収入を払った時刻（放置収入を二重に払わないため）
 const IDLE_KEY = 'idlePaidAt'
-const PET_SHOW_MS = 4000
-const CHARACTERS: Record<string, Character> = { clawd: 'clawd', neko: 'neko', cat: 'neko', ねこ: 'neko', 猫: 'neko' }
-const SHOP = 'parade-shop'
-const SHOP_WORDS = ['shop', 'game', 'ショップ', 'みせ', 'おみせ', 'ゲーム']
-
-const FRAME_MS = 200
-// 落ち着いている間は 3 コマに 1 回だけ描き直す
-const CALM_EVERY = 3
-// 放置収入は 5 コマ（1 秒）ごとに足し、保存は 5 秒に 1 回まで
-const ACCRUE_EVERY = 5
+// 保存は 5 秒に 1 回まで
 const SAVE_EVERY_MS = 5000
-// 取った実績を帯に出しておく時間
-const UNLOCK_SHOW_MS = 5000
-// デスクトップの星は大きく見えてせわしないので、またたきを 1/4 の速さにする
-const DESKTOP_TWINKLE_TICKS = 4
-// SVG 本来の 1 ドットの大きさ。舞台の幅まで縮められるよう、大きめにしておく
-const DESKTOP_MARKUP_PIXEL = 16
-// 手ざわり層の高さ（行）。上端から置き、地面まで届くよう絵より少し高めにとる。
-// 下にはみ出たぶんは舞台で切る（デスクトップは bottom での配置が効かず、層ごと消えた）。
-// デスクトップの 1 行はおよそ 28px、夜空はおよそ 160px なので 7 行で足りる
-const TOUCH_ROWS = 7
-// ぎゅっとされた仲間が跳ねているコマ数
-const HOP_FRAMES = 6
-const SLEEP_AFTER_MS = 3 * 60 * 1000
-const GOODBYE_MS = 2500
 
-const ASKING: MoodKind[] = ['permission', 'question', 'plan']
-
-const LINES: Record<MoodKind, string[]> = {
-  idle: ['よろしくね！なんでも言ってね'],
-  working: ['おしごと中…カタカタ', 'がんばってるよ！', 'もうちょっと待ってね', 'ふむふむ…なるほど'],
-  permission: ['これ、やってもいい？おねがい〜'],
-  question: ['ちょっと聞きたいことがあるの'],
-  plan: ['プランできたよ！見てみて'],
-  done: ['おわったよ！ほめてほめて〜'],
-  waiting: ['どうする？おへんじ待ってるね'],
-  aborted: ['あっ、とめられちゃった…'],
-  error: ['エラーになっちゃった…ごめんね'],
-  refusal: ['それはできないの…ごめんね'],
-  sleeping: ['すやすや…（話しかけたら起きるよ）'],
-}
-
-const PETTED_LINES: Partial<Record<MoodKind, string>> = {
-  working: 'えへへ…おしごと中だけどうれしい♡',
-  permission: 'なでなでより先に、おへんじほしいな…♡',
-  error: 'ぐすん…なぐさめてくれるの？♡',
-  aborted: 'ううん、だいじょうぶ…♡',
-  sleeping: 'むにゃ…なでなで…♡',
-}
-
-const TONE: Record<MoodKind, string> = {
-  idle: '#d97757',
-  working: '#d97757',
-  permission: '#ff7a59',
-  question: '#ffd166',
-  plan: '#ffe066',
-  done: '#ff6b9a',
-  waiting: '#ffd166',
-  aborted: '#9ec9ff',
-  error: '#6ec6ff',
-  refusal: '#ff5c5c',
-  sleeping: '#9ec9ff',
-}
-
-const clockText = (ms: number) => {
-  const s = Math.max(0, Math.round(ms / 1000))
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-}
-
-// 最後の段落が問いかけで終わっていたら「指示待ち」
-const asksBack = (answer: string) => /[?？]\s*[)）」』]*\s*$/.test(answer.trim().split('\n').filter(l => l.trim()).at(-1) ?? '')
-
-const setMood = async ($: EngineInterface, kind: MoodKind) => {
+async function setMood($: EngineInterface, kind: MoodKind) {
   const at = await $.clock.now()
   await update($, mood, () => ({ kind, at }))
 }
 
-// ゲームから見た今のようす：Claude が働いているか、働いている仲間の数
-const sceneOf = (w: Work, list: Friend[]): Scene => ({
-  isWorking: w.isRunning,
-  workers: list.filter(f => f.doneAt === null).length,
-})
+// ---- 保存 ----------------------------------------------------------------
 
 let savedAt = 0
 let saving = Promise.resolve()
@@ -170,6 +97,11 @@ function save($: EngineInterface, now: number) {
   const run = saving.then(() => saveNow($, now))
   saving = run.catch(() => undefined)
   return run
+}
+
+// 前の保存から SAVE_EVERY_MS たっていれば保存する
+async function saveIfDue($: EngineInterface, now: number) {
+  if (now - savedAt >= SAVE_EVERY_MS) await save($, now)
 }
 
 // ほかのセッションの保存に、このセッションで増えた（減った）ぶんだけを足し込んで書く
@@ -204,6 +136,8 @@ async function payIdleIncome($: EngineInterface, now: number) {
   if (ms > 0) await update($, game, one => payIdle(one, ms, now))
 }
 
+// ---- 実績・なでる・買う ------------------------------------------------------
+
 // 条件を満たした実績を渡して、トーストで知らせる
 async function award($: EngineInterface, now: number, petsTotal: number, at: Scene) {
   const facts = (g: Game) => ({ game: g, pets: petsTotal, rate: perSecond(g, at) })
@@ -221,7 +155,7 @@ async function pet($: EngineInterface, kind: Pets['kind'], touch: { hand?: numbe
     total: p.total + 1,
     at: now,
     // 手を止めずになで続けている間は、ハートの流れを始めからやり直さない
-    from: p.at > 0 && now - p.at < PET_SHOW_MS && p.kind === kind ? p.from : now,
+    from: isPetted(p, now) && p.kind === kind ? p.from : now,
     kind,
     hand: touch.hand ?? null,
     friend: touch.friend ?? null,
@@ -239,6 +173,36 @@ async function pet($: EngineInterface, kind: Pets['kind'], touch: { hand?: numbe
   })
   if (isFeverStart) $.ui.toast('★ フィーバー！ ♡ 3 倍！ ★')
   await award($, now, after.total, at)
+}
+
+// 買い物：足りなければ理由をトーストで、買えたら知らせて実績も見て、すぐ保存する。
+// 贈り物なら、Clawd がかかえてお礼を言う。いまはショップのボタンから呼ぶ（帯のボタンからも呼べる形にしてある）
+async function buy($: EngineInterface, label: string, deal: Deal) {
+  const now = await $.clock.now()
+  let refusal: string | undefined
+  let gave: Game['lastGift'] | undefined
+  await update($, game, g => {
+    const dealt = deal(g, now)
+    if (typeof dealt === 'string') {
+      refusal = dealt
+      return g
+    }
+    refusal = undefined
+    gave = dealt.lastGift !== g.lastGift ? dealt.lastGift : null
+    return dealt
+  })
+  if (refusal !== undefined) {
+    $.ui.toast(refusal)
+    return
+  }
+  if (gave) {
+    const { id } = gave
+    await update($, holding, () => ({ id, from: now }))
+  }
+  $.ui.toast(label)
+  const [p, w, list] = await Promise.all([read($, pets), read($, work), read($, friends)])
+  await award($, now, p.total, sceneOf(w, list))
+  await save($, now)
 }
 
 let timer: { cancel: () => void } | undefined
@@ -265,13 +229,12 @@ async function step($: EngineInterface) {
       await update($, game, one => accrue(one, now, at))
       await payIdleIncome($, now)
       await award($, now, p.total, at)
-      if (now - savedAt >= SAVE_EVERY_MS) await save($, now)
+      await saveIfDue($, now)
     }
 
     // なでられている間とフィーバー中は、ハートが滑らかに動くよう毎コマ描く
-    const isPetted = p.at > 0 && now - p.at < PET_SHOW_MS
     const isHolding = heldGift(held, now) !== null
-    const isLively = isMarching(m.kind, list) || m.kind === 'done' || isPetted || isFever(g, now) || isHolding
+    const isLively = isMarching(m.kind, list) || m.kind === 'done' || isPetted(p, now) || isFever(g, now) || isHolding
     if (!isLively && beat % CALM_EVERY !== 0) return
 
     const isCalm = !isMarching(m.kind, list) && !ASKING.includes(m.kind)
@@ -446,7 +409,7 @@ export const register: Register = on => {
     const draft = await $.prompt.read().catch(() => ({ text: '' }))
     if (/\[Image #\d+\]/.test(draft.text)) return next(e)
 
-    const [m, list, w, t, who, petted, g, isDebug, held] = await Promise.all([
+    const [m, list, w, t, who, p, g, isDebug, held] = await Promise.all([
       read($, mood),
       read($, friends),
       read($, work),
@@ -457,406 +420,33 @@ export const register: Register = on => {
       read($, touchDebug),
       read($, holding),
     ])
-    const isPetted = petted.at > 0 && t.at - petted.at < PET_SHOW_MS
-    // 贈り物をもらった直後は、なにより先にその贈り物へのお礼を言う
-    const holdingId = heldGift(held, t.at)
-    const thanked = holdingId ? giftOf(holdingId) : undefined
-    const lines = LINES[m.kind]
-    const say = thanked
-      ? thanked.thanks
-      : isPetted
-        ? petted.kind === 'hug' ? 'なかまもよろこんでるよ♡' : PETTED_LINES[m.kind] ?? 'えへへ…♡ もっとなでて〜'
-        : lines[Math.floor(t.n / 25) % lines.length] ?? lines[0]
-    // 取ったばかりの実績は、しばらくなでなで回数やタイマーの行に出す
-    const unlock = g.lastUnlock && t.at - g.lastUnlock.at < UNLOCK_SHOW_MS ? ACHIEVEMENTS.find(a => a.id === g.lastUnlock?.id) : undefined
-    const info =
-      unlock ? `🏆 実績「${unlock.name}」ゲット！` :
-      thanked ? `🎁 ${thanked.name}${isDream(thanked.id) ? ' がやってきた！' : ` · ${g.gifts[thanked.id] ?? 1} 個目`}` :
-      isPetted ? `なでなで ${petted.total} 回目 ♡` :
-      w.isRunning ? `⏱ ${clockText(t.at - w.startedAt)}${w.tool ? ` · ${w.tool}` : ''}` :
-      w.durationMs !== null ? `⏱ ${clockText(w.durationMs)} でおわり${w.helpers ? ` · なかま ${w.helpers}匹がてつだったよ` : ''}` :
-      ''
-
-    // なでなでゲームの行：フィーバー中はのこり時間、ふだんは ♡ と放置収入とコンボ
-    const at = sceneOf(w, list)
-    const combo = liveCombo(g, t.at)
-    const isFeverNow = isFever(g, t.at)
-    const happy = isHappy(g, t.at) ? ` · ごきげん ${clockText(g.happyUntil - t.at)}` : ''
-    const score = isFeverNow
-      ? `★ フィーバー ★ ♡×3 あと ${Math.ceil((g.feverUntil - t.at) / 1000)} 秒 · ♡ ${formatHearts(g.hearts)}`
-      : `♡ ${formatHearts(g.hearts)} · +${formatRate(perSecond(g, at, t.at))}/秒${combo >= 2 ? ` · ${combo} コンボ！` : happy}`
-    const scoreColor = isFeverNow ? '#ffb347' : '#ff9ec7'
-    const look = lookOf(g, t.at, held)
-
-    const ui = $.ui.resolve(e)
-    const { Box, Text, Button } = ui
-    const isDesktop = e.surface === 'desktop'
-
-    const scoreLine = (
-      <Text key="score" color={scoreColor} bold={isFeverNow} wrap="truncate-end">
-        {score}
-      </Text>
-    )
-
-    const legend = list.map(f => (
-      <Box key={`f-${f.id}`}>
-        <Text color={hex(coatOf(f.type))}>● {f.type} </Text>
-        <Text dimColor wrap="truncate-end">
-          {f.doneAt !== null ? 'おつかれさま！' : `${f.label}${f.tool ? ` · ${f.tool}` : ''}`}
-        </Text>
-      </Box>
-    ))
-
-    // デスクトップでも絵があれば手ざわり層で直接なでられる。絵が出せないほど狭いときだけボタンで
-    const petRow = isDesktop && (
-      <Box key="pet-row" paddingTop={1}>
-        <Button key="pet" label="なでる ♡" onPress={() => void pet($, 'pet')} />
-      </Box>
-    )
-
-    const words = (
-      <Box key="words" flexDirection="column" flexShrink={1}>
-        <Text color={isPetted || thanked ? '#ff6b9a' : TONE[m.kind]} bold wrap="truncate-end">
-          {say}
-        </Text>
-        {info !== '' && (
-          <Text dimColor wrap="truncate-end">
-            {info}
-          </Text>
-        )}
-        {scoreLine}
-        {legend}
-      </Box>
-    )
-
-    // 夜空に重ねる版：右端に寄せ、空の高さに収まるよう仲間は色つきの名札 1 行にまとめる
-    const skyWords = (
-      <Box key="words" flexDirection="column" alignItems="flex-end" paddingRight={2}>
-        <Text color={isPetted || thanked ? '#ff6b9a' : TONE[m.kind]} bold wrap="truncate-end">
-          {say}
-        </Text>
-        {info !== '' && (
-          <Text dimColor wrap="truncate-end">
-            {info}
-          </Text>
-        )}
-        {scoreLine}
-        {list.length > 0 && (
-          <Box key="chips" columnGap={1} overflow="hidden">
-            {[...Map.groupBy(list, f => f.type)].map(([type, crew]) => (
-              <Text key={`c-${type}`} color={hex(coatOf(type))} wrap="truncate-end">
-                ● {type}
-                {crew.length > 1 ? ` ×${crew.length}` : ''}
-                {crew.every(f => f.doneAt !== null) ? ' ♡' : ''}
-              </Text>
-            ))}
-          </Box>
-        )}
-      </Box>
-    )
-
-    const cols = e.props.bodyColumns
-    // デスクトップは夜空を帯の幅いっぱいに広げ、広いときは右側の空をセリフに空けておく
-    const frame = frameOf(isDesktop ? 'desktop' : 'terminal', cols)
-    const { isWide, columns: sceneColumns, paradeColumns, headroom } = frame
-    const room = SCENE_ROWS + (isWide ? 0 : 3 + list.length)
-    const sceneProps: ViewProps = { columns: sceneColumns, mood: m.kind, tick: t.n, friends: list, character: who, look }
-    // デスクトップの絵は px で描くので、行数の余裕は見ない
-    const canDraw = cols >= 40 && (isDesktop || (e.surface === 'terminal' && e.props.maxRows >= room))
-
-    // デスクトップは SVG に、さわったぶんのハート・傾き・仲間のジャンプを足して描く
-    const desktopScene = () => {
-      const age = Math.floor((t.at - petted.from) / FRAME_MS)
-      const isStroked = isPetted && petted.kind === 'pet'
-      const hugged = isPetted && petted.kind === 'hug' && petted.friend !== null && age < HOP_FRAMES ? [petted.friend] : []
-      const spots = layout(sceneColumns, paradeColumns, list, who)
-      const { x, w } = spots.leader
-      const sway = petted.hand !== null ? Math.round((petted.hand - (x + w / 2)) / 3) : [0, 1, 0, -1][age % 4] ?? 0
-      const g = drawScene({
-        ...sceneProps,
-        paradeColumns,
-        twinkleTicks: DESKTOP_TWINKLE_TICKS,
-        headroom,
-        petted: isStroked ? { sway } : null,
-        hopping: hugged,
-      })
-      if (isStroked) {
-        // なでている間は 2 コマごとにハートを出し、両脇から昇らせる
-        const { hearts } = spots
-        const lastTouch = Math.floor((petted.at - petted.from) / FRAME_MS)
-        for (let k = Math.max(0, Math.ceil((age - 11) / 2)); k * 2 <= Math.min(age, lastTouch + 4); k++) {
-          putHeart(g, hearts[k % hearts.length]!, headroom + 8 - (age - k * 2), k % 2 === 0)
-        }
-      }
-      return toSvg(g, DESKTOP_MARKUP_PIXEL)
-    }
-
-    // 端末はなでなでできる Client を優先し、無い面では絵だけの Raster にする。
-    // デスクトップは SVG の上に、同じ大きさの見えない手ざわり層（Client）を重ねる
-    const scene =
-      canDraw && isDesktop && 'Svg' in ui ? (
-        (() => {
-          const svg = desktopScene()
-          const alt = `${who === 'clawd' ? 'Clawd' : 'ねこ'}${list.length ? `となかま ${list.length} 匹` : ''}のパレード`
-          const touchProps: TouchProps = {
-            columns: sceneColumns,
-            paradeColumns,
-            rows: TOUCH_ROWS,
-            friends: list,
-            character: who,
-            isDebug,
-          }
-          const stageCells = cols
-          // 割合（100%）の大きさはデスクトップで効かず層が左上に縮んだので、層も絵も同じマス数で置く。
-          // セリフは手ざわり層より後に置き、層の上に重ねる
-          return (
-            <Box key="stage" width={stageCells} overflow="hidden">
-              <ui.Svg source={svg.source} alt={alt} />
-              {'Client' in ui && (
-                <Box key="touch-layer" position="absolute" top={0} left={0} width={stageCells} height={TOUCH_ROWS}>
-                  <ui.Client key="touch" module="./touch-pad.tsx" props={touchProps} width={stageCells} height={TOUCH_ROWS} />
-                </Box>
-              )}
-              {isWide && (
-                <Box
-                  key="sky-words"
-                  position="absolute"
-                  top={0}
-                  bottom={0}
-                  right={0}
-                  width={frame.wordsCells}
-                  flexDirection="column"
-                  justifyContent="center"
-                  overflow="hidden"
-                >
-                  {skyWords}
-                </Box>
-              )}
-            </Box>
-          )
-        })()
-      ) : canDraw && 'Client' in ui ? (
-        <ui.Client key="parade" module="./parade-view.tsx" props={sceneProps} width={sceneColumns} height={SCENE_ROWS} />
-      ) : canDraw && 'Raster' in ui ? (
-        (() => {
-          const cells = encodeCells(drawScene(sceneProps))
-          return <ui.Raster key="scene" columns={cells.columns} rows={cells.rows} cells={cells.cells} />
-        })()
-      ) : null
-
-    // 広いデスクトップはセリフも夜空の中にあるので、絵だけを返す
-    if (scene && isDesktop && isWide) return scene
-
-    if (scene) {
-      return (
-        <Box flexDirection={isWide ? 'row' : 'column'}>
-          {scene}
-          <Box key="side" flexDirection="column" paddingLeft={isWide ? 1 : 0} paddingTop={isWide ? 1 : 0}>
-            {words}
-          </Box>
-        </Box>
-      )
-    }
-
-    const crew = list.map(f => (
-      <Text key={`k-${f.id}`} color={hex(coatOf(f.type))}>
-        {who === 'clawd'
-          ? f.doneAt !== null ? '▗▛▜▖♡' : (t.n + f.id.length) % 2 ? '▗▛▜▖' : ' ▗▛▜▖'
-          : f.doneAt !== null ? '(=^ᴗ^=)ﾉ' : (t.n + f.id.length) % 2 ? '(=･ω･=)' : '(=･ω･=)ﾉ'}{' '}
-      </Text>
-    ))
-
-    return (
-      <Box flexDirection="column">
-        <Box key="row">
-          {crew}
-          <Text color={TONE[m.kind]} bold>
-            {who === 'clawd' ? clawdText(m.kind, t.n) : kaomoji(m.kind, t.n)}{' '}
-          </Text>
-          <Text color={TONE[m.kind]}>{say}</Text>
-        </Box>
-        {info !== '' && <Text dimColor>{info}</Text>}
-        {scoreLine}
-        {petRow}
-      </Box>
-    )
+    return bandView($.ui.resolve(e), {
+      mood: m,
+      work: w,
+      friends: list,
+      pets: p,
+      game: g,
+      holding: held,
+      tick: t,
+      surface: e.surface,
+      cols: e.props.bodyColumns,
+      maxRows: e.props.maxRows,
+      character: who,
+      isDebug,
+      onPet: () => void pet($, 'pet'),
+    })
   })
 
-  // ---- なでなでショップ（/parade shop で開くパネル） ----
-
+  // なでなでショップ（/parade shop で開くパネル）
   on('ui.render', { component: 'Pane', requestId: SHOP }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
     const [g, w, list, p, who] = await Promise.all([read($, game), read($, work), read($, friends), read($, pets), read($, character)])
-    const at = sceneOf(w, list)
-    // 放置収入は 1 秒ごとに足されるので、その時刻を「いま」とみなす
-    const now = g.passiveAt
-
-    // 買い物：足りなければ理由をトーストで、買えたら実績も見て、すぐ保存する
-    const shop = (label: string, deal: (one: Game, when: number) => Game | string) => async () => {
-      const when = await $.clock.now()
-      let refusal: string | undefined
-      let gave: Game['lastGift'] | undefined
-      await update($, game, one => {
-        const dealt = deal(one, when)
-        refusal = typeof dealt === 'string' ? dealt : undefined
-        gave = typeof dealt !== 'string' && dealt.lastGift !== one.lastGift ? dealt.lastGift : null
-        return typeof dealt === 'string' ? one : dealt
-      })
-      if (refusal !== undefined) {
-        $.ui.toast(refusal)
-        return
-      }
-      // 贈り物なら、Clawd がかかえてお礼を言う
-      if (gave) {
-        const { id } = gave
-        await update($, holding, () => ({ id, from: when }))
-      }
-      $.ui.toast(label)
-      await award($, when, p.total, at)
-      await save($, when)
-    }
-
-    const header = (title: string) => (
-      <Box key={`h-${title}`} paddingTop={1}>
-        <Text bold color="#ff9ec7">
-          ── {title} ──
-        </Text>
-      </Box>
-    )
-
-    const workBoost = at.isWorking ? `（お仕事中 ×${2 + 0.5 * levelOf(g, 'coffee')}）` : ''
-    const done = ACHIEVEMENTS.filter(a => g.achievements.includes(a.id)).length
-    const affection = affectionOf(g.given)
-    const lasts = (ms: number) => (ms >= 60_000 ? `${ms / 60_000} 分` : `${ms / 1000} 秒`)
-
-    return (
-      <Box flexDirection="column" paddingX={1}>
-        <Text bold color="#ff6b9a">
-          ♡ {formatHearts(g.hearts)}
-        </Text>
-        <Text dimColor>
-          放置 +{formatRate(perSecond(g, at))}/秒 · 1 なで {formatRate(perPet(g, at, now, 0))} ♡{workBoost}
-        </Text>
-        <Text dimColor>なで続けると コンボ、30 コンボで フィーバー（♡×3）！</Text>
-
-        {header('おかいもの')}
-        {UPGRADES.map(u => {
-          const level = levelOf(g, u.id)
-          const isTop = isMaxed(u, level)
-          const price = priceOf(u, level)
-          return (
-            <Box key={`u-${u.id}`} columnGap={1}>
-              <Button
-                key={`buy-${u.id}`}
-                variant={!isTop && g.hearts >= price ? 'primary' : 'secondary'}
-                onPress={shop(`${u.name} を Lv${level + 1} にしたよ！`, one => buyUpgrade(one, u.id))}
-              >
-                {u.name} Lv{level} <Text dimColor>{isTop ? 'MAX' : `${formatHearts(price)}♡`}</Text>
-              </Button>
-              <Text dimColor wrap="truncate-end">
-                {u.about}
-              </Text>
-            </Box>
-          )
-        })}
-
-        {header('きせかえ')}
-        {COSMETICS.map(c => {
-          const isOwned = g.owned.includes(c.id)
-          const isWorn = c.hat !== undefined && g.hat === c.hat
-          const label = !isOwned ? `${c.name} ${formatHearts(c.price)}♡` : isWorn ? `${c.name} ✓かぶってる` : c.hat ? `${c.name} をかぶる` : `${c.name} ✓`
-          const press = !isOwned
-            ? shop(`${c.name} を買ったよ！`, one => buyCosmetic(one, c.id))
-            : c.hat
-              ? shop(isWorn ? `${c.name} をはずしたよ` : `${c.name} をかぶったよ！`, one => wear(one, isWorn ? null : c.hat ?? null))
-              : async () => $.ui.toast(`${c.name} はもう夜空にあるよ`)
-          const about = c.id === 'catEars' && who === 'neko' ? 'ねこはもとからねこみみ（Clawd だけ）' : c.about
-          return (
-            <Box key={`c-${c.id}`} columnGap={1}>
-              <Button key={`dress-${c.id}`} variant={!isOwned && g.hearts >= c.price ? 'primary' : 'secondary'} onPress={press}>
-                {label}
-              </Button>
-              <Text dimColor wrap="truncate-end">
-                {about}
-              </Text>
-            </Box>
-          )
-        })}
-
-        {header(`プレゼント · なかよし度「${affection.name}」`)}
-        <Text dimColor>
-          {affection.next
-            ? `あと ♡${formatHearts(affection.next.at - g.given)} 贈ると「${affection.next.name}」`
-            : 'これ以上ないくらいなかよし！'}
-          {isHappy(g, now) ? ` · ごきげん中 ♡×1.5（あと ${clockText(g.happyUntil - now)}）` : ''}
-        </Text>
-        {TREATS.map(treat => {
-          const count = g.gifts[treat.id] ?? 0
-          return (
-            <Box key={`t-${treat.id}`} columnGap={1}>
-              <Button
-                key={`gift-${treat.id}`}
-                variant={g.hearts >= treat.price ? 'primary' : 'secondary'}
-                onPress={shop(`🎁 ${treat.name} をあげたよ！`, (one, when) => giveGift(one, treat.id, when))}
-              >
-                {treat.name} <Text dimColor>{formatHearts(treat.price)}♡</Text>
-              </Button>
-              <Text dimColor wrap="truncate-end">
-                ごきげん {lasts(treat.happyMs)}
-                {count > 0 ? ` · ${count} 回あげた` : ''}
-              </Text>
-            </Box>
-          )
-        })}
-
-        {header('夢のプレゼント（ひとつごとに ♡ ずっと +10%）')}
-        {DREAMS.map(dream => {
-          const isGiven = (g.gifts[dream.id] ?? 0) > 0
-          return (
-            <Box key={`d-${dream.id}`} columnGap={1}>
-              {isGiven ? (
-                <Button key={`gift-${dream.id}`} onPress={async () => $.ui.toast(`${dream.name} はもう飾ってあるよ`)}>
-                  {dream.name} ✓
-                </Button>
-              ) : (
-                <Button
-                  key={`gift-${dream.id}`}
-                  variant={g.hearts >= dream.price ? 'primary' : 'secondary'}
-                  onPress={shop(`🎁 ${dream.name} を贈ったよ！`, (one, when) => giveGift(one, dream.id, when))}
-                >
-                  {dream.name} <Text dimColor>{formatHearts(dream.price)}♡</Text>
-                </Button>
-              )}
-              <Text dimColor wrap="truncate-end">
-                {dream.shows}
-              </Text>
-            </Box>
-          )
-        })}
-
-        {header(`実績 ${done}/${ACHIEVEMENTS.length}`)}
-        {ACHIEVEMENTS.map(a => {
-          const isMine = g.achievements.includes(a.id)
-          return (
-            <Box key={`a-${a.id}`} columnGap={1}>
-              <Text {...(isMine ? { color: '#ffd166' } : { dimColor: true })}>
-                {isMine ? '🏆' : '・'} {a.name}
-              </Text>
-              <Text dimColor wrap="truncate-end">
-                {a.about}
-              </Text>
-            </Box>
-          )
-        })}
-
-        {header('きろく')}
-        <Text dimColor>
-          なでた回数 {formatHearts(p.total)} 回 · 稼いだ ♡ {formatHearts(g.earned)} · 贈った ♡ {formatHearts(g.given)}
-        </Text>
-        <Text dimColor>
-          最高コンボ {g.maxCombo} · フィーバー {g.fevers} 回 · お仕事中のなでなで {formatHearts(g.workPets)} 回 · ぎゅっ {g.hugs} 回
-        </Text>
-      </Box>
-    )
+    return shopView($.ui.resolve(e), {
+      game: g,
+      at: sceneOf(w, list),
+      petsTotal: p.total,
+      character: who,
+      buy: (label, deal) => () => buy($, label, deal),
+      say: text => async () => $.ui.toast(text),
+    })
   })
 }

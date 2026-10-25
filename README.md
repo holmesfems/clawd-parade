@@ -72,7 +72,9 @@ claude plugin enable clawd-parade@clawd-parade
 
 | ファイル | |
 | --- | --- |
-| `hooks/register.tsx` | フック本体（状態、帯とショップの描画、コマンド） |
+| `hooks/register.tsx` | フック本体（状態、保存、なでる・買う、コマンド） |
+| `hooks/band.tsx` | 入力欄の上の帯の描画と、セリフ・♡ の行を作る `bandText` |
+| `hooks/shop.tsx` | なでなでショップの描画 |
 | `hooks/game.ts` | なでなでゲームのルール（♡、コンボ、お店、実績） |
 | `hooks/scene.ts` | ドット絵（パレード、ぼうし、夜空の飾り）と SVG・端末セルへの変換 |
 | `hooks/parade-view.tsx` | ターミナルでなでるための Client |
