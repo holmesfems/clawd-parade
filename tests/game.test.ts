@@ -13,6 +13,7 @@ import {
   formatRate,
   giveGift,
   idleDue,
+  isSame,
   isMaxed,
   mergeGame,
   newGame,
@@ -187,6 +188,26 @@ test('mergeGame：ぼうし・最後の実績・最後の贈り物は、この�
   const changed = mergeGame(theirs, base, { ...base, hat: null })
   expect(changed.hat).toBeNull()
   expect(changed.lastUnlock).toEqual({ id: 'pets1', at: 1 })
+})
+
+test('mergeGame：キーの順番が違うだけなら、変えていないとみなす', () => {
+  const base = game({ lastGift: { id: 'cake', at: 5 } })
+  const theirs = { ...base, lastGift: { id: 'cookie' as const, at: 9 } }
+  // 保存から読み直すと、キーの順番が変わることがある
+  const reordered = { ...base, lastGift: { at: 5, id: 'cake' as const } }
+  expect(mergeGame(theirs, base, reordered).lastGift).toEqual({ id: 'cookie', at: 9 })
+})
+
+test('isSame：中身で比べ、object のキーの順番によらない', () => {
+  expect(isSame({ id: 'cake', at: 5 }, { at: 5, id: 'cake' })).toBe(true)
+  expect(isSame({ id: 'cake', at: 5 }, { id: 'cake', at: 6 })).toBe(false)
+  expect(isSame({ id: 'cake' }, { id: 'cake', at: undefined })).toBe(false)
+  expect(isSame(null, null)).toBe(true)
+  expect(isSame(null, {})).toBe(false)
+  expect(isSame(['a', 'b'], ['a', 'b'])).toBe(true)
+  expect(isSame(['a', 'b'], ['b', 'a'])).toBe(false)
+  expect(isSame([], {})).toBe(false)
+  expect(isSame(NaN, NaN)).toBe(true)
 })
 
 test('mergeGame：知らない項目（新しい版が書いたもの）は、向こうの値を残す', () => {

@@ -25,6 +25,7 @@ import {
   isFever,
   isHappy,
   isMaxed,
+  isSame,
   levelOf,
   liveCombo,
   lookOf,
@@ -194,7 +195,7 @@ async function saveNow($: EngineInterface, now: number) {
   // 保存している間になでたぶんも落とさずに、ほかのセッションのぶんを取り込む
   await update($, game, one => mergeGame(merged, g, one))
   // 別のセッションで贈った贈り物が届いたら、こちらでも今からかかえてお礼を言う
-  if (merged.lastGift && JSON.stringify(merged.lastGift) !== JSON.stringify(g.lastGift)) {
+  if (merged.lastGift && !isSame(merged.lastGift, g.lastGift)) {
     const { id } = merged.lastGift
     await update($, holding, () => ({ id, from: now }))
   }
