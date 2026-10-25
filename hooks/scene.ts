@@ -1,7 +1,7 @@
 // パレードのドット絵。1 ピクセルを半角ブロックの上下半分で描くので、
 // 縦 14 px が端末 7 行になる。ここは $ に触らない純粋な関数だけを置く。
 
-import type { Character, DreamId, Friend, Hat, Look, MoodKind } from '../types'
+import type { Character, DreamId, Friend, Hat, Look, MoodKind, TreatId } from '../types'
 
 export const SCENE_ROWS = 7
 const H = SCENE_ROWS * 2
@@ -1096,6 +1096,51 @@ export function toSvg(g: Grid, pixel: number, palette: Palette): { source: strin
 
 export function putHeart(g: Grid, x: number, y: number, isBig: boolean) {
   put(g, isBig ? 'heart' : 'small', x, y, isBig ? C.heart : C.cheek)
+}
+
+// ---- ワンぽちの贈り物の札（広いデスクトップ） ------------------------------
+// 帯に出した贈り物は、行進とセリフの空のあいだにこの幅（ドット）の列を空けて、札にして描く。
+// 手ざわり層はこの列を押したら贈る（縦の位置は見ない）
+export const QUICK_GIFT_DOTS = 13
+const BADGE_W = 11
+const BADGE_H = 9
+const BADGE_FILL = 0x2a2540
+const BADGE_OFF = 0x6b6f85
+
+// 札の列。frame.paradeColumns から QUICK_GIFT_DOTS を引いた行進の幅の、すぐ右
+export const quickGiftSpot = (paradeColumns: number) => ({ x: paradeColumns, w: QUICK_GIFT_DOTS })
+
+// 札を空の上のほうに描き、下に小さな ♡ を添える。♡ が足りないときは、ふちを灰色に、贈り物を札の色に沈ませる
+export function putQuickGift(g: Grid, x: number, gift: TreatId, canAfford: boolean) {
+  const left = x + Math.floor((QUICK_GIFT_DOTS - BADGE_W) / 2)
+  const top = 1
+  const edge = canAfford ? C.heart : BADGE_OFF
+  for (let dy = 0; dy < BADGE_H; dy++)
+    for (let dx = 0; dx < BADGE_W; dx++) {
+      const isRim = dx === 0 || dy === 0 || dx === BADGE_W - 1 || dy === BADGE_H - 1
+      const isCorner = (dx === 0 || dx === BADGE_W - 1) && (dy === 0 || dy === BADGE_H - 1)
+      if (!isCorner) dot(g, left + dx, top + dy, isRim ? edge : BADGE_FILL)
+    }
+  const icon = GIFT_ICONS[gift]
+  const w = icon[0]?.length ?? 0
+  const ix = left + Math.floor((BADGE_W - w) / 2)
+  const iy = top + Math.floor((BADGE_H - icon.length) / 2)
+  stampIcon(g, icon, ix, iy)
+  if (canAfford) {
+    put(g, 'small', left + Math.floor(BADGE_W / 2) - 1, top + BADGE_H + 1, C.heart)
+    return
+  }
+  for (let dy = 0; dy < icon.length; dy++)
+    for (let dx = 0; dx < w; dx++) {
+      const c = g[iy + dy]?.[ix + dx]
+      if (c !== null && c !== undefined && c !== BADGE_FILL) dot(g, ix + dx, iy + dy, mix(c, BADGE_FILL, 0.6))
+    }
+}
+
+// 色 a を b へ t だけ寄せる
+function mix(a: number, b: number, t: number): number {
+  const ch = (shift: number) => Math.round(((a >> shift) & 0xff) * (1 - t) + ((b >> shift) & 0xff) * t)
+  return (ch(16) << 16) | (ch(8) << 8) | ch(0)
 }
 
 export type Run = { text: string; fg?: string; bg?: string }

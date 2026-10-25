@@ -17,6 +17,8 @@ export type TouchProps = {
   isDebug: boolean
   friends: Friend[]
   character: Character
+  // 帯に出した贈り物の札の列（絵のドット）。出していなければ null
+  gift: { x: number; w: number } | null
 }
 
 // Client は 1 つしか置かないので、手の状態はモジュールに持つ
@@ -39,7 +41,10 @@ const TouchPad: ClientModule<TouchProps, number> = (props, surface) => {
 
       if (ev.type === 'down' && ev.button === 'left') {
         const hit = hitTest(spots, px)
-        if (hit?.kind === 'leader') {
+        const { gift } = now
+        if (gift && px >= gift.x && px < gift.x + gift.w) {
+          send({ kind: 'gift' })
+        } else if (hit?.kind === 'leader') {
           isHolding = true
           meter.start(px)
           send({ kind: 'pet', x: px })

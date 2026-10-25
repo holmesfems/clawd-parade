@@ -8,6 +8,7 @@ test('形の合うものだけを ClientMessage として読む', () => {
   expect(messageOf({ kind: 'pet', x: 12 })).toEqual({ kind: 'pet', x: 12 })
   expect(messageOf({ kind: 'stroke', x: 3 })).toEqual({ kind: 'stroke', x: 3 })
   expect(messageOf({ kind: 'hug', id: 'agent-1' })).toEqual({ kind: 'hug', id: 'agent-1' })
+  expect(messageOf({ kind: 'gift' })).toEqual({ kind: 'gift' })
   // 型の違う項目は落とす
   expect(messageOf({ kind: 'pet', x: '12' })).toEqual({ kind: 'pet' })
   expect(messageOf({ kind: 'stroke', x: NaN })).toEqual({ kind: 'stroke' })
