@@ -26,7 +26,8 @@ const newer = (a, b) => {
 
 if (base) {
   const mergeBase = git('merge-base', base, 'HEAD').trim()
-  const changed = git('diff', '--name-only', mergeBase, 'HEAD').split('\n').filter(Boolean)
+  // hooks/ から外へ移したファイルも数えるよう、rename を分けずに出す
+  const changed = git('diff', '--no-renames', '--name-only', mergeBase, 'HEAD').split('\n').filter(Boolean)
   const touched = changed.filter(f => f.startsWith('hooks/') || f.startsWith('types/'))
   if (touched.length > 0) {
     const before = versionOf(git('show', `${mergeBase}:.claude-plugin/plugin.json`))
