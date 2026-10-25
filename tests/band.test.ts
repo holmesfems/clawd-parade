@@ -56,7 +56,7 @@ test('贈り物をかかえている間は、なにより先にお礼', () => {
 })
 
 test('取ったばかりの実績は info に 5 秒出す', () => {
-  const game = { ...newGame(0, NOW), lastUnlock: { id: 'pets1', at: NOW - 4_000 } }
+  const game = { ...newGame(0, NOW), lastUnlock: { id: 'pets1' as const, at: NOW - 4_000 } }
   expect(bandText(state({ game })).info).toBe('🏆 実績「はじめてのなでなで」ゲット！')
   expect(bandText(state({ game, tick: { n: 0, at: NOW + 1_000 } })).info).toBe('')
 })

@@ -445,7 +445,7 @@ function face(mood: MoodKind, tick: number): { eyes: Eyes; mouth: Mouth } {
   }
 }
 
-const PLAIN: Look = { hat: null, shootingStars: false, aurora: false, fever: false }
+const PLAIN: Look = { hat: null, shootingStars: false, aurora: false, fever: false, gift: null, dreams: [] }
 
 export function drawScene({
   columns,
@@ -474,7 +474,7 @@ export function drawScene({
   // 並びを先に決めて、行進の右にあいた「庭」に夢のプレゼントを飾る
   const spots = layout(W, paradeColumns, friends, character)
   const { yard } = spots
-  const dreams = (yard && look.dreams) || []
+  const dreams = yard ? look.dreams : []
   if (yard && dreams.includes('noBugs')) drawRainbow(g, yard, ground)
 
   // 空の星。遠くにあるので歩いても動かさない
@@ -523,7 +523,7 @@ export function drawScene({
   })
 
   // なでなで中や、贈り物をもらった直後は、何をしていてもとろけた顔になる（なでなでは手のほうへ傾く）
-  const gift = look.gift ?? null
+  const { gift } = look
   const pose = petted ?? (gift !== null ? { sway: 0 } : null)
   const feel: MoodKind = pose ? 'done' : mood
   const { eyes, mouth } = pose ? { eyes: 'happy' as const, mouth: 'smile' as const } : face(mood, tick)

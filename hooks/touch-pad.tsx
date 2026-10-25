@@ -4,7 +4,7 @@
 
 import type { ClientModule } from 'claude-code'
 
-import type { Character, Friend } from '../types'
+import type { Character, ClientMessage, Friend } from '../types'
 import { hitTest, layout, strokeMeter } from './scene'
 
 export type TouchProps = {
@@ -28,6 +28,7 @@ const TouchPad: ClientModule<TouchProps, number> = (props, surface) => {
   current = props
 
   if (surface.state === undefined) {
+    const send = (message: ClientMessage) => surface.post(message)
     surface.setState(0)
     surface.onPointer(ev => {
       const now = current
@@ -41,12 +42,12 @@ const TouchPad: ClientModule<TouchProps, number> = (props, surface) => {
         if (hit?.kind === 'leader') {
           isHolding = true
           meter.start(px)
-          surface.post({ kind: 'pet', x: px })
+          send({ kind: 'pet', x: px })
         } else if (hit?.kind === 'friend') {
-          surface.post({ kind: 'hug', id: hit.spot.id })
+          send({ kind: 'hug', id: hit.spot.id })
         }
       } else if (ev.type === 'move' && isHolding && ev.button === 'left') {
-        for (let n = meter.move(px); n > 0; n--) surface.post({ kind: 'stroke', x: px })
+        for (let n = meter.move(px); n > 0; n--) send({ kind: 'stroke', x: px })
       } else if (ev.type === 'up') {
         isHolding = false
       }

@@ -4,7 +4,7 @@
 
 import type { ClientModule } from 'claude-code'
 
-import type { Character, Friend, Look, MoodKind } from '../types'
+import type { Character, ClientMessage, Friend, Look, MoodKind } from '../types'
 import { drawScene, hitTest, layout, putHeart, strokeMeter, toRuns } from './scene'
 
 export type ViewProps = {
@@ -51,6 +51,7 @@ const ParadeView: ClientModule<ViewProps, number> = (props, surface) => {
   current = props
 
   if (surface.state === undefined) {
+    const send = (message: ClientMessage) => surface.post(message)
     surface.setState(0)
     surface.every(FRAME_MS, () => {
       const wasLively = isLively()
@@ -73,12 +74,12 @@ const ParadeView: ClientModule<ViewProps, number> = (props, surface) => {
           toHeart = 0
           petUntil = frame + PET_FRAMES
           addHeart(ev.x, ev.y)
-          surface.post({ kind: 'pet' })
+          send({ kind: 'pet' })
         } else if (hit?.kind === 'friend') {
           const friend = hit.spot
           hops.set(friend.id, frame + HOP_FRAMES)
           addHeart(friend.x + 4, 1)
-          surface.post({ kind: 'hug' })
+          send({ kind: 'hug' })
         } else {
           return
         }
@@ -95,7 +96,7 @@ const ParadeView: ClientModule<ViewProps, number> = (props, surface) => {
           toHeart = 0
           addHeart(ev.x, ev.y)
         }
-        for (let n = meter.move(ev.x); n > 0; n--) surface.post({ kind: 'stroke' })
+        for (let n = meter.move(ev.x); n > 0; n--) send({ kind: 'stroke' })
       } else if (ev.type === 'up') {
         isHolding = false
       } else {
