@@ -847,8 +847,8 @@ test('restore：1.4.3 のセーブ（星の無いころ）はそのまま読め�
     passiveAt: 77,
   }
   const g = restore(JSON.parse(JSON.stringify(saved)), newGame(0, 5_000))
-  // 1.6.0 で足した項目（飾る夢・しまった空の飾り）は「まだ選んでいない」で埋まる
-  expect(g).toEqual({ ...saved, shown: null, off: [], passiveAt: 5_000 } as Game)
+  // 1.6.0 で足した項目（飾る夢・しまった空の飾り）は「まだ選んでいない」で、1.10.0 の日記（#43）は空で埋まる
+  expect(g).toEqual({ ...saved, shown: null, off: [], diary: {}, totals: {}, bestStreak: 0, passiveAt: 5_000 } as Game)
   expect(starCount(g)).toBe(0)
   expect(starRate(g)).toBe(1)
 })
@@ -1174,7 +1174,8 @@ test('restore：1.6.0 のセーブ（飾りを選んである）は、♡・強�
     passiveAt: 55,
   }
   const g = restore(JSON.parse(JSON.stringify(saved)), newGame(0, 5_000))
-  expect(g).toEqual({ ...saved, passiveAt: 5_000 } as Game)
+  // 1.10.0 の日記（#43）は空で埋まる
+  expect(g).toEqual({ ...saved, diary: {}, totals: {}, bestStreak: 0, passiveAt: 5_000 } as Game)
   expect(shownDreams(g)).toEqual(['greenTests', 'telescope', 'house', 'noBugs'])
   expect(lookOf(g, 5_000, null)).toMatchObject({ aurora: false, shootingStars: true, dreams: ['greenTests', 'telescope', 'house', 'noBugs'], stars: 24 })
   // 新しい段：贈った ♡ 9 兆は「うんめいのふたり」。実績はまだ渡していないので、次に見たときに取れる

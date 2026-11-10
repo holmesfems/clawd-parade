@@ -3,8 +3,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
+import type { Character, DiaryKind, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
 import { bandView } from './band'
+import { dayOf, record, tidyDiary } from './diary'
 import type { Deal, Situation } from './game'
 import {
   HOOK_FRAME_MS,
@@ -121,7 +122,8 @@ async function saveNow($: EngineInterface, now: number) {
   // まだ保存が無い・壊れている項目は、前回読んだ（書いた）ものとみなす
   // store には compare-and-set が無いので、書く直前に読み、書いたあとに読み直して確かめる
   const theirs = restore(await $.store.get(GAME_KEY), base.game)
-  const written = mergeGame(theirs, base.game, g)
+  // 日記の古い日は、合わせたあとのものから消す（差分にしないので、ほかのセッションと同時に消しても負にならない）
+  const written = tidyDiary(mergeGame(theirs, base.game, g), dayOf(now))
   const writtenPets = (Number(await $.store.get(PETS_KEY)) || 0) + p.total - base.pets
   await $.store.set(GAME_KEY, written)
   await $.store.set(PETS_KEY, writtenPets)
@@ -141,6 +143,13 @@ async function saveNow($: EngineInterface, now: number) {
     await update($, holding, () => ({ id, from: now }))
   }
   await update($, pets, one => ({ ...one, total: total + one.total - p.total }))
+}
+
+// きょうの日記（#43）に数を足す。日は時計の今の日付（PC のタイムゾーン）で、/parade debug 12/25 の日付は使わない。
+// 数だけを渡す（ツールの名前やプロンプトは渡さない）。読み込む前（passiveAt が 0）は数えない
+async function jot($: EngineInterface, add: Partial<Record<DiaryKind, number>>) {
+  const day = dayOf(await $.clock.now())
+  await update($, game, g => (g.passiveAt === 0 ? g : record(g, day, add)))
 }
 
 // 放置収入は、開いているセッションのどれか 1 つが払う。最後に払った時刻を store で分け合う
@@ -192,6 +201,7 @@ async function pet($: EngineInterface, kind: TouchKind, touch: { hand?: number; 
     return touched.game
   })
   if (isFeverStart) $.ui.toast('★ フィーバー！ ♡ 3 倍！ ★')
+  await jot($, { pets: 1 })
   await award($, now, after.total, at)
 }
 
@@ -395,8 +405,9 @@ export const register: Register = on => {
 
     const ran = await next(e)
 
-    // ツールを使うたびに、おだちんの ♡
+    // ツールを使うたびに、おだちんの ♡。日記には回数だけ（仲間が使ったぶんも）
     await update($, game, g => (g.passiveAt === 0 ? g : toolTip(g)))
+    await jot($, { tools: 1 })
     const [m, w] = await Promise.all([read($, mood), read($, work)])
     if (w.isRunning && ASKING.includes(m.kind)) await setMood($, 'working')
 
@@ -421,6 +432,7 @@ export const register: Register = on => {
       }
       await update($, friends, all => [...all.filter(f => f.id !== friend.id), friend])
       await update($, work, w => ({ ...w, helpers: w.helpers + 1 }))
+      await jot($, { agents: 1 })
     }
 
     return spawned
@@ -443,6 +455,8 @@ export const register: Register = on => {
       asksBack(e.answer) ? 'waiting' : 'done'
     await update($, work, w => ({ ...w, durationMs: e.durationMs, isRunning: false }))
     await update($, mood, () => ({ kind, at: now }))
+    // 働いた時間は帯の「1:23 でおわり」と同じ、ターンの始めから終わりまで。日をまたいだターンは、終わった日にまとめて数える
+    await jot($, { turns: 1, workMs: e.durationMs })
     if (kind === 'aborted') {
       await update($, friends, all => all.map(f => (f.doneAt === null ? { ...f, doneAt: now } : f)))
     }
@@ -500,7 +514,10 @@ export const register: Register = on => {
   // なでなでショップ（/parade shop で開くパネル）
   on('ui.render', { component: 'Pane', requestId: SHOP }, async ($, e) => {
     const [g, w, list, p, who] = await Promise.all([read($, game), read($, work), read($, friends), read($, pets), read($, character)])
+    // 日記のきょうも、時計の今の日付（/parade debug 12/25 の日付ではない）
+    const today = dayOf(await $.clock.now())
     return shopView($.ui.resolve(e), {
+      today,
       game: g,
       at: situationOf(w, list),
       petsTotal: p.total,

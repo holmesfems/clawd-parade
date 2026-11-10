@@ -73,6 +73,9 @@ export function newGame(hearts: number, now: number): Game {
     favorite: null,
     shown: null,
     off: [],
+    diary: {},
+    totals: {},
+    bestStreak: 0,
     passiveAt: now,
   }
 }
@@ -103,6 +106,9 @@ export function restore(saved: unknown, fallback: Game): Game {
     // 文字列だけを残す。知らない id（新しい版の夢かもしれない）は持ち回り、絵を決めるとき（shownDreams）に見ないだけ
     shown: saved.shown === null ? null : ((stringsOf(saved.shown) as DreamId[] | undefined) ?? fallback.shown),
     off: (stringsOf(saved.off) as CosmeticId[] | undefined) ?? fallback.off,
+    // 日記は「日付.数えるもの」の鍵の数だけを残す（新しい版の数えるものは持ち回る。数でないもの・形の違う鍵は捨てる）
+    diary: diaryOf(saved.diary) ?? fallback.diary,
+    totals: countsOf(saved.totals) ?? fallback.totals,
     passiveAt: fallback.passiveAt,
   }
 }
@@ -123,6 +129,7 @@ const COUNTS: Record<Exclude<CountKey, 'v' | 'passiveAt'>, true> = {
   wakes: true,
   given: true,
   happyUntil: true,
+  bestStreak: true,
 }
 const COUNT_KEYS = Object.keys(COUNTS) as (keyof typeof COUNTS)[]
 
@@ -146,6 +153,20 @@ const stringsOf = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.fi
 const countsOf = (v: unknown): Record<string, number> | undefined =>
   isRecord(v) ? Object.fromEntries(Object.entries(v).filter((e): e is [string, number] => isFiniteNumber(e[1]) && e[1] >= 0)) : undefined
 
+// 日記の鍵：「PC のタイムゾーンの日付.数えるもの」（'2026-11-10.tools'）。数えるものは英字だけ
+export const DIARY_KEY = /^\d{4}-\d{2}-\d{2}\.[A-Za-z]+$/
+
+// 日記として読める record なら、鍵の形が合い、0 以上の数の項目だけを残す。
+// 保存には数と日付の鍵しか入らないこと（文やファイルの名前が紛れこまないこと）を、読むときにも守る
+const diaryOf = (v: unknown): Record<string, number> | undefined => {
+  const counts = countsOf(v)
+  return counts && Object.fromEntries(Object.entries(counts).filter(([k]) => DIARY_KEY.test(k)))
+}
+
+// 数の表の値を上限に収める（2 つのセッションの足し合わせが上限を超えても、保存には上限までしか書かない）
+const capCounts = <T extends Counts>(c: T): T =>
+  Object.fromEntries(Object.entries(c).map(([k, n]) => [k, Math.min(HEART_CAP, n ?? 0)])) as T
+
 // { id, at } の形で、id が合っているか
 const isStamp = <T>(v: unknown, isId: (id: unknown) => id is T): v is { id: T; at: number } =>
   isRecord(v) && isId(v.id) && isFiniteNumber(v.at)
@@ -168,7 +189,14 @@ export function mergeGame(theirs: Game, base: Game, mine: Game): Game {
   for (const k of MERGE_KEYS) merged[k] = mergeField(MERGE[k], theirs[k], base[k], mine[k])
   const out = settle(merged as Game, theirs, base, mine)
   // 大きな数の足し引きで上限を超えても、保存には上限までしか書かない
-  return { ...out, hearts: clampHearts(out.hearts), earned: clampHearts(out.earned), given: clampHearts(out.given) }
+  return {
+    ...out,
+    hearts: clampHearts(out.hearts),
+    earned: clampHearts(out.earned),
+    given: clampHearts(out.given),
+    diary: capCounts(out.diary),
+    totals: capCounts(out.totals),
+  }
 }
 
 // 2 つのセッションが base からほぼ同時に買ったとき、払った ♡ を本当の値段にそろえる。
@@ -258,6 +286,13 @@ const MERGE: { [K in keyof Game]-?: PolicyFor<Game[K]> } = {
   // 飾る夢のプレゼントと、しまった空の飾りも、あとから選んだほう（選び直した一式をまるごと）
   shown: 'latest',
   off: 'latest',
+  // きょうの日記（#43）：同じ日の数は、セッションごとに増えたぶんを足し合う（二重にも数えず、落としもしない）。
+  // 30 日より前の日を消すのは、差分ではなく、合わせたあとの保存に対して（hooks/diary.ts の tidyDiary）。
+  // 消した鍵は、どのセッションでも base と mine が同じになるので差分が 0 で、よみがえらず、負にもならない
+  diary: 'counts',
+  totals: 'counts',
+  // いちばん長くつづいた日数は、大きいほう
+  bestStreak: 'max',
   passiveAt: 'mine',
 }
 const MERGE_KEYS = Object.keys(MERGE) as (keyof Game)[]
@@ -706,6 +741,12 @@ export type Facts = { game: Game; pets: number; rate: number }
 
 type AchievementSpec = { id: AchievementId; name: string; about: string; test: (f: Facts) => boolean }
 
+// 日記のどれかの日に、kind を n 回以上数えたか（30 日より前の日は消えているが、取った実績は残る）
+const someDay = (g: Game, kind: string, n: number) =>
+  Object.entries(g.diary).some(([k, v]) => k.endsWith(`.${kind}`) && (v ?? 0) >= n)
+
+const totalOf = (g: Game, kind: keyof Game['totals']) => g.totals[kind] ?? 0
+
 // その夢のプレゼントを贈ったか（しまってあっても）
 const hasGiven = (g: Game, id: DreamId) => (g.gifts[id] ?? 0) > 0
 
@@ -761,6 +802,14 @@ export const ACHIEVEMENTS = [
   { id: 'dreamAirship', name: '空のたびびと', about: '空飛ぶ船を贈る', test: f => hasGiven(f.game, 'airship') },
   { id: 'dreamStatue', name: 'りっぱな銅像', about: 'Clawd の銅像を贈る', test: f => hasGiven(f.game, 'statue') },
   { id: 'dreamTwinStars', name: 'ならんだふたつ星', about: 'ふたりの星を贈る', test: f => hasGiven(f.game, 'twinStars') },
+  // 1.10.0（#43）：きょうの日記。つづけた日数は、いちばん長くつづいた日数で見る（日をまたいで見直しても消えない）。♡ はもらえない
+  { id: 'streak3', name: 'みっかぼうずじゃない', about: '3 日つづけていっしょに働く', test: f => f.game.bestStreak >= 3 },
+  { id: 'streak7', name: 'いっしゅうかんいっしょ', about: '7 日つづけていっしょに働く', test: f => f.game.bestStreak >= 7 },
+  { id: 'streak30', name: 'ひとつきずっといっしょ', about: '30 日つづけていっしょに働く', test: f => f.game.bestStreak >= 30 },
+  { id: 'tools100', name: 'どうぐの達人', about: '1 日にツールを 100 回使う', test: f => someDay(f.game, 'tools', 100) },
+  { id: 'agents100', name: 'なかまがいっぱい', about: '仲間（サブエージェント）が合わせて 100 匹来る', test: f => totalOf(f.game, 'agents') >= 100 },
+  { id: 'hours100', name: '100 時間いっしょ', about: '合わせて 100 時間いっしょに働く', test: f => totalOf(f.game, 'workMs') >= 100 * 3_600_000 },
+  { id: 'turns1000', name: 'ながいつきあい', about: 'ターンを合わせて 1,000 回終える', test: f => totalOf(f.game, 'turns') >= 1_000 },
 ] as const satisfies readonly AchievementSpec[]
 
 export type Achievement = (typeof ACHIEVEMENTS)[number]

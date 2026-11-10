@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ACHIEVEMENTS } from '../hooks/game'
+import { ACHIEVEMENTS, DIARY_KEY } from '../hooks/game'
 import {
   ALL_ACHIEVEMENTS,
   boot,
@@ -858,4 +858,80 @@ test('複数のセッション：放置収入を書いた直後に別のセッ�
   await clock.advance(3_000)
   await endSession($)
   expect((held.get('game') as { hearts: number }).hearts).toBe(0)
+})
+
+// ---- きょうの日記（#43） ----
+
+const HOUR = 3_600_000
+
+test('きょうの日記：ターン・ツール・仲間・なでなでがショップに出て、別のセッションのぶんも届く。保存には数しか入らない（#43）', async ($, on) => {
+  const { clock, held } = boot(on, { store: veteran() })
+  on('tool.call', async () => ({ result: {} }))
+  await startSession($, 'desktop')
+  // 絵のために選んだ日（12/25）は、日記の日付には使わない。テストの時計は 1970/1/1（木）
+  await runParade($, 'debug 12/25')
+  await clock.advance(400)
+
+  await $.turn.start({ text: 'ひみつのプロンプト', turnId: 't1' })
+  await $.tool.call({ tool: 'Bash', command: 'cat ひみつのファイル.txt' })
+  await spawnFriend($, 'Explore', 'ひみつの仕事')
+  await $.tool.call({ tool: 'Read', file_path: '/ひみつ/ファイル.ts', agentId: 'agent-1' })
+  await completeTurn($, { turnId: 'x', agentId: 'agent-1' })
+  await completeTurn($, { turnId: 't1', answer: 'できました', durationMs: 2 * HOUR + 10 * 60_000 })
+  const band = await mountTouchBand($)
+  await petLeader(band, clock, 2)
+  await band.unmount()
+
+  const shop = await mountShop($, 200)
+  expect(await textOf(shop, /Clawd「きょうは 2 時間 10 分いっしょに働いたね。仲間も 1 匹来てくれた！」/)).toBeDefined()
+  expect(await textOf(shop, /はたらいた 2 時間 10 分 · ターン 1 回 · ツール 2 回 · 仲間 1 匹 · なでなで 2 回/)).toBeDefined()
+  expect(await textOf(shop, /1 日つづけていっしょ · いちばん長くて 1 日/)).toBeDefined()
+  expect(await textOf(shop, /これまで いっしょに働いた 2 時間 10 分 · ターン 1 回 · ツール 2 回 · 仲間 1 匹/)).toBeDefined()
+  // 7 日の棒：きょう（木）がいちばん高い
+  const week = await shop.find({ key: 'diary-week' })
+  expect(week).toBeDefined()
+  expect(await textOf(shop, /^██$/)).toBeDefined()
+  expect(await textOf(shop, /^木$/)).toBeDefined()
+
+  // 別のセッションが同じ日に 1 ターン（30 分）働き、ツールを 5 回使って保存した
+  const other = held.get('game') as { diary?: Record<string, number>; totals?: Record<string, number> }
+  const add = (rec: Record<string, number> | undefined, more: Record<string, number>) =>
+    Object.fromEntries([...new Set([...Object.keys(rec ?? {}), ...Object.keys(more)])].map(k => [k, (rec?.[k] ?? 0) + (more[k] ?? 0)]))
+  held.set('game', {
+    ...other,
+    diary: add(other.diary, { '1970-01-01.turns': 1, '1970-01-01.tools': 5, '1970-01-01.workMs': 30 * 60_000 }),
+    totals: add(other.totals, { turns: 1, tools: 5, workMs: 30 * 60_000 }),
+  })
+  await clock.advance(6_000)
+  expect(await textOf(shop, /はたらいた 2 時間 40 分 · ターン 2 回 · ツール 7 回 · 仲間 1 匹 · なでなで 2 回/)).toBeDefined()
+  expect(await textOf(shop, /これまで いっしょに働いた 2 時間 40 分 · ターン 2 回 · ツール 7 回/)).toBeDefined()
+
+  // 保存した日記には、日付.数えるもの の鍵と数しか無い。プロンプト・ファイル・ツール・仲間の名前はどこにも書かない
+  const saved = held.get('game') as { diary: Record<string, unknown>; totals: Record<string, unknown> }
+  expect(saved.diary).toEqual({
+    '1970-01-01.turns': 2,
+    '1970-01-01.tools': 7,
+    '1970-01-01.workMs': 2 * HOUR + 40 * 60_000,
+    '1970-01-01.agents': 1,
+    '1970-01-01.pets': 2,
+  })
+  for (const [k, v] of Object.entries(saved.diary)) {
+    expect(DIARY_KEY.test(k)).toBe(true)
+    expect(typeof v).toBe('number')
+  }
+  for (const v of Object.values(saved.totals)) expect(typeof v).toBe('number')
+  expect(JSON.stringify([...held])).not.toMatch(/ひみつ|Bash|Read|Explore|できました/)
+})
+
+test('きょうの日記：日をまたいだターンは、終わった日に数える（#43）', async ($, on) => {
+  // 1970/1/1 の 23:59:59（テストの時計は UTC）
+  const { clock, held } = boot(on, { now: 24 * HOUR - 1_000, store: veteran() })
+  await startSession($, 'desktop')
+  await $.turn.start({ text: 'よる', turnId: 't1' })
+  await clock.advance(2_000)
+  await completeTurn($, { turnId: 't1', durationMs: 2_000 })
+  const shop = await mountShop($, 200)
+  expect(await textOf(shop, /きょうは 1 回いっしょにお話ししたね/)).toBeDefined()
+  await endSession($)
+  expect((held.get('game') as { diary: Record<string, number> }).diary).toEqual({ '1970-01-02.turns': 1, '1970-01-02.workMs': 2_000 })
 })

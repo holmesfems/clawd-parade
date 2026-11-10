@@ -132,6 +132,21 @@ export type AchievementId =
   | 'dreamAirship'
   | 'dreamStatue'
   | 'dreamTwinStars'
+  // 1.10.0（#43）：きょうの日記と、つづけて使った日数
+  | 'streak3'
+  | 'streak7'
+  | 'streak30'
+  | 'tools100'
+  | 'agents100'
+  | 'hours100'
+  | 'turns1000'
+
+// きょうの日記（#43）で、日ごとに数えるもの：Claude が働いた時間（ミリ秒）、終わったターン、ツールを使った回数、
+// 来てくれた仲間（サブエージェント）、なでた回数（ぎゅっも）。数だけを持ち、何をしたか（文やファイルやツールの名前）は持たない
+export type DiaryKind = 'workMs' | 'turns' | 'tools' | 'agents' | 'pets'
+
+// これまでの合計を持つもの。なでた回数の合計は、前からある store の pets がそれなので、ここには入れない
+export type TotalKind = Exclude<DiaryKind, 'pets'>
 
 export type Game = {
   // 保存形式の版。v の無い保存（1.1.2 まで）は v1 として読む
@@ -167,6 +182,14 @@ export type Game = {
   shown: DreamId[] | null
   // しまってある、買った空の飾り（流れ星・オーロラ）。入っていなければ出す
   off: CosmeticId[]
+  // きょうの日記（#43）。'2026-11-10.tools' のように「PC のタイムゾーンの日付.数えるもの」を鍵にした数だけの表で、
+  // 30 日より前の日は保存するときに消す。'2026-10-11.streak' だけは、消した日までつづいていた日数（つづけて使った日数を、
+  // 30 日より長くても数えられるように残す。hooks/diary.ts の pruneDiary）
+  diary: Partial<Record<string, number>>
+  // これまでの合計（日記を消しても減らない）
+  totals: Partial<Record<TotalKind, number>>
+  // いちばん長くつづけて使った日数（日記を消しても残るよう、この数だけは持つ）
+  bestStreak: number
   // 最後に放置収入を足した時刻。0 はこのセッションでまだ読み込んでいない
   passiveAt: number
 }

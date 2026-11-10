@@ -4,6 +4,7 @@ import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
 import type { Character, Game } from '../types'
 import type { Deal, Situation } from './game'
+import { countsText, dayCounts, diaryLine, formatDuration, streakOf, weekBars } from './diary'
 
 import {
   ACHIEVEMENTS,
@@ -52,6 +53,8 @@ export type ShopInput = {
   at: Situation
   petsTotal: number
   character: Character
+  // きょうの日付（PC のタイムゾーン。きょうの日記で使う）
+  today: string
   // ボタンを押したときの取り引き（買う・贈る・かぶる・飾る。できなければ断られる）。label はできたときのトースト
   buy: (label: string, deal: Deal) => () => Promise<void>
 }
@@ -59,7 +62,7 @@ export type ShopInput = {
 // ショップを描く（ui は $.ui.resolve(e) の部品）
 export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderElement {
   const { Box, Text, Button } = ui
-  const { game: g, at, character: who, buy } = input
+  const { game: g, at, character: who, today, buy } = input
   // 放置収入は 1 秒ごとに足されるので、その時刻を「いま」とみなす
   const now = g.passiveAt
 
@@ -78,6 +81,10 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
   // 飾っている夢のプレゼントと、場所ごとの数
   const shown = shownDreams(g)
   const used = slotsUsed(g)
+  // きょうの日記（#43）
+  const streak = streakOf(g.diary, today)
+  const best = Math.max(g.bestStreak, streak)
+  const total = (kind: keyof Game['totals']) => g.totals[kind] ?? 0
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -243,6 +250,28 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
           </Box>
         )
       })}
+
+      {header('きょうの日記')}
+      <Text color="#ff9ec7">
+        {who === 'neko' ? 'ねこ' : 'Clawd'}「{diaryLine(g.diary, today)}」
+      </Text>
+      <Text dimColor>{countsText(dayCounts(g.diary, today))}</Text>
+      {/* 7 日ぶんの働いた時間（古い日 → きょう）。棒と曜日を 1 日ずつ縦に並べ、文字の幅が違っても曜日の上に棒が立つようにする */}
+      <Box key="diary-week" columnGap={1}>
+        {weekBars(g.diary, today).map(d => (
+          <Box key={`diary-${d.day}`} flexDirection="column" alignItems="center">
+            <Text {...(d.workMs > 0 ? { color: '#ff6b9a' } : { dimColor: true })}>{d.bar.repeat(2)}</Text>
+            <Text {...(d.day === today ? { bold: true } : { dimColor: true })}>{d.weekday}</Text>
+          </Box>
+        ))}
+      </Box>
+      <Text dimColor>
+        {streak > 0 ? `${streak} 日つづけていっしょ` : 'きょう働けば 1 日目'} · いちばん長くて {best} 日
+      </Text>
+      <Text dimColor>
+        これまで いっしょに働いた {formatDuration(total('workMs'))} · ターン {formatHearts(total('turns'))} 回 · ツール{' '}
+        {formatHearts(total('tools'))} 回 · 仲間 {formatHearts(total('agents'))} 匹
+      </Text>
 
       {header('きろく')}
       <Text dimColor>
