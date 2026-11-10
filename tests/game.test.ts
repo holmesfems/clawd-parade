@@ -8,10 +8,12 @@ import {
   COMBO_WINDOW_MS,
   FEVER_COMBO,
   FEVER_MS,
+  HEART_CAP,
   DREAMS,
   TREATS,
   UPGRADES,
   affectionOf,
+  accrue,
   buyCosmetic,
   buyUpgrade,
   formatHearts,
@@ -28,6 +30,7 @@ import {
   pickFavorite,
   priceOf,
   restore,
+  toolTip,
   touchGame,
   treatOf,
   unlocked,
@@ -400,6 +403,59 @@ test('formatRate：100 未満は小数 1 桁、それ以上は formatHearts', ()
   expect(formatRate(12_345)).toBe('1.23万')
 })
 
+test('formatHearts：兆・京・垓と、1e24 以上の指数（境目も）', () => {
+  const table: [number, string][] = [
+    [9_999e8, '9999億'],
+    [1e12, '1兆'],
+    [1234e12, '1234兆'],
+    [12.5e12, '12.5兆'],
+    [9999e12, '9999兆'],
+    [1e16, '1京'],
+    [1.5e16, '1.5京'],
+    [9999e16, '9999京'],
+    [1e20, '1垓'],
+    [123e20, '123垓'],
+    [9999e20, '9999垓'],
+    [1e24, '1e24'],
+    [1.234e24, '1.23e24'],
+    [9.999e24, '1e25'],
+    [1.5e100, '1.5e100'],
+    [HEART_CAP, '1e300'],
+  ]
+  for (const [n, text] of table) expect(formatHearts(n)).toBe(text)
+  // 負（借金）は - をつけたまま
+  expect(formatHearts(-1234e12)).toBe('-1234兆')
+  expect(formatHearts(-1.234e24)).toBe('-1.23e24')
+  // 上限より大きい数や Infinity、NaN でも壊れない
+  expect(formatHearts(Infinity)).toBe('1e300')
+  expect(formatHearts(-Infinity)).toBe('-1e300')
+  expect(formatHearts(NaN)).toBe('0')
+})
+
+test('formatHearts：どんな大きさでも、今までの最長（4 桁 + 単位）を超えない', () => {
+  for (let e = 0; e <= 300; e++) {
+    for (const m of [1, 1.5, 9.99, 9.9999, 99.9, 999.9, 9999]) {
+      const text = formatHearts(m * 10 ** e)
+      // 4 桁 + 単位（5 字）か、最長の指数 1.23e300（8 字）
+      expect(text.length).toBeLessThanOrEqual(8)
+    }
+  }
+})
+
+test('formatHearts：1 兆より小さい数の表示は変わらない', () => {
+  expect(formatHearts(9_999)).toBe('9,999')
+  expect(formatHearts(99_999_999)).toBe('9999万')
+  expect(formatHearts(100_000_000)).toBe('1億')
+  expect(formatHearts(999_999_999_999)).toBe('9999億')
+})
+
+test('formatRate：大きな ♡/秒も formatHearts と同じ単位で', () => {
+  expect(formatRate(1e12)).toBe('1兆')
+  expect(formatRate(2.5e16)).toBe('2.5京')
+  expect(formatRate(1e24)).toBe('1e24')
+  expect(formatRate(99.94)).toBe('99.9')
+})
+
 test('affectionOf：贈った ♡ でなかよし度が上がり、次の段を教える', () => {
   expect(affectionOf(0)).toEqual({ name: 'しりあい', next: { name: 'ともだち', at: 300 } })
   expect(affectionOf(300)).toEqual({ name: 'ともだち', next: { name: 'なかよし', at: 3_000 } })
@@ -515,3 +571,96 @@ test('giveGift：夢のプレゼントは 1 回きりで、ごきげんにはな
   expect(giveGift(dream, 'greenTests', 3_000)).toEqual({ ok: false, reason: '全部グリーンのテスト はもう飾ってあるよ' })
   expect(giveGift(game({ hearts: 10 }), 'cookie', 2_000)).toEqual({ ok: false, reason: '♡ が 40 足りないよ' })
 })
+
+// ---- とても大きな ♡ ----
+
+const BIG = [1e12, 1e16, 1e20]
+
+test('大きな ♡：なでると増え、強化も買える', () => {
+  for (const hearts of BIG) {
+    const g = game({ hearts, earned: hearts })
+    const petted = touchGame(g, 10_000, resting, pet).game
+    // 1垓 では +1 ほどの稼ぎは丸めで入らない（下のテスト）ので、減らないことまで
+    expect(petted.hearts).toBeGreaterThanOrEqual(hearts)
+    if (hearts < 1e20) expect(petted.hearts).toBeGreaterThan(hearts)
+    expect(petted.earned).toBeGreaterThanOrEqual(hearts)
+    const next = bought(buyUpgrade(g, 'glove'))
+    expect(next.hearts).toBe(hearts - 15)
+    expect(next.levels.glove).toBe(1)
+  }
+})
+
+test('大きな ♡：保存して読み込んでも、そのまま戻る', () => {
+  for (const hearts of [...BIG, 1e24, HEART_CAP]) {
+    const g = game({ hearts, earned: hearts, given: hearts })
+    const back = restore(JSON.parse(JSON.stringify(g)), newGame(7, 5_000))
+    expect(back.hearts).toBe(hearts)
+    expect(back.earned).toBe(hearts)
+    expect(back.given).toBe(hearts)
+  }
+})
+
+test('大きな ♡：2 つのセッションの足し合わせも有限で、差分が足される', () => {
+  for (const hearts of BIG) {
+    const base = game({ hearts, earned: hearts })
+    const theirs = { ...base, hearts: hearts + hearts / 2, earned: hearts + hearts / 2 }
+    const mine = { ...base, hearts: hearts + hearts / 4, earned: hearts + hearts / 4 }
+    const merged = mergeGame(theirs, base, mine)
+    expect(merged.hearts).toBe(hearts * 1.75)
+    expect(merged.earned).toBe(hearts * 1.75)
+    // 強化を両方で買ったときの払い戻しも壊れない
+    const both = mergeGame(bought(buyUpgrade(base, 'glove')), base, bought(buyUpgrade(base, 'glove')))
+    expect(Number.isFinite(both.hearts)).toBe(true)
+    expect(both.levels.glove).toBe(2)
+  }
+})
+
+test('上限：上限で足しても有限のまま、上限を超えない', () => {
+  const g = game({ hearts: HEART_CAP, earned: HEART_CAP, given: HEART_CAP, levels: { glove: 5, toolTip: 3, fan: 4 }, passiveAt: 0 })
+  const petted = touchGame(g, 10_000, resting, pet)
+  expect(petted.game.hearts).toBe(HEART_CAP)
+  expect(petted.game.earned).toBe(HEART_CAP)
+  expect(accrue(g, 1_000, { isWorking: true, workers: 3 }).hearts).toBe(HEART_CAP)
+  expect(payIdle(g, 60_000, 1_000).hearts).toBe(HEART_CAP)
+  expect(toolTip(g).hearts).toBe(HEART_CAP)
+  const gift = giveGift(g, 'cookie', 1_000)
+  expect(gift.ok && gift.game.given).toBe(HEART_CAP)
+  // 足す量そのものが Infinity でも、有限のまま
+  const wild = touchGame(game({ levels: { glove: 1e308 } }), 10_000, resting, pet)
+  expect(wild.game.hearts).toBe(HEART_CAP)
+  expect(Number.isFinite(wild.gained)).toBe(true)
+  // 上限どうしの合流も、上限まで
+  const merged = mergeGame({ ...g, hearts: HEART_CAP }, game(), { ...g, hearts: HEART_CAP })
+  expect(merged.hearts).toBe(HEART_CAP)
+  expect(merged.earned).toBe(HEART_CAP)
+  expect(merged.given).toBe(HEART_CAP)
+  // 上限のままでも、保存から戻せる
+  const back = restore(JSON.parse(JSON.stringify(petted.game)), newGame(7, 5_000))
+  expect(back.hearts).toBe(HEART_CAP)
+})
+
+test('上限：高すぎる Lv の値段も有限で、買えない', () => {
+  for (const u of UPGRADES) {
+    expect(Number.isFinite(priceOf(u, 1e6))).toBe(true)
+    expect(priceOf(u, 1e6)).toBe(HEART_CAP)
+  }
+  const g = game({ hearts: HEART_CAP, levels: { glove: 1e6 } })
+  expect(buyUpgrade(g, 'glove').ok).toBe(false)
+  // 買えない理由も、大きな数のまま読める
+  const poor = buyUpgrade(game({ levels: { glove: 1e6 } }), 'glove')
+  expect(!poor.ok && poor.reason).toBe('♡ が 1e300 足りないよ')
+})
+
+test('2^53（約 9007 兆）以上では、+1 ♡ ほどの小さな稼ぎは丸めで消える（そのまま受け入れる）', () => {
+  const limit = 2 ** 53
+  expect(formatHearts(limit)).toBe('9007兆')
+  // 放置で ♡ +1/秒（応援うちわ Lv5）の 1 秒ぶん
+  const rich = (hearts: number) => game({ hearts, earned: hearts, levels: { fan: 5 } })
+  // +1 は、2^53 より手前なら入る
+  expect(payIdle(rich(limit - 2), 1_000, 1_000).hearts).toBe(limit - 1)
+  // 2^53 では丸めで消える
+  expect(payIdle(rich(limit), 1_000, 1_000).hearts).toBe(limit)
+  // 2^53 を超えても、刻み（2）以上の稼ぎは入る
+  expect(payIdle(rich(limit), 2_000, 1_000).hearts).toBe(limit + 2)
+})
+

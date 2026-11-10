@@ -12,6 +12,18 @@ const FEVER_RATE = 3
 // 放置収入は 1 分ぶんまで（別のセッションのあいだに貯まったりはしない）
 const PASSIVE_CAP_MS = 60_000
 
+// ♡ の上限。double は超えると Infinity になり、保存したときに有限の数でなくなって restore が初期値に戻してしまう。
+// そうなる手前で止める（hearts・earned・given はこの範囲に収める。借金は -HEART_CAP まで）。
+// なお 2^53（約 9007 兆）を超えると double の刻みが 1 より大きくなり、+1 ♡ ほどの小さな稼ぎは丸めで消える。
+// 桁がそこまで大きいときの ♡ には誤差が出るが、遊びには影響しないのでそのままにしている
+export const HEART_CAP = 1e300
+
+// 上限（と下限）に収める。NaN（Infinity どうしの引き算など）は 0 にして、保存を壊さない
+const clampHearts = (n: number) => (Number.isNaN(n) ? 0 : Math.max(-HEART_CAP, Math.min(HEART_CAP, n)))
+
+// ♡ を稼いだ（hearts と earned に同じだけ足す）。足す場所はここを通して、上限を 1 か所で守る
+const earn = (g: Game, gained: number): Game => ({ ...g, hearts: clampHearts(g.hearts + gained), earned: clampHearts(g.earned + gained) })
+
 // 保存形式の版。形を変えたら上げて、restore で古い形を読めるようにする。
 // 古い版のセッションが同時に開いていることがあるので、今ある項目の型は変えずに、新しい項目を足す
 // （古い版は型の合わない項目を初期値に戻してしまうが、知らない項目は残す）
@@ -146,7 +158,9 @@ export function mergeGame(theirs: Game, base: Game, mine: Game): Game {
   // 知らない項目（新しい版が書いたもの）は、このセッションでは変えないので向こうの
   const merged: Record<string, unknown> = unknownOf(theirs)
   for (const k of MERGE_KEYS) merged[k] = mergeField(MERGE[k], theirs[k], base[k], mine[k])
-  return settle(merged as Game, theirs, base, mine)
+  const out = settle(merged as Game, theirs, base, mine)
+  // 大きな数の足し引きで上限を超えても、保存には上限までしか書かない
+  return { ...out, hearts: clampHearts(out.hearts), earned: clampHearts(out.earned), given: clampHearts(out.given) }
 }
 
 // 2 つのセッションが base からほぼ同時に買ったとき、払った ♡ を本当の値段にそろえる。
@@ -303,7 +317,8 @@ const short = (price: number, g: Game) => no(`♡ が ${formatHearts(price - g.h
 
 export const levelOf = (g: Game, id: UpgradeId) => g.levels[id] ?? 0
 
-export const priceOf = (u: Upgrade, level: number) => Math.ceil(u.base * u.growth ** level)
+// 高い Lv では growth ** level が Infinity になるので、上限で止める（上限の値段は買えない。buyUpgrade を見る）
+export const priceOf = (u: Upgrade, level: number) => Math.min(HEART_CAP, Math.ceil(u.base * u.growth ** level))
 
 export const isMaxed = (u: Upgrade, level: number) => u.max !== undefined && level >= u.max
 
@@ -313,7 +328,8 @@ export function buyUpgrade(g: Game, id: UpgradeId): Dealt {
   const level = levelOf(g, id)
   if (isMaxed(u, level)) return no(`${u.name} はもう最大だよ`)
   const price = priceOf(u, level)
-  if (g.hearts < price) return short(price, g)
+  // 上限で止めた値段は本当の値段ではないので、♡ がちょうど上限でも買えない
+  if (g.hearts < price || price >= HEART_CAP) return short(price, g)
   return ok({ ...g, hearts: g.hearts - price, levels: { ...g.levels, [id]: level + 1 } })
 }
 
@@ -397,7 +413,7 @@ export function giveGift(g: Game, id: GiftId, now: number): Dealt {
   return ok({
     ...g,
     hearts: g.hearts - gift.price,
-    given: g.given + gift.price,
+    given: clampHearts(g.given + gift.price),
     gifts: { ...g.gifts, [id]: (g.gifts[id] ?? 0) + 1 },
     happyUntil: happyMs > 0 ? Math.max(now, g.happyUntil) + happyMs : g.happyUntil,
     lastGift: { id, at: now },
@@ -471,15 +487,15 @@ export function touchGame(g: Game, now: number, at: Situation, touch: Touch): { 
     hugs: g.hugs + (touch.kind === 'hug' ? 1 : 0),
     wakes: g.wakes + (touch.wasSleeping ? 1 : 0),
   }
-  const gained = perPet(next, at, now, combo)
-  return { game: { ...next, hearts: next.hearts + gained, earned: next.earned + gained }, gained, isFeverStart }
+  const gained = clampHearts(perPet(next, at, now, combo))
+  return { game: earn(next, gained), gained, isFeverStart }
 }
 
 // 前回から今までのお給料を足す（放置のぶんは payIdle で、セッションをまたいで 1 回だけ払う）
 export function accrue(g: Game, now: number, at: Situation): Game {
   const seconds = Math.min(PASSIVE_CAP_MS, Math.max(0, now - g.passiveAt)) / 1000
   const gained = workPerSecond(g, at, now) * seconds
-  return { ...g, hearts: g.hearts + gained, earned: g.earned + gained, passiveAt: now }
+  return { ...earn(g, gained), passiveAt: now }
 }
 
 // どのセッションかが最後に放置収入を払った時刻から、いま払うぶん（ms）。
@@ -491,12 +507,12 @@ export function idleDue(paidAt: number, now: number): number {
 
 export function payIdle(g: Game, ms: number, now: number): Game {
   const gained = (idlePerSecond(g, now) * ms) / 1000
-  return gained === 0 ? g : { ...g, hearts: g.hearts + gained, earned: g.earned + gained }
+  return gained === 0 ? g : earn(g, gained)
 }
 
 export function toolTip(g: Game): Game {
   const gained = 3 * levelOf(g, 'toolTip')
-  return gained === 0 ? g : { ...g, hearts: g.hearts + gained, earned: g.earned + gained }
+  return gained === 0 ? g : earn(g, gained)
 }
 
 // コンボが途切れていたら 0 に戻す（表示用）
@@ -585,13 +601,28 @@ export function lookOf(g: Game, now: number, holding: Holding): Look {
   }
 }
 
-// 1 万未満は 3 桁区切り、それ以上は「万」「億」で。負（借金）は - をつける
+// 大きい順の単位。どれも 4 桁まで（9999億 の次は 1兆）で、帯の狭い ♡ の行に収まる長さを保つ
+const UNITS = [
+  [1e20, '垓'],
+  [1e16, '京'],
+  [1e12, '兆'],
+  [1e8, '億'],
+  [1e4, '万'],
+] as const
+
+// 1 万未満は 3 桁区切り、それ以上は「万」「億」「兆」「京」「垓」で、1e24 以上は 1.23e24 の指数で。負（借金）は - をつける
 export function formatHearts(n: number): string {
   // 1 に満たない借金は 0 と見せる（-0 にしない）
   if (n <= -1) return `-${formatHearts(-n)}`
-  const v = Math.max(0, n)
-  if (v >= 1e8) return `${trim(v / 1e8)}億`
-  if (v >= 1e4) return `${trim(v / 1e4)}万`
+  // 上限より大きい（Infinity も）ときは上限として見せる。NaN は 0
+  const v = Math.min(HEART_CAP, Math.max(0, n || 0))
+  // 垓の次（1e24 以上）は単位がないので指数で。仮数は有効数字 3 桁（1.00e+25 のような繰り上がりも toExponential が直す）
+  if (v >= 1e24) {
+    const [mantissa, exponent] = v.toExponential(2).split('e+')
+    return `${mantissa.replace(/\.?0+$/, '')}e${exponent}`
+  }
+  const unit = UNITS.find(([size]) => v >= size)
+  if (unit) return `${trim(v / unit[0])}${unit[1]}`
   return String(Math.floor(v)).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
