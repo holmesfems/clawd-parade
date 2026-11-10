@@ -47,9 +47,10 @@ const stampSeason = stampWith({
   // 満月（明るい・もよう）
   M: 0xfff1a8,
   m: 0xf2dd86,
-  // 入道雲（明るい・かげ）
-  W: 0xaebfd6,
-  w: 0x8aa0bd,
+  // 入道雲（てっぺんの白・まんなかの白・下のかげ）
+  W: 0xfbfcff,
+  V: 0xe6edf6,
+  v: 0xbfcbdc,
 })
 
 // 行事の日に地面に立てる飾り。どれも 8 列・9 行まで（端末の狭い庭でも、夢の飾りのとなりに入るよう小さく）
@@ -121,14 +122,19 @@ function holidayRows(holiday: Holiday, tick: number, isDark: boolean): string[] 
 // お月見の満月（夢の「月への旅」の細い月とは別の、まるい月）
 const FULL_MOON = ['.MMM.', 'MMmMM', 'MMMMm', 'MmMMM', '.MMM.']
 
-// 夏の昼の入道雲。地平線の上に低く、空の色になじむ落ち着いた色で
+// 夏の昼の入道雲。地面からはなれた空の低いところに浮かぶ、上にもくもく伸びた白い雲。てっぺんが明るく、下は少しかげる。
+// 前は地面に立てていて、灰色の岩に見えた
 const CLOUD = [
-  '....WW....',
-  '..WWWWW...',
-  '..WWWWWWW.',
-  '.WWWWWWWw.',
-  'WWWWWWWwww',
+  '...WW.....',
+  '..WWWW.W..',
+  '.WWWWWWWW.',
+  'WWWWWWWWWW',
+  'WWWVWWWWVW',
+  'VWVVVWVVVV',
+  '.vvVvvvVv.',
 ]
+// 入道雲の下と地面のあいだにあける行
+const CLOUD_LIFT = 2
 
 // 落ちてくる花びら・葉の色（1 つ目が芯、2 つ目が添えるドット）
 const FALLING: Partial<Record<Season, [number, number][]>> = {
@@ -161,12 +167,13 @@ export type SeasonPlan = {
   item: { holiday: Holiday; x: number } | null
   // お月見の満月・夏の昼の入道雲（場所が無ければ null）
   moon: { x: number; y: number } | null
-  cloud: { x: number } | null
+  cloud: { x: number; y: number } | null
 }
 
 // room は空の夢を置くのに使ったもの、skyBoxes は置いた空の夢の箱。行事の飾り → 満月 → 入道雲の順に、
-// それまでに置いたもの（夢のプレゼント・みんな・虹・ほかの季節の飾り）から 1 ドットあけて置く。夢のほうは動かさない
-export function seasonPlan(calendar: Calendar, room: SkyRoom | null, skyBoxes: Box[], palette: Palette): SeasonPlan {
+// それまでに置いたもの（夢のプレゼント・みんな・虹・ほかの季節の飾り）から 1 ドットあけて置く。夢のほうは動かさない。
+// isClear が false（くもり・雨・雪の時間帯。#42）なら、入道雲は出さない（天気の雲がかわりに出る）
+export function seasonPlan(calendar: Calendar, room: SkyRoom | null, skyBoxes: Box[], palette: Palette, isClear = true): SeasonPlan {
   const plan: SeasonPlan = { calendar, item: null, moon: null, cloud: null }
   if (!room) return plan
   const taken = [...skyBoxes]
@@ -190,10 +197,11 @@ export function seasonPlan(calendar: Calendar, room: SkyRoom | null, skyBoxes: B
       taken.push(boxOf(FULL_MOON, spot.x, spot.y))
     }
   }
-  // 入道雲は夏の明るい空に。行事の日は行事の飾りだけにして、庭をにぎやかにしすぎない
-  if (calendar.season === 'summer' && !isDarkSky(palette) && !holiday) {
-    const x = groundSpot(room, CLOUD, [...taken, ...sun])
-    if (x !== null) plan.cloud = { x }
+  // 入道雲は夏の晴れた明るい空に。行事の日は行事の飾りだけにして、庭をにぎやかにしすぎない。
+  // あいている空の、なるべく低いところ（下に CLOUD_LIFT 行あける）に浮かべ、太陽にはかけない
+  if (calendar.season === 'summer' && !isDarkSky(palette) && !holiday && isClear) {
+    const [spot] = placeInSky(room, [{ id: 'cloud', rows: CLOUD }], [...taken, ...sun], { bottom: room.ground - CLOUD_LIFT })
+    if (spot) plan.cloud = { x: spot.x, y: spot.y }
   }
   return plan
 }
@@ -206,14 +214,18 @@ export function seasonBoxes(plan: SeasonPlan, ground: number): Box[] {
     boxes.push(boxOf(rows, plan.item.x, ground - rows.length))
   }
   if (plan.moon) boxes.push(boxOf(FULL_MOON, plan.moon.x, plan.moon.y))
-  if (plan.cloud) boxes.push(boxOf(CLOUD, plan.cloud.x, ground - CLOUD.length))
+  if (plan.cloud) boxes.push(boxOf(CLOUD, plan.cloud.x, plan.cloud.y))
   return boxes
 }
 
-// 空の季節の飾り（満月・入道雲）。星や空の夢と同じく、地面とみんなより奥に描く
-export function drawSeasonSky(g: Grid, plan: SeasonPlan, ground: number) {
+// お月見の満月。星や空の夢と同じく、地面とみんなより奥に描く
+export function drawSeasonSky(g: Grid, plan: SeasonPlan) {
   if (plan.moon) stampSeason(g, FULL_MOON, plan.moon.x, plan.moon.y)
-  if (plan.cloud) stampSeason(g, CLOUD, plan.cloud.x, ground - CLOUD.length)
+}
+
+// 入道雲。ふつうの星と季節の降るものの手前、贈った星・夢の飾り・みんなの奥に描く（買ったものの上にはかからない）
+export function drawSeasonCloud(g: Grid, plan: SeasonPlan) {
+  if (plan.cloud) stampSeason(g, CLOUD, plan.cloud.x, plan.cloud.y)
 }
 
 // 行事の地面の飾り。夢の地面の飾りといっしょに、地面のあとで描く

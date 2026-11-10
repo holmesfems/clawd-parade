@@ -58,6 +58,10 @@ export type Pets = {
 
 export type Tick = { n: number; at: number }
 
+// 天気（#42）。日付から決まる、つくりものの天気（ほんとうの天気ではない。hooks/weather.ts の weatherOf）。
+// 保存には入らない
+export type Weather = 'clear' | 'cloudy' | 'rain' | 'snow'
+
 // ---- なでなでゲーム ----
 
 export type UpgradeId = 'glove' | 'brush' | 'coffee' | 'fan' | 'allowance' | 'toolTip' | 'stardust' | 'feverTime'
@@ -207,6 +211,8 @@ declare module 'claude-code' {
       touchDebug: boolean
       // /parade debug 12/25：この日として描く（このセッションだけ。保存しない）。null は今日
       dateOverride: { month: number; day: number } | null
+      // /parade debug rain：この天気で描く（このセッションだけ。保存しない）。null は日付から決める
+      weatherOverride: Weather | null
       synced: Synced
       holding: Holding
     }

@@ -3,7 +3,7 @@
 
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, TreatId, Work } from '../types'
+import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, TreatId, Weather, Work } from '../types'
 import { ACHIEVEMENTS, HOOK_FRAME_MS, affectionsOf, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf, treatOf } from './game'
 import type { ViewProps } from './parade-view'
 import { QUICK_GIFT_DOTS, putHeart, putQuickGift, quickGiftSpot } from './decor'
@@ -119,13 +119,26 @@ const HOLIDAY_LINES: Record<Holiday, Partial<Record<MoodKind, string[]>>> = {
   tsukimi: { idle: ['おつきさま、まんまるだね', 'おだんご、いっしょに食べよ？'] },
 }
 
-// 表情のセリフ。時間帯のセリフ（無ければふだんのセリフ）の後ろに、行事・季節のセリフ、届いたなかよし度の段のセリフを足す。
-// calendar が無ければ（null）季節のセリフは足さない
-export function linesOf(kind: MoodKind, time: TimeOfDay, given: number, calendar: Calendar | null = null): string[] {
-  const base = TIME_LINES[time][kind] ?? LINES[kind]
+// 天気のセリフ（#42）。行事のセリフのあとに足す（雪のクリスマスは「メリークリスマス！」が先）。晴れの日は足さない
+const WEATHER_LINES: Record<Weather, Partial<Record<MoodKind, string[]>>> = {
+  clear: {},
+  cloudy: { idle: ['くもってるね', 'お日さま、どこいったかな？'] },
+  rain: { idle: ['雨だね…', 'かさ、持ってる？', '雨の音って、おちつくね'] },
+  snow: { idle: ['ゆきだ！', 'ゆきだるま、つくりたいな', 'まっしろだね〜'] },
+}
+
+// 晴れの日にしか合わない、時間帯のセリフ。晴れでない日は入れかわりから外す（いちばん目のセリフはどれでもないので、そのまま）
+const CLEAR_ONLY = ['いい天気だね〜（たぶん）', 'ゆうやけ、きれいだね', '星がきれいな夜だね']
+
+// 表情のセリフ。時間帯のセリフ（無ければふだんのセリフ）の後ろに、行事・天気・季節のセリフ、届いたなかよし度の段のセリフを足す。
+// calendar が無ければ（null）季節のセリフは足さない。weather が無ければ（null）晴れと同じ
+export function linesOf(kind: MoodKind, time: TimeOfDay, given: number, calendar: Calendar | null = null, weather: Weather | null = null): string[] {
+  const all = TIME_LINES[time][kind] ?? LINES[kind]
+  const base = weather && weather !== 'clear' ? all.filter(line => !CLEAR_ONLY.includes(line)) : all
   const holiday = calendar?.holiday ? HOLIDAY_LINES[calendar.holiday][kind] ?? [] : []
+  const sky = weather ? WEATHER_LINES[weather][kind] ?? [] : []
   const season = calendar ? SEASON_LINES[calendar.season][kind] ?? [] : []
-  return [...base, ...holiday, ...season, ...affectionsOf(given).flatMap(name => AFFECTION_LINES[name]?.[kind] ?? [])]
+  return [...base, ...holiday, ...sky, ...season, ...affectionsOf(given).flatMap(name => AFFECTION_LINES[name]?.[kind] ?? [])]
 }
 
 // なでられたときの、時間帯ごとのひとこと（表情ごとの PETTED_LINES が無いとき）
@@ -180,6 +193,8 @@ export type BandState = {
   tick: Tick
   hour: number
   date?: { month: number; day: number }
+  // 天気（#42）。日付と時刻から register.tsx が決める（/parade debug rain で決めた天気にもできる）。無ければ晴れ
+  weather?: Weather
 }
 
 // 今日の季節と行事。日付が無ければ null（季節なし）
@@ -209,7 +224,7 @@ export function bandText(s: BandState): BandText {
   const holdingId = heldGift(s.holding, now)
   const thanked = holdingId ? giftOf(holdingId) : undefined
   const time = timeOfDay(s.hour)
-  const lines = linesOf(m.kind, time, g.given, calendarOfState(s))
+  const lines = linesOf(m.kind, time, g.given, calendarOfState(s), s.weather ?? null)
   const say = thanked
     ? thanked.thanks
     : petted
@@ -386,6 +401,7 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
     look: lookOf(g, t.at, held, calendar?.holiday ?? null),
     palette: PALETTES[timeOfDay(input.hour)],
     calendar,
+    weather: input.weather ?? null,
   }
   // デスクトップの絵は px で描くので、行数の余裕は見ない
   const canDraw = cols >= MIN_SCENE_CELLS && (isDesktop || (input.surface === 'terminal' && input.maxRows >= room))

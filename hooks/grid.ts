@@ -10,14 +10,23 @@ export type Sprite = { w: number; h: number; px: Grid }
 export type Ink = Readonly<Record<string, number>>
 
 // ink で文字の表を押す関数を作る。isFlipped で左右反転。絵からはみ出たところは描かない
+// 表は毎コマ同じもの（同じ配列）を押すことが多いので、色のあるドットの並びにして覚えておく（毎コマ文字を読み直さない）
 export function stampWith(ink: Ink) {
-  return (g: Grid, rows: readonly string[], x: number, y: number, isFlipped = false) =>
+  const compiled = new WeakMap<readonly string[], { dx: number; dy: number; w: number; color: number }[]>()
+  const compile = (rows: readonly string[]) => {
+    const dots: { dx: number; dy: number; w: number; color: number }[] = []
     rows.forEach((row, dy) =>
       [...row].forEach((ch, dx) => {
         const color = ink[ch]
-        if (color !== undefined) dot(g, isFlipped ? x + row.length - 1 - dx : x + dx, y + dy, color)
+        if (color !== undefined) dots.push({ dx, dy, w: row.length, color })
       }),
     )
+    compiled.set(rows, dots)
+    return dots
+  }
+  return (g: Grid, rows: readonly string[], x: number, y: number, isFlipped = false) => {
+    for (const { dx, dy, w, color } of compiled.get(rows) ?? compile(rows)) dot(g, isFlipped ? x + w - 1 - dx : x + dx, y + dy, color)
+  }
 }
 
 export function dot(g: Grid, x: number, y: number, color: number) {

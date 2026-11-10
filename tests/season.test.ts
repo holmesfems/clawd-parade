@@ -74,8 +74,9 @@ test('季節の飾りは、先に描いたもの（みんな・夢の飾り・�
     for (const time of ['night', 'day', 'evening'] as const)
       for (const frame of FRAMES)
         for (const n of [0, 3])
-          for (const ground of GROUND_SETS)
-            for (const sky of SKY_SETS)
+          for (const [k, ground] of GROUND_SETS.entries())
+            // 空の夢は、地面の飾りごとに 2 とおりずつ（全部の組み合わせは重いので、ずらしながら全部の空の組が出るように）
+            for (const sky of [SKY_SETS[k]!, SKY_SETS[(k + 1) % SKY_SETS.length]!])
               for (const tick of [0, 13]) {
                 const palette = PALETTES[time]
                 const input = { ...frame, mood: 'idle' as const, tick, friends: crew(n), character: 'clawd' as const, look: { ...plain, dreams: [...ground, ...sky] }, palette }

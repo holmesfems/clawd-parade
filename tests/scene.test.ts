@@ -23,11 +23,11 @@ test('星はどの幅でも空の中にあり、縦に固まらない', () => {
     for (let columns = 20; columns <= 600; columns++) {
       const stars = starsOf(columns, skyRows)
       expect(stars.length).toBe(Math.ceil((columns / 14) * (skyRows / 6)))
-      for (const { x, y } of stars) {
-        expect(x >= 0 && x < columns && y >= 0 && y < skyRows).toBe(true)
-        // 前は幅が 37 の倍数のとき、1 列に 5 個並んだ
-        expect(stars.filter(s => Math.abs(s.x - x) <= 1).length).toBe(1)
-      }
+      // 幅ごとにまとめて 1 回ずつ確かめる（星ごとに expect すると、幅 600 まで回すのに数秒かかった）
+      expect(stars.every(({ x, y }) => x >= 0 && x < columns && y >= 0 && y < skyRows)).toBe(true)
+      // 前は幅が 37 の倍数のとき、1 列に 5 個並んだ。どの星も、となりの列（±1）にほかの星が無い
+      const xs = stars.map(s => s.x).sort((a, b) => a - b)
+      expect(xs.every((x, i) => i === 0 || x - xs[i - 1]! > 1)).toBe(true)
     }
   }
 })

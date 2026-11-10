@@ -4,7 +4,7 @@
 
 import type { ClientModule } from 'claude-code'
 
-import type { Character, ClientMessage, Friend, Look, MoodKind } from '../types'
+import type { Character, ClientMessage, Friend, Look, MoodKind, Weather } from '../types'
 import { putHeart } from './decor'
 import { toRuns } from './encode'
 import { drawScene, hitTest, layout, strokeMeter } from './scene'
@@ -22,6 +22,8 @@ export type ViewProps = {
   palette?: Palette
   // 季節と行事（#41）。無ければ季節の飾りを描かない
   calendar?: Calendar | null
+  // 天気（#42）。無ければ晴れ
+  weather?: Weather | null
 }
 
 type Heart = { x: number; y: number; age: number; isBig: boolean }

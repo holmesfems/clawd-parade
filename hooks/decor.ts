@@ -57,7 +57,8 @@ export function drawAurora(g: Grid, tick: number) {
   }
 }
 
-export function drawShootingStar(g: Grid, tick: number, palette: Palette) {
+// isHidden の場所（くもりの日の雲のところ。#42）には描かない
+export function drawShootingStar(g: Grid, tick: number, palette: Palette, isHidden: (x: number, y: number) => boolean = () => false) {
   const W = g[0]?.length ?? 0
   const period = 40
   const phase = tick % period
@@ -65,7 +66,11 @@ export function drawShootingStar(g: Grid, tick: number, palette: Palette) {
   const n = Math.floor(tick / period)
   const hx = W - 6 - ((n * 53) % Math.max(1, Math.floor(W * 0.6))) - phase * 3
   const trail = [C.white, palette.star, palette.star, palette.star, palette.starDim, palette.starDim, palette.starDim]
-  trail.forEach((color, j) => dot(g, hx + j, phase - Math.floor(j / 3), color))
+  trail.forEach((color, j) => {
+    const x = hx + j
+    const y = phase - Math.floor(j / 3)
+    if (!isHidden(x, y)) dot(g, x, y, color)
+  })
 }
 
 // 太陽。朝日は右（東）、昼は上に小さく、夕日は左（西）の空。地平線ぎりぎりだと、朝日は右寄せの夢のプレゼント（おうち）に、
@@ -92,8 +97,13 @@ export function sunOf(kind: Sun['kind'], ground: number, paradeColumns: number):
   return { kind, cx, cy, r, halo }
 }
 
-export function drawSun(g: Grid, { kind, cx, cy, r, halo }: Sun) {
-  const { core, rim, glow } = SUN[kind]
+// dim があれば、太陽の色をその色（空の色）へ dim.by だけ寄せて、うすく描く（くもりと雪の日。#42）
+export function drawSun(g: Grid, { kind, cx, cy, r, halo }: Sun, dim: { to: number; by: number } | null = null) {
+  const fade = (c: number) => (dim ? mix(c, dim.to, dim.by) : c)
+  const colors = SUN[kind]
+  const core = fade(colors.core)
+  const rim = fade(colors.rim)
+  const glow = colors.glow === null ? null : fade(colors.glow)
   for (let y = cy - halo; y <= cy + halo; y++)
     for (let x = cx - halo; x <= cx + halo; x++) {
       const d = (x - cx) ** 2 + (y - cy) ** 2
@@ -369,15 +379,21 @@ export function takenBoxes({ yard, dreams, sky, ground, crowd }: SkyRoom): Box[]
 }
 
 // 絵（rows）を、行進の上の空のあいている場所に、渡した順に置く。extra はほかによける箱（季節の飾りを置くときの、置いた空の夢など）。
-// 先に渡したものから置くので、後ろに足したものは前のものの場所を変えない。置けなかったものは返さない
-export function placeInSky<T>(room: SkyRoom, items: { id: T; rows: readonly string[] }[], extra: Box[] = []): { id: T; x: number; y: number }[] {
+// 先に渡したものから置くので、後ろに足したものは前のものの場所を変えない。置けなかったものは返さない。
+// low を渡すと、星の出る高さより下の low.bottom 行の手前まで使い、なるべく下の行に置く（夏の入道雲）
+export function placeInSky<T>(
+  room: SkyRoom,
+  items: { id: T; rows: readonly string[] }[],
+  extra: Box[] = [],
+  low: { bottom: number } | null = null,
+): { id: T; x: number; y: number }[] {
   if (items.length === 0) return []
   const { yard, sky, sun, stars } = room
   const top = Math.max(0, sky - 3)
   // 1 ドットあけるもの（takenBoxes と extra）を、空の夢を置ける範囲（x は 0〜yard.right、y は星の出る高さまで）の格子に、
   // まわり 1 ドットぶん広げて印をつけ、累積和で「箱の中に印があるか」を 1 回で調べる（毎コマ描くので、候補ごとに全部の飾りと比べない）
   const W = yard.right + 1
-  const H = SKY_ROWS + sky
+  const H = low ? low.bottom : SKY_ROWS + sky
   const blocked: number[][] = Array.from({ length: H }, () => Array<number>(W).fill(0))
   const mark = (b: Box) => {
     for (let y = Math.max(0, b.y - 1); y < Math.min(H, b.y + b.h + 1); y++)
@@ -400,7 +416,7 @@ export function placeInSky<T>(room: SkyRoom, items: { id: T; rows: readonly stri
       for (let x = yard.right - w; x >= 0; x--) {
         const box = boxOf(rows, x, y)
         if (!isClear(box)) continue
-        const score = [sunArea ? overlap(sunArea, box) : 0, y, stars.filter(p => inBox(padded(box), p.x, p.y)).length]
+        const score = [sunArea ? overlap(sunArea, box) : 0, low ? -y : y, stars.filter(p => inBox(padded(box), p.x, p.y)).length]
         if (!best || isLess(score, best.score)) best = { x, y, score }
       }
     if (!best) continue
@@ -445,7 +461,20 @@ export function drawSkyDreams(g: Grid, spots: { dream: DreamId; x: number; y: nu
 const RAINBOW = [0xa8454f, 0xb07a3c, 0xb8a64a, 0x4f9a5c, 0x456fa8, 0x6f55a0]
 
 // 虹のドット（色つき）。地面の飾りが無ければ、前と同じく yard.right - 7 に立てる
+// 虹のドットは、並びと夢が同じなら毎コマ同じなので、覚えておく（描くときと、空の夢・季節の飾りの置き場所を探すときに何度も使う）
+const rainbowCache = new Map<string, { x: number; y: number; color: number }[]>()
+
 export function rainbowDots(yard: Yard, dreams: DreamId[], ground: number): { x: number; y: number; color: number }[] {
+  const key = `${yard.left},${yard.right},${ground}:${dreams.join(',')}`
+  const known = rainbowCache.get(key)
+  if (known) return known
+  if (rainbowCache.size > 256) rainbowCache.clear()
+  const out = rainbowDotsOf(yard, dreams, ground)
+  rainbowCache.set(key, out)
+  return out
+}
+
+function rainbowDotsOf(yard: Yard, dreams: DreamId[], ground: number): { x: number; y: number; color: number }[] {
   const decos = groundBoxes(yard, dreams, ground)
   const first = decos[0]
   const cx = first ? Math.min(yard.right - 7, first.x + Math.floor(first.w / 2)) : yard.right - 7

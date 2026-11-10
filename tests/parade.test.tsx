@@ -53,7 +53,9 @@ test('仲間が増えて、終わると表情とセリフが変わる', async ($
   expect(await done.find({ key: 'parade' })).toBeUndefined()
   await done.unmount()
 
-  await clock.advance(4 * 60 * 1000)
+  // 3 分で寝る（おわってから 3 秒たっているので、ここから 3 分でちょうど寝たあと）。
+  // おわったあとは毎コマ描き直すので、1 コマずつ進む時計を長く進めると、このテストだけで数秒かかった
+  await clock.advance(3 * 60 * 1000)
   const sleepy = await mountBand($, 'terminal')
   expect(await textOf(sleepy, /すやすや/)).toBeDefined()
   await sleepy.unmount()
@@ -346,6 +348,43 @@ test('季節と行事：/parade debug 12/25 でその日として描き（保存
   expect(await svgOf(ui)).not.toContain('#2e8b57')
   expect(await svgOf(ui)).toContain('#6dbb6a')
   expect((await hat()).look.hat).toBe('crown')
+})
+
+test('天気：/parade debug rain・雪 などでその天気で描き（保存しない）、/parade debug today で日付と天気を今日にもどす（#42）', async ($, on) => {
+  // テストの時計は 1970/1/1 の 0 時（UTC）。お正月なので、天気は晴れ
+  const { clock, held } = boot(on, { store: veteran() })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const ui = await mountBand($, 'desktop')
+  const terminal = await mountBand($, 'terminal')
+  const weather = async () => ((await terminal.find({ key: 'parade' }))?.props as { props: { weather: unknown } }).props.weather
+  expect(await weather()).toBe('clear')
+  // 雨の水たまり（地面の線）はまだ無い
+  expect(await svgOf(ui)).not.toContain('#4f6f99')
+
+  expect((await runParade($, 'debug rain')).text).toBe('雨の日として描くよ（ほんとうの天気ではないよ。/parade debug today でもどる）')
+  await clock.advance(200)
+  expect(await weather()).toBe('rain')
+  expect(await svgOf(ui)).toContain('#4f6f99')
+  // 日本語でも打てる。日付を選んでも、選んだ天気のまま
+  expect((await runParade($, 'debug 雪')).text).toBe('雪の日として描くよ（ほんとうの天気ではないよ。/parade debug today でもどる）')
+  expect((await runParade($, 'debug くもり')).text).toMatch(/^くもりの日として描くよ/)
+  expect((await runParade($, 'debug 晴れ')).text).toMatch(/^晴れの日として描くよ/)
+  expect((await runParade($, 'debug SNOW')).text).toMatch(/^雪の日として描くよ/)
+  expect((await runParade($, 'debug 7/1')).text).toMatch(/^7\/1（夏）として描くよ/)
+  await clock.advance(200)
+  expect(await weather()).toBe('snow')
+  expect((await runParade($, 'debug fog')).text).toMatch(/^日付は 月\/日 で打ってね.*rain/)
+  // 天気はセーブに入らない
+  await endSession($)
+  expect(JSON.stringify([...held])).not.toMatch(/snow|weather/)
+
+  expect((await runParade($, 'debug today')).text).toBe('日付と天気を今日にもどしたよ')
+  await clock.advance(200)
+  expect(await weather()).toBe('clear')
+  expect(await svgOf(ui)).not.toContain('#4f6f99')
+  // 天気を選んでいなければ、今までどおり
+  expect((await runParade($, 'debug today')).text).toBe('日付を今日にもどしたよ')
 })
 
 // ---- なでなでゲーム ----

@@ -2,7 +2,7 @@
 // 描画を整理するとき（#13）に、1 ドットも変えないための見張り。絵をわざと変えたら、指紋を取り直す
 import { expect, test } from 'claude-code/testing'
 
-import type { Friend, Look, MoodKind } from '../types'
+import type { Friend, Look, MoodKind, Weather } from '../types'
 import { encodeCells, toSvg } from '../hooks/encode'
 import { NIGHT, PALETTES, calendarOf } from '../hooks/palette'
 import { drawScene } from '../hooks/scene'
@@ -179,7 +179,8 @@ test('1.8.0 の季節と行事のある絵の指紋', () => {
   expect(got).toEqual(SEASONAL_EXPECTED)
 })
 
-// 1.8.0 で季節と行事を足したときの絵から取った指紋。tsukimi-day/terminal が autumn-day/terminal と同じなのは、狭い端末の昼は
+// 1.8.0 で季節と行事を足したときの絵から取った指紋（summer-day の 2 つだけは 1.9.0 で取り直した：入道雲を、地面に立つ灰色の雲から、
+// 空に浮かぶ白い雲に描き直したので）。tsukimi-day/terminal が autumn-day/terminal と同じなのは、狭い端末の昼は
 // 太陽と空飛ぶ船で庭の上がふさがり、おだんごを置く場所が無い（出さない）から
 const SEASONAL_EXPECTED: Record<string, string> = {
   'spring-night/desktop': 'c6ad7c49',
@@ -192,8 +193,8 @@ const SEASONAL_EXPECTED: Record<string, string> = {
   'winter-night/terminal': 'f651f02e',
   'spring-day/desktop': 'e490a31f',
   'spring-day/terminal': 'fafb995b',
-  'summer-day/desktop': '5e9afca3',
-  'summer-day/terminal': '64b7b57c',
+  'summer-day/desktop': '9cf2573d',
+  'summer-day/terminal': '50debe9c',
   'autumn-day/desktop': '04c0e636',
   'autumn-day/terminal': '6cb4973f',
   'winter-day/desktop': '8ee8933d',
@@ -210,4 +211,47 @@ const SEASONAL_EXPECTED: Record<string, string> = {
   'tsukimi/terminal': '0c469570',
   'tsukimi-day/desktop': '2ef66905',
   'tsukimi-day/terminal': '6cb4973f',
+}
+
+// 1.9.0（#42）の天気の場面。くもり・雨・雪を、夜と昼で。夢の飾りと贈った星と行事の飾り（雪はクリスマス）もいっしょに出して、
+// 天気の絵がそれをよけているところを残す。もうひとつは、フィーバーのハートの雨と雨つぶがいっしょのところ。
+// 上の指紋は天気なし（weather を渡さない）で取っているので、天気を足しても変わらない
+const WEATHERY: { name: string; weather: Weather; date: [number, number]; palette: keyof typeof PALETTES; look?: Partial<Look> }[] = [
+  ...(['night', 'day'] as const).flatMap(palette => [
+    { name: `cloudy-${palette}`, weather: 'cloudy' as const, date: [11, 10] as [number, number], palette },
+    { name: `rain-${palette}`, weather: 'rain' as const, date: [6, 20] as [number, number], palette },
+    { name: `snow-${palette}`, weather: 'snow' as const, date: [12, 25] as [number, number], palette },
+  ]),
+  { name: 'rain-fever', weather: 'rain', date: [6, 20], palette: 'night', look: { fever: true, shootingStars: true, aurora: true } },
+]
+
+test('1.9.0 の天気のある絵の指紋', () => {
+  const got: Record<string, string> = {}
+  for (const s of WEATHERY) {
+    const palette = PALETTES[s.palette]
+    const calendar = calendarOf(...s.date)
+    const look: Look = { ...plain, dreams: ['house', 'starHill', 'airship'], stars: 5, shootingStars: true, ...s.look }
+    const input = { mood: 'idle' as const, character: 'clawd' as const, friends: crew(1), look, tick: 6, palette, calendar, weather: s.weather }
+    got[`${s.name}/desktop`] = fingerprint(toSvg(drawScene({ ...input, columns: 180, paradeColumns: 114, headroom: 4, twinkleTicks: 4 }), 16, palette).source)
+    got[`${s.name}/terminal`] = fingerprint(JSON.stringify(encodeCells(drawScene({ ...input, look: { ...look, dreams: ['greenTests', 'airship'] }, columns: 84 }))))
+  }
+  expect(got).toEqual(WEATHERY_EXPECTED)
+})
+
+// 1.9.0 で天気を足したときの絵から取った指紋
+const WEATHERY_EXPECTED: Record<string, string> = {
+  'cloudy-night/desktop': '3cd19d99',
+  'cloudy-night/terminal': 'cb4c268f',
+  'rain-night/desktop': '1c3543b6',
+  'rain-night/terminal': '7c4c587a',
+  'snow-night/desktop': '04319d23',
+  'snow-night/terminal': 'bfb59701',
+  'cloudy-day/desktop': '4d424d08',
+  'cloudy-day/terminal': '57058ebf',
+  'rain-day/desktop': 'e5cececa',
+  'rain-day/terminal': '75df4b3a',
+  'snow-day/desktop': '6425bca0',
+  'snow-day/terminal': 'a69a6cea',
+  'rain-fever/desktop': '5edd0425',
+  'rain-fever/terminal': '765d1119',
 }

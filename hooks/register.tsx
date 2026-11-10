@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Work } from '../types'
+import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
 import { bandView } from './band'
 import type { Deal, Situation } from './game'
 import {
@@ -32,6 +32,7 @@ import {
 import { messageOf } from './message'
 import { HOLIDAY_NAMES, SEASON_NAMES, calendarOf, parseMonthDay } from './palette'
 import { isMarching } from './scene'
+import { WEATHER_NAMES, WEATHER_WORDS, weatherAt } from './weather'
 import { SHOP, shopView } from './shop'
 
 const CHARACTER_KEY = 'character'
@@ -77,6 +78,8 @@ const game = atom({ plugin: 'clawd-parade', key: 'game' } as const, newGame(0, 0
 const touchDebug = atom({ plugin: 'clawd-parade', key: 'touchDebug' } as const, false)
 // /parade debug 12/25 で選んだ、見てみたい日（季節と行事の飾りを確かめるため）。このセッションだけで、保存しない
 const dateOverride = atom({ plugin: 'clawd-parade', key: 'dateOverride' } as const, null as { month: number; day: number } | null)
+// /parade debug rain で選んだ天気（#42。天気の絵を確かめるため）。このセッションだけで、保存しない
+const weatherOverride = atom({ plugin: 'clawd-parade', key: 'weatherOverride' } as const, null as Weather | null)
 // 前回 store から読んだ（store に書いた）ゲームとなでた回数。次に保存するときは、ここからの差分を足し込む
 const synced = atom({ plugin: 'clawd-parade', key: 'synced' } as const, { game: newGame(0, 0), pets: 0 } as Synced)
 const holding = atom({ plugin: 'clawd-parade', key: 'holding' } as const, null as Holding)
@@ -317,16 +320,25 @@ export const register: Register = on => {
 
       return { text: isOn ? 'なでなでの当たり判定を、ピンクの枠で見えるようにしたよ（/parade debug で消える）' : '当たり判定の枠を消したよ' }
     }
-    // /parade debug 12/25 でその日として描き、/parade debug today で今日にもどす（季節と行事の飾りを確かめるため）
+    // /parade debug 12/25 でその日として描き、/parade debug rain でその天気で描き、/parade debug today で両方を今日にもどす
+    // （季節と行事の飾り・天気の絵を確かめるため）
     if (arg.startsWith('debug ')) {
       const when = arg.slice('debug '.length).trim()
       if (when === 'today' || when === 'きょう' || when === '今日') {
         await update($, dateOverride, () => null)
+        const hadWeather = (await read($, weatherOverride)) !== null
+        await update($, weatherOverride, () => null)
 
-        return { text: '日付を今日にもどしたよ' }
+        return { text: hadWeather ? '日付と天気を今日にもどしたよ' : '日付を今日にもどしたよ' }
+      }
+      const forced = WEATHER_WORDS[when]
+      if (forced) {
+        await update($, weatherOverride, () => forced)
+
+        return { text: `${WEATHER_NAMES[forced]}の日として描くよ（ほんとうの天気ではないよ。/parade debug today でもどる）` }
       }
       const date = parseMonthDay(when)
-      if (!date) return { text: '日付は 月/日 で打ってね（例: /parade debug 12/25。もどすときは /parade debug today）' }
+      if (!date) return { text: '日付は 月/日 で打ってね（例: /parade debug 12/25。天気は /parade debug rain・snow・cloudy・clear。もどすときは /parade debug today）' }
       await update($, dateOverride, () => date)
       const { season, holiday } = calendarOf(date.month, date.day)
       const label = holiday ? `${HOLIDAY_NAMES[holiday]}・${SEASON_NAMES[season]}` : SEASON_NAMES[season]
@@ -341,7 +353,7 @@ export const register: Register = on => {
 
       return { text: picked === 'clawd' ? 'Clawd がやってきた！' : 'ねこたちがやってきた！' }
     }
-    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade clawd / /parade cat / /parade debug / /parade debug 12/25' }
+    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade clawd / /parade cat / /parade debug / /parade debug 12/25 / /parade debug rain' }
 
     const hidden = await update($, isHidden, v => !v)
 
@@ -444,7 +456,7 @@ export const register: Register = on => {
     const draft = await $.prompt.read().catch(() => ({ text: '' }))
     if (/\[Image #\d+\]/.test(draft.text)) return next(e)
 
-    const [m, list, w, t, who, p, g, isDebug, held, pinned] = await Promise.all([
+    const [m, list, w, t, who, p, g, isDebug, held, pinned, forced] = await Promise.all([
       read($, mood),
       read($, friends),
       read($, work),
@@ -455,15 +467,19 @@ export const register: Register = on => {
       read($, touchDebug),
       read($, holding),
       read($, dateOverride),
+      read($, weatherOverride),
     ])
     // フックの中の Date は使う人のタイムゾーンで動く（claude plugin test の中は UTC）。
     // tick.at は始めのコマまで 0 なので、時計から読む。季節と行事（#41）も、同じ時計の月と日から決める
     const clock = new Date(await $.clock.now())
     const hour = clock.getHours()
     const date = pinned ?? { month: clock.getMonth() + 1, day: clock.getDate() }
+    // 天気（#42）も同じ日付と時刻から決める（ほんとうの天気ではない）。見たい日を選んでいれば、その日の天気（年は今年）
+    const weather = forced ?? weatherAt(clock.getFullYear(), date.month, date.day, hour)
     return bandView($.ui.resolve(e), {
       hour,
       date,
+      weather,
       mood: m,
       work: w,
       friends: list,
