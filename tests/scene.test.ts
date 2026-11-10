@@ -1,7 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { DreamId, Friend } from '../types'
-import { NIGHT, PALETTES, STROKE_DOTS, drawScene, frameOf, groundDecos, hitTest, layout, starsOf, strokeMeter, timeOfDay, toSvg } from '../hooks/scene'
+import { groundDecos } from '../hooks/decor'
+import { toSvg } from '../hooks/encode'
+import { NIGHT, PALETTES, timeOfDay } from '../hooks/palette'
+import { STROKE_DOTS, drawScene, frameOf, hitTest, layout, starsOf, strokeMeter } from '../hooks/scene'
 
 const STAR = 0xffe38a
 const STAR_DIM = 0x8a86c9

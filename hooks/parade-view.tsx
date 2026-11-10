@@ -5,8 +5,10 @@
 import type { ClientModule } from 'claude-code'
 
 import type { Character, ClientMessage, Friend, Look, MoodKind } from '../types'
-import { drawScene, hitTest, layout, putHeart, strokeMeter, toRuns } from './scene'
-import type { Palette } from './scene'
+import { putHeart } from './decor'
+import { toRuns } from './encode'
+import { drawScene, hitTest, layout, strokeMeter } from './scene'
+import type { Palette } from './palette'
 
 export type ViewProps = {
   columns: number

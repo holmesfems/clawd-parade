@@ -79,7 +79,12 @@ claude plugin enable clawd-parade@clawd-parade
 | `hooks/band.tsx` | 入力欄の上の帯の描画と、セリフ・♡ の行を作る `bandText` |
 | `hooks/shop.tsx` | なでなでショップの描画 |
 | `hooks/game.ts` | なでなでゲームのルール（♡、コンボ、お店、実績） |
-| `hooks/scene.ts` | ドット絵（パレード、ぼうし、夜空の飾り）と SVG・端末セルへの変換 |
+| `hooks/scene.ts` | 場面づくり（並び・当たり判定・なでる距離・`drawScene`） |
+| `hooks/palette.ts` | 色（Clawd・仲間・小物の色、時間帯ごとの空と地面、毛色） |
+| `hooks/grid.ts` | ドット絵の土台（ピクセルの格子と、点・文字の表・小物を押す関数） |
+| `hooks/sprites.ts` | キャラのドット絵（ねこ・子ねこ・Clawd・ミニ Clawd、顔、顔文字） |
+| `hooks/decor.ts` | 飾り（ぼうし、贈り物、夢のプレゼント、太陽・流れ星などの空、ハート、贈り物の札） |
+| `hooks/encode.ts` | 絵から端末セル・Text の並び・SVG への変換 |
 | `hooks/parade-view.tsx` | ターミナルでなでるための Client |
 | `hooks/touch-pad.tsx` | デスクトップで SVG に重ねる、見えない手ざわり層の Client |
 | `types/index.d.ts` | 状態と保存（`$.store`）の型 |

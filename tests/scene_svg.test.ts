@@ -3,7 +3,9 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Friend, Look, MoodKind } from '../types'
-import { NIGHT, drawScene, encodeCells, toSvg } from '../hooks/scene'
+import { encodeCells, toSvg } from '../hooks/encode'
+import { NIGHT } from '../hooks/palette'
+import { drawScene } from '../hooks/scene'
 
 // FNV-1a（32 bit）
 const fingerprint = (text: string) => {
