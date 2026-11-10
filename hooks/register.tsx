@@ -467,7 +467,6 @@ export const register: Register = on => {
       petsTotal: p.total,
       character: who,
       buy: (label, deal) => () => buy($, label, deal),
-      say: text => async () => $.ui.toast(text),
     })
   })
 }

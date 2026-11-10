@@ -70,6 +70,8 @@ export function newGame(hearts: number, now: number): Game {
     happyUntil: 0,
     lastGift: null,
     favorite: null,
+    shown: null,
+    off: [],
     passiveAt: now,
   }
 }
@@ -97,6 +99,9 @@ export function restore(saved: unknown, fallback: Game): Game {
     lastUnlock: saved.lastUnlock === null || isStamp(saved.lastUnlock, isAchievementId) ? saved.lastUnlock : fallback.lastUnlock,
     lastGift: saved.lastGift === null || isStamp(saved.lastGift, isGiftId) ? saved.lastGift : fallback.lastGift,
     favorite: saved.favorite === null || isFavoriteId(saved.favorite) ? saved.favorite : fallback.favorite,
+    // 文字列だけを残す。知らない id（新しい版の夢かもしれない）は持ち回り、絵を決めるとき（shownDreams）に見ないだけ
+    shown: saved.shown === null ? null : ((stringsOf(saved.shown) as DreamId[] | undefined) ?? fallback.shown),
+    off: (stringsOf(saved.off) as CosmeticId[] | undefined) ?? fallback.off,
     passiveAt: fallback.passiveAt,
   }
 }
@@ -249,6 +254,9 @@ const MERGE: { [K in keyof Game]-?: PolicyFor<Game[K]> } = {
   lastGift: 'latest',
   // 別のセッションで選び直したら、あとから選んだほう
   favorite: 'latest',
+  // 飾る夢のプレゼントと、しまった空の飾りも、あとから選んだほう（選び直した一式をまるごと）
+  shown: 'latest',
+  off: 'latest',
   passiveAt: 'mine',
 }
 const MERGE_KEYS = Object.keys(MERGE) as (keyof Game)[]
@@ -378,6 +386,17 @@ export function wear(g: Game, hat: Hat | null): Dealt {
   return hat === null || g.owned.includes(hat) ? ok({ ...g, hat }) : no('そのぼうしはまだ持ってないよ')
 }
 
+// 買った空の飾り（流れ星・オーロラ）が出ているか。しまう（off に入れる）まで出す
+export const isLit = (g: Game, id: CosmeticId) => g.owned.includes(id) && !g.off.includes(id)
+
+// 買った空の飾りを出す・しまう（押すたびに入れ替わる）。夢のプレゼントの枠は使わない
+export function switchCosmetic(g: Game, id: CosmeticId): Dealt {
+  const c = COSMETICS.find(one => one.id === id)
+  if (!c || c.hat !== undefined) return no('そんな飾りはないよ')
+  if (!g.owned.includes(id)) return no(`${c.name} はまだ持ってないよ`)
+  return ok({ ...g, off: g.off.includes(id) ? g.off.filter(one => one !== id) : [...g.off, id] })
+}
+
 // ---- 贈り物 -------------------------------------------------------------
 
 type GiftBase = { name: string; price: number; thanks: string }
@@ -408,12 +427,34 @@ const DREAM_TABLE: Record<DreamId, Omit<Dream, 'kind' | 'id'>> = {
   noBugs: { name: 'バグのない世界', price: 100_000_000, shows: '空に虹', thanks: '…夢みたい。でも、きみといっしょに直す時間も好きだったよ' },
 }
 
+// 夢のプレゼントを飾る場所と、その枠の数（♡ では増やせない）。
+// 飾りが増えても場面がうるさくならず、地面の飾りが行進の右の庭に収まるように、一度に飾るのは庭 3 つ・空 2 つまで（#44）
+export type DreamSpot = 'yard' | 'sky'
+export const SLOTS: Record<DreamSpot, number> = { yard: 3, sky: 2 }
+export const SPOT_NAMES: Record<DreamSpot, string> = { yard: '庭', sky: '空' }
+
+// どの夢をどこに飾るか。夢を足したら、ここに足すまで型エラーになる。
+// 絵のおもな場所で決め、1 つの夢は 1 つの枠を使う。月への旅は地面のロケットと空の月で、いっしょに出し入れする。
+// ロケットが庭の幅を取るので庭に数える（こうすると、庭に並ぶ地面の飾りはいつも 3 つまで）
+const DREAM_SPOTS: Record<DreamId, DreamSpot> = {
+  greenTests: 'yard',
+  telescope: 'yard',
+  house: 'yard',
+  library: 'yard',
+  constellation: 'sky',
+  moonTrip: 'yard',
+  noBugs: 'sky',
+}
+const SPOTS = Object.keys(SLOTS) as DreamSpot[]
+
+export const spotOf = (id: DreamId): DreamSpot => DREAM_SPOTS[id]
+
 const entries = <K extends string, V>(table: Record<K, V>) => Object.entries(table) as [K, V][]
 
 // 小さな贈り物：何度でもあげられて、もらったらしばらくごきげん（♡×1.5）
 export const TREATS: Treat[] = entries(TREAT_TABLE).map(([id, t]) => ({ kind: 'treat', id, ...t }))
 
-// 夢のプレゼント：1 回きり。ずっと飾られて、ひとつごとに ♡ の稼ぎが +10%
+// 夢のプレゼント：1 回きり。庭や空に飾られ（しまうこともできる）、ひとつごとに ♡ の稼ぎが +10%（しまっても）
 export const DREAMS: Dream[] = entries(DREAM_TABLE).map(([id, d]) => ({ kind: 'dream', id, ...d }))
 
 // 星を贈る：何度でも贈れて、贈るたびに値段が growth 倍。ひとつごとに ♡ の稼ぎが全部 STAR_RATE 倍になる（ずっと続く）。
@@ -453,7 +494,54 @@ export const isDream = (id: GiftId): id is DreamId => GIFTS[id].kind === 'dream'
 
 export const isHappy = (g: Game, now: number) => now < g.happyUntil
 
+// 贈った夢のプレゼント（しまってあるものも）。♡ の +10%・実績はこちらで数える
 export const dreamsOf = (g: Game): DreamId[] => DREAMS.filter(d => (g.gifts[d.id] ?? 0) > 0).map(d => d.id)
+
+const isDreamId = (v: unknown): v is DreamId => typeof v === 'string' && Object.hasOwn(DREAM_TABLE, v)
+
+// 絵に飾る夢のプレゼント（表の順）。絵が何を飾るかは、ここ（と lookOf）だけで決める。
+// 選んでいなければ（shown が null）贈ったもの全部を、選んでいれば選んだもののうち贈ったものを候補にし、
+// 場所ごとに高いものから枠の数までを飾る。枠より多く選ばれていても（壊れた保存など）、同じ決まりでいつも同じものに減らす
+export function shownDreams(g: Game): DreamId[] {
+  const picked = dreamsOf(g).filter(id => g.shown === null || g.shown.includes(id))
+  const kept = SPOTS.flatMap(spot =>
+    picked
+      .filter(id => spotOf(id) === spot)
+      .sort((a, b) => DREAM_TABLE[b].price - DREAM_TABLE[a].price)
+      .slice(0, SLOTS[spot]),
+  )
+  return picked.filter(id => kept.includes(id))
+}
+
+// 場所ごとの、いま飾っている数
+export const slotsUsed = (g: Game): Record<DreamSpot, number> => {
+  const shown = shownDreams(g)
+  return Object.fromEntries(SPOTS.map(spot => [spot, shown.filter(id => spotOf(id) === spot).length])) as Record<DreamSpot, number>
+}
+
+// 選び直した一式を shown に書く。この版の知らない id（新しい版の夢）は捨てずに残す
+const withShown = (g: Game, ids: DreamId[]): Game => ({ ...g, shown: [...(g.shown ?? []).filter(id => !isDreamId(id)), ...ids] })
+
+// 贈った夢のプレゼントを飾る・しまう（押すたびに入れ替わる）。変わるのは絵だけ。
+// 飾る場所の枠がいっぱいなら、先にどれかをしまってもらう
+export function toggleDream(g: Game, id: DreamId): Dealt {
+  if (!isDreamId(id)) return no('そんな夢はないよ')
+  const { name } = DREAM_TABLE[id]
+  if ((g.gifts[id] ?? 0) <= 0) return no(`${name} はまだ贈っていないよ`)
+  const shown = shownDreams(g)
+  if (shown.includes(id)) return ok(withShown(g, shown.filter(one => one !== id)))
+  const spot = spotOf(id)
+  if (slotsUsed(g)[spot] >= SLOTS[spot]) return no(`${SPOT_NAMES[spot]}はもういっぱい（${SLOTS[spot]}/${SLOTS[spot]}）だよ。先にどれかをしまってね`)
+  return ok(withShown(g, [...shown, id]))
+}
+
+// 新しく贈る夢を、その場所の枠があいていれば飾り、いっぱいならしまっておく。
+// まだ選んでいなかったセーブも、ここで今の飾りを選んだことにする（高い夢を贈っても、飾ってあるものを勝手に入れ替えない）
+function showNew(g: Game, id: DreamId): Game {
+  const shown = shownDreams(g)
+  const spot = spotOf(id)
+  return withShown(g, slotsUsed(g)[spot] < SLOTS[spot] ? [...shown, id] : shown)
+}
 
 // ごきげん中は ×1.5、夢のプレゼントひとつごとに +10%、星ひとつごとに ×STAR_RATE
 export const giftRate = (g: Game, now: number) =>
@@ -462,11 +550,11 @@ export const giftRate = (g: Game, now: number) =>
 export function giveGift(g: Game, id: GiftId, now: number): Dealt {
   const gift = giftOf(id)
   if (gift.kind === 'star') return giveStar(g, now)
-  if (gift.kind === 'dream' && (g.gifts[id] ?? 0) > 0) return no(`${gift.name} はもう飾ってあるよ`)
+  if (gift.kind === 'dream' && (g.gifts[id] ?? 0) > 0) return no(`${gift.name} はもう贈ったよ`)
   if (g.hearts < gift.price) return short(gift.price, g)
   const happyMs = gift.kind === 'treat' ? gift.happyMs : 0
   return ok({
-    ...g,
+    ...(gift.kind === 'dream' ? showNew(g, gift.id) : g),
     hearts: g.hearts - gift.price,
     given: clampHearts(g.given + gift.price),
     gifts: { ...g.gifts, [id]: (g.gifts[id] ?? 0) + 1 },
@@ -669,12 +757,13 @@ export function lookOf(g: Game, now: number, holding: Holding): Look {
   const gift = heldGift(holding, now)
   return {
     hat: g.hat,
-    shootingStars: g.owned.includes('shootingStars'),
-    aurora: g.owned.includes('aurora'),
+    shootingStars: isLit(g, 'shootingStars'),
+    aurora: isLit(g, 'aurora'),
     fever: isFever(g, now),
-    // 夢のプレゼントは箱で抱えて、そのあと庭や夜空にずっと飾る。星はそのまま抱えて、夜空に足す
+    // 夢のプレゼントは箱で抱えて（しまっておく夢も、抱えてお礼は言う）、そのあと庭や夜空に飾る。星はそのまま抱えて、夜空に足す
     gift: gift === null ? null : isDream(gift) ? 'box' : gift,
-    dreams: dreamsOf(g),
+    // 飾ると選んだものだけ（庭 3 つ・空 2 つまで）
+    dreams: shownDreams(g),
     stars: starCount(g),
   }
 }

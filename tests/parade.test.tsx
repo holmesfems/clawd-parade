@@ -371,7 +371,7 @@ test('ぼうしをかぶって・はずせる。強化は最大になると買�
   expect(await textOf(shop, /フィーバー延長 Lv5 MAX/)).toBeDefined()
 })
 
-test('贈り物：お礼を言ってごきげんになり、夢のプレゼントはずっと飾られる', async ($, on) => {
+test('贈り物：お礼を言ってごきげんになり、夢のプレゼントは飾られる（しまうこともできる）', async ($, on) => {
   const fresh = ['gift1', 'dream1']
   const { clock, toasts } = boot(on, {
     store: { pets: 10, game: { hearts: 100_000, achievements: ALL_ACHIEVEMENTS.filter(id => !fresh.includes(id)) } },
@@ -397,13 +397,80 @@ test('贈り物：お礼を言ってごきげんになり、夢のプレゼン�
   expect(toasts).toContain('🏆 実績「夢をひとつ」ゲット！')
   await clock.advance(10_000)
   expect(await svgOf(ui)).toContain('#3fbf5f')
-  expect(await textOf(shop, /全部グリーンのテスト ✓/)).toBeDefined()
+  expect(await textOf(shop, /全部グリーンのテスト ✓飾ってる/)).toBeDefined()
+  expect(await textOf(shop, /飾っている数 庭 1\/3・空 0\/2/)).toBeDefined()
+  // もう一度押すとしまい、また押すと飾る（贈り直しにはならない）
   await shop.press({ key: 'gift-greenTests' })
-  expect(toasts.at(-1)).toBe('全部グリーンのテスト はもう飾ってあるよ')
+  expect(toasts.at(-1)).toBe('全部グリーンのテスト をしまったよ')
+  await clock.advance(200)
+  expect(await svgOf(ui)).not.toContain('#3fbf5f')
+  expect(await textOf(shop, /全部グリーンのテスト を飾る/)).toBeDefined()
+  expect(await textOf(shop, /✓贈った（しまってある）/)).toBeDefined()
+  await shop.press({ key: 'gift-greenTests' })
+  expect(toasts.at(-1)).toBe('全部グリーンのテスト を飾ったよ！')
+  await clock.advance(200)
+  expect(await svgOf(ui)).toContain('#3fbf5f')
 
   // 高すぎる夢はまだ贈れない
   await shop.press({ key: 'gift-noBugs' })
   expect(toasts.at(-1)).toMatch(/足りないよ/)
+})
+
+test('飾る・しまう：夢のプレゼントは庭 3 つ・空 2 つまで。流れ星・オーロラも出し入れでき、別のセッションの帯にも届く（#44）', async ($, on) => {
+  const gifts = { greenTests: 1, telescope: 1, house: 1, library: 1, constellation: 1, moonTrip: 1, noBugs: 1 }
+  const { clock, held, toasts } = boot(on, { store: veteran({ gifts, owned: ['shootingStars', 'aurora'] }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const ui = await mountBand($, 'desktop')
+  const shop = await mountShop($, 120)
+  const saved = () => held.get('game') as { shown: unknown; off: unknown; gifts: unknown }
+
+  // まだ選んでいないセーブ：庭は高い 3 つ（月への旅・図書館・おうち）、空は 2 つ。旗と望遠鏡はしまってある
+  expect(await textOf(shop, /飾っている数 庭 3\/3・空 2\/2/)).toBeDefined()
+  expect(await textOf(shop, /小さなおうち ✓飾ってる/)).toBeDefined()
+  expect(await textOf(shop, /全部グリーンのテスト を飾る/)).toBeDefined()
+  let svg = await svgOf(ui)
+  expect(svg).toContain('#b5523b')
+  expect(svg).not.toContain('#3fbf5f')
+  expect(svg).not.toContain('#8a8fa8')
+  expect(svg).toContain('#1f6b55')
+
+  // 庭がいっぱいなら断る
+  await shop.press({ key: 'gift-greenTests' })
+  expect(toasts.at(-1)).toBe('庭はもういっぱい（3/3）だよ。先にどれかをしまってね')
+  // 断ったら何も変わらない（保存にもまだ選んだものは無い）
+  expect(saved().shown ?? null).toBeNull()
+
+  // おうちをしまって、旗を飾る。贈ったことと ♡ の稼ぎはそのまま
+  await shop.press({ key: 'gift-house' })
+  expect(toasts.at(-1)).toBe('小さなおうち をしまったよ')
+  await shop.press({ key: 'gift-greenTests' })
+  expect(toasts.at(-1)).toBe('全部グリーンのテスト を飾ったよ！')
+  expect(saved().shown).toEqual(['library', 'constellation', 'moonTrip', 'noBugs', 'greenTests'])
+  expect(saved().gifts).toEqual(gifts)
+  expect(await textOf(shop, /飾っている数 庭 3\/3・空 2\/2/)).toBeDefined()
+
+  // オーロラをしまう（夢の枠とは別）
+  await shop.press({ key: 'dress-aurora' })
+  expect(toasts.at(-1)).toBe('オーロラ をしまったよ')
+  expect(saved().off).toEqual(['aurora'])
+  expect(await textOf(shop, /オーロラ を出す/)).toBeDefined()
+  expect(await textOf(shop, /流れ星 ✓出てる/)).toBeDefined()
+  await clock.advance(200)
+  svg = await svgOf(ui)
+  expect(svg).toContain('#3fbf5f')
+  expect(svg).not.toContain('#b5523b')
+  expect(svg).not.toContain('#1f6b55')
+
+  // 別のセッションが、望遠鏡だけを飾ってオーロラを出し直して保存した。次の保存で、こちらの帯にも届く
+  held.set('game', { ...(held.get('game') as object), shown: ['telescope'], off: [] })
+  await clock.advance(6_000)
+  svg = await svgOf(ui)
+  expect(svg).toContain('#8a8fa8')
+  expect(svg).not.toContain('#3fbf5f')
+  expect(svg).toContain('#1f6b55')
+  expect(await textOf(shop, /飾っている数 庭 1\/3・空 0\/2/)).toBeDefined()
+  expect(saved().shown).toEqual(['telescope'])
 })
 
 test('星を贈る：何度でも贈れて値段が上がり、お礼を言って夜空に星が増える。強化には次の節目が出る', async ($, on) => {

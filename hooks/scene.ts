@@ -10,7 +10,7 @@ import type { Grid, Px } from './grid'
 import { clawd, face, kitten, leader, miniClawd } from './sprites'
 import {
   DECOS, GIFT_ICONS, drawAurora, drawConstellation, drawGiftedStars, drawHat, drawHeartRain, drawMilkyWay, drawRainbow,
-  drawShootingStar, drawSun, drawYard, glow, groundDecos, stampDeco, stampIcon, sunOf,
+  drawShootingStar, drawSun, drawYard, glow, stampDeco, stampIcon, sunOf,
 } from './decor'
 
 export const SCENE_ROWS = 7
@@ -87,10 +87,9 @@ export function frameOf(surface: 'terminal' | 'desktop', cells: number): Frame {
   }
 }
 
-// 夢のプレゼントを飾る、行進の右にあいた庭（ドットの列）。
-// 地面の飾りは right に右寄せで並べ、入りきらないぶんだけ絵の右端（far）まではみ出す。
-// 広いデスクトップでは、はみ出たぶんが夜空のセリフと少し重なる（セリフは右寄せなので、左側はたいてい空いている）
-export type Yard = { left: number; right: number; far: number }
+// 夢のプレゼントを飾る、行進の右にあいた庭（ドットの列）。地面の飾りは right に右寄せで並べ、入りきらないぶんは飾らない。
+// 広いデスクトップでも right より右（贈り物の札とセリフの空）には出さない
+export type Yard = { left: number; right: number }
 export type Layout = {
   leader: { x: number; w: number }
   friends: { id: string; x: number; w: number }[]
@@ -111,17 +110,17 @@ export function layout(columns: number, paradeColumns: number, friends: Friend[]
   // room が 0 のとき slice(-0) は全員を返すので、分けて書く
   const shown = room > 0 ? friends.slice(-room) : []
   const x = 2 + shown.length * (friendW + GAP)
-  const yard = { left: x + leaderW + YARD_GAP, right: W - 2, far: full - 2 }
+  const yard = { left: x + leaderW + YARD_GAP, right: W - 2 }
   return {
     leader: { x, w: leaderW },
     friends: shown.map((f, i) => ({ id: f.id, x: 2 + i * (friendW + GAP), w: friendW })),
-    yard: yard.far - yard.left >= YARD_MIN ? yard : null,
+    yard: yard.right - yard.left >= YARD_MIN ? yard : null,
     hearts: [x + leaderW + 1, x - 4, x + leaderW + 5],
   }
 }
 
 const GAP = 1
-// 庭はリーダーの右、小物（！や ♡、かかえた贈り物）の場所をあけたところから。絵の右端まで狭すぎるときは飾らない
+// 庭はリーダーの右、小物（！や ♡、かかえた贈り物）の場所をあけたところから。狭すぎるときは飾らない
 const YARD_GAP = 12
 const YARD_MIN = 10
 
@@ -207,7 +206,7 @@ export function drawScene({
   const spots = layout(W, paradeColumns, friends, character)
   const { yard } = spots
   const dreams = yard ? look.dreams : []
-  if (yard && dreams.includes('noBugs')) drawRainbow(g, groundDecos(yard, dreams).right, ground)
+  if (yard && dreams.includes('noBugs')) drawRainbow(g, yard.right, ground)
 
   // 空の星。遠くにあるので歩いても動かさない
   starsOf(W, skyRows).forEach(({ x, y }, i) => {
@@ -220,10 +219,8 @@ export function drawScene({
   })
   // 贈った星は、昼も含めてどの時間帯でも出す（流れ星やオーロラと同じ）。セリフの空には出さない
   if (look.stars > 0) drawGiftedStars(g, look.stars, paradeW, skyRows, Math.floor(tick / twinkleTicks), leaderSpan(spots.leader), isBehindSun)
-  // 空の飾りはセリフの空へはみ出さないので、行進の右に YARD_MIN あるときだけ
-  const skyYard = yard && yard.right - yard.left >= YARD_MIN ? yard : null
-  if (skyYard && dreams.includes('constellation')) drawConstellation(g, skyYard, sky, tick, palette)
-  if (skyYard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, skyYard.right - 7, Math.max(0, sky - 3))
+  if (yard && dreams.includes('constellation')) drawConstellation(g, yard, sky, tick, palette)
+  if (yard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
   if (look.shootingStars) drawShootingStar(g, tick, palette)
   if (look.fever) drawHeartRain(g, tick)
 

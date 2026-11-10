@@ -18,13 +18,17 @@ const crew = (n: number): Friend[] =>
   Array.from({ length: n }, (_, i) => ({ id: `f${i}`, type: ['Explore', 'Plan', 'general-purpose', 'mystery'][i % 4]!, label: '', tool: null, doneAt: i === 2 ? 5 : null }))
 
 const plain: Look = { hat: null, shootingStars: false, aurora: false, fever: false, gift: null, dreams: [], stars: 0 }
+// 夢のプレゼントは、全部贈ったセーブで飾られるもの（庭は高い 3 つ、空は 2 つ。lookOf）。
+// 1.5.0 までは 7 つ全部を渡していたが、飾るのは庭 3 つ・空 2 つまでになり（#44）、ゲームはもうそういう Look を作らないので、
+// 1.6.0 で渡すものを変えて dressed と neko のデスクトップの指紋だけを取り直した（望遠鏡と旗が消える）。
+// 端末は前から庭に入りきらず、ちょうどこの 3 つ（おうち・図書館・ロケット）しか描いていなかったので、指紋は変わらない
 const dressed: Look = {
   hat: 'crown',
   shootingStars: true,
   aurora: true,
   fever: true,
   gift: 'cake',
-  dreams: ['greenTests', 'telescope', 'house', 'library', 'constellation', 'moonTrip', 'noBugs'],
+  dreams: ['house', 'library', 'constellation', 'moonTrip', 'noBugs'],
   stars: 0,
 }
 
@@ -49,17 +53,17 @@ test('絵の指紋が変わらない（デスクトップの SVG と端末のセ
   expect(got).toEqual(EXPECTED)
 })
 
-// 直す前（1.1.7）の絵から取った指紋
+// 直す前（1.1.7）の絵から取った指紋（dressed/desktop と neko/desktop だけは 1.6.0 で取り直した。上の dressed を見る）
 const EXPECTED: Record<string, string> = {
   'idle/desktop': '4d13e612',
   'idle/terminal': 'd7057417',
   'working/desktop': 'd5c4d120',
   'working/terminal': 'b258fd32',
-  'dressed/desktop': '256b466a',
+  'dressed/desktop': 'ac206950',
   'dressed/terminal': 'ccd01a04',
   'petted/desktop': '7e984f08',
   'petted/terminal': '91a0562f',
-  'neko/desktop': '900c2db1',
+  'neko/desktop': '263df775',
   'neko/terminal': '86fe2f2d',
   'asking/desktop': '1343f236',
   'asking/terminal': '55b95308',

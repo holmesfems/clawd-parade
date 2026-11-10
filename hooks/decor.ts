@@ -202,7 +202,8 @@ export const DECOS = {
   moon: ['..MMM.', '.MM...', 'MM....', 'MM....', '.MM...', '..MMM.'],
 }
 
-// 地面の飾りを庭の右から順に置く。入りきらないものは左から順にあきらめる
+// 地面の飾りを庭の右から順に置く。入りきらないものは左から順にあきらめる。
+// 一度に飾るのは庭の枠（3 つ）までなので、広いデスクトップの庭にはふつう全部入る（game.ts の SLOTS）
 const GROUND_DECOS: [DreamId, keyof typeof DECOS][] = [
   ['house', 'house'],
   ['library', 'library'],
@@ -211,26 +212,23 @@ const GROUND_DECOS: [DreamId, keyof typeof DECOS][] = [
   ['greenTests', 'flag'],
 ]
 
-// 地面の飾りの並び。yard.right に右寄せで並べ、入りきらなければ入るまで yard.far のほうへずらす。
-// right は並びの右端（虹をかける場所）。far まで使っても入らないぶんは飾らない
-export function groundDecos(yard: Yard, dreams: DreamId[]): { right: number; placed: { dream: DreamId; x: number }[] } {
-  const owned = GROUND_DECOS.filter(([dream]) => dreams.includes(dream))
-  const widthOf = (deco: keyof typeof DECOS) => DECOS[deco][0]?.length ?? 0
-  const need = owned.reduce((sum, [, deco]) => sum + widthOf(deco) + 1, -1)
-  const right = Math.min(yard.far, Math.max(yard.right, yard.left + need))
+// 地面の飾りの並び。yard.right に右寄せで並べ、庭に入りきらないぶんは飾らない。
+// 前は入りきらないぶんを右のセリフの空へはみ出させていたが、セリフの文字と重なったのでやめた（#44）。
+// 飾るのは 3 つまでになったので、仲間がとても多いときのほかは庭に入る
+export function groundDecos(yard: Yard, dreams: DreamId[]): { dream: DreamId; x: number }[] {
   const placed: { dream: DreamId; x: number }[] = []
-  let x = right
-  for (const [dream, deco] of owned) {
-    x -= widthOf(deco)
+  let x = yard.right
+  for (const [dream, deco] of GROUND_DECOS.filter(([one]) => dreams.includes(one))) {
+    x -= DECOS[deco][0]?.length ?? 0
     if (x < yard.left) break
     placed.push({ dream, x })
     x -= 1
   }
-  return { right, placed }
+  return placed
 }
 
 export function drawYard(g: Grid, dreams: DreamId[], yard: Yard, ground: number, tick: number) {
-  for (const { dream, x } of groundDecos(yard, dreams).placed) {
+  for (const { dream, x } of groundDecos(yard, dreams)) {
     const deco = GROUND_DECOS.find(([d]) => d === dream)![1]
     const rows = deco === 'rocket' && tick % 2 ? DECOS.rocket.map(row => row.replace(/F/g, 'f')) : DECOS[deco]
     stampDeco(g, rows, x, ground - rows.length)

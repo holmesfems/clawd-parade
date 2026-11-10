@@ -10,6 +10,8 @@ import {
   COSMETICS,
   DREAMS,
   MILESTONE_LEVELS,
+  SLOTS,
+  SPOT_NAMES,
   STAR,
   STAR_RATE,
   TREATS,
@@ -22,6 +24,7 @@ import {
   formatRate,
   giveGift,
   isHappy,
+  isLit,
   isMaxed,
   levelOf,
   milestoneOf,
@@ -29,10 +32,15 @@ import {
   perSecond,
   pickFavorite,
   priceOf,
+  shownDreams,
+  slotsUsed,
+  spotOf,
   starCount,
   starPrice,
   starRate,
+  switchCosmetic,
   toMilestone,
+  toggleDream,
   wear,
   workRate,
 } from './game'
@@ -44,10 +52,8 @@ export type ShopInput = {
   at: Situation
   petsTotal: number
   character: Character
-  // ボタンを押したときの買い物（足りなければ断られる）。label は買えたときのトースト
+  // ボタンを押したときの取り引き（買う・贈る・かぶる・飾る。できなければ断られる）。label はできたときのトースト
   buy: (label: string, deal: Deal) => () => Promise<void>
-  // 押しても何も起きないボタンの、ひとこと
-  say: (text: string) => () => Promise<void>
 }
 
 // ショップを描く（ui は $.ui.resolve(e) の部品）
@@ -69,6 +75,9 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
   const done = ACHIEVEMENTS.filter(a => g.achievements.includes(a.id)).length
   const affection = affectionOf(g.given)
   const lasts = (ms: number) => (ms >= 60_000 ? `${ms / 60_000} 分` : `${ms / 1000} 秒`)
+  // 飾っている夢のプレゼントと、場所ごとの数
+  const shown = shownDreams(g)
+  const used = slotsUsed(g)
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -111,12 +120,17 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
       {COSMETICS.map(c => {
         const isOwned = g.owned.includes(c.id)
         const isWorn = c.hat !== undefined && g.hat === c.hat
-        const label = !isOwned ? `${c.name} ${formatHearts(c.price)}♡` : isWorn ? `${c.name} ✓かぶってる` : c.hat ? `${c.name} をかぶる` : `${c.name} ✓`
+        // 空の飾り（流れ星・オーロラ）は、ぼうしと同じように押すたびに出す・しまう（夢のプレゼントの枠は使わない）
+        const isOn = isLit(g, c.id)
+        const label =
+          !isOwned ? `${c.name} ${formatHearts(c.price)}♡` :
+          c.hat ? (isWorn ? `${c.name} ✓かぶってる` : `${c.name} をかぶる`) :
+          isOn ? `${c.name} ✓出てる` : `${c.name} を出す`
         const press = !isOwned
           ? buy(`${c.name} を買ったよ！`, one => buyCosmetic(one, c.id))
           : c.hat
             ? buy(isWorn ? `${c.name} をはずしたよ` : `${c.name} をかぶったよ！`, one => wear(one, isWorn ? null : c.hat ?? null))
-            : input.say(`${c.name} はもう夜空にあるよ`)
+            : buy(isOn ? `${c.name} をしまったよ` : `${c.name} を出したよ！`, one => switchCosmetic(one, c.id))
         const about = c.id === 'catEars' && who === 'neko' ? 'ねこはもとからねこみみ（Clawd だけ）' : c.about
         return (
           <Box key={`c-${c.id}`} columnGap={1}>
@@ -168,13 +182,22 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
       })}
 
       {header('夢のプレゼント（ひとつごとに ♡ ずっと +10%）')}
+      <Text dimColor>
+        飾っている数 {(Object.keys(SLOTS) as (keyof typeof SLOTS)[]).map(spot => `${SPOT_NAMES[spot]} ${used[spot]}/${SLOTS[spot]}`).join('・')}
+        （贈ったものを押すと 飾る／しまう。しまっても ♡ の +10% はそのまま）
+      </Text>
       {DREAMS.map(dream => {
         const isGiven = (g.gifts[dream.id] ?? 0) > 0
+        const isShown = shown.includes(dream.id)
         return (
           <Box key={`d-${dream.id}`} columnGap={1}>
             {isGiven ? (
-              <Button key={`gift-${dream.id}`} onPress={input.say(`${dream.name} はもう飾ってあるよ`)}>
-                {dream.name} ✓
+              // 贈ったものは、ぼうしと同じように押すたびに飾る・しまう（しまってあっても「贈った」と出す）
+              <Button
+                key={`gift-${dream.id}`}
+                onPress={buy(isShown ? `${dream.name} をしまったよ` : `${dream.name} を飾ったよ！`, one => toggleDream(one, dream.id))}
+              >
+                {isShown ? `${dream.name} ✓飾ってる` : `${dream.name} を飾る`}
               </Button>
             ) : (
               <Button
@@ -186,7 +209,7 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
               </Button>
             )}
             <Text dimColor wrap="truncate-end">
-              {dream.shows}
+              {dream.shows}（{SPOT_NAMES[spotOf(dream.id)]}）{isGiven && !isShown ? ' · ✓贈った（しまってある）' : ''}
             </Text>
           </Box>
         )

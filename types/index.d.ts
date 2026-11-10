@@ -138,6 +138,12 @@ export type Game = {
   lastGift: { id: GiftId; at: number } | null
   // 帯に出して、ワンぽちで贈れる小さな贈り物（ショップの ☆ で選ぶ）。null は出さない
   favorite: TreatId | null
+  // 飾ると選んだ夢のプレゼント（ショップの「飾る／しまう」で選ぶ）。null はまだ選んでいない
+  // （場所ごとに高いものから枠の数まで飾る。hooks/game.ts の shownDreams）。
+  // しまっても絵から消えるだけで、♡ の +10%・なかよし度・実績・贈ったことはそのまま
+  shown: DreamId[] | null
+  // しまってある、買った空の飾り（流れ星・オーロラ）。入っていなければ出す
+  off: CosmeticId[]
   // 最後に放置収入を足した時刻。0 はこのセッションでまだ読み込んでいない
   passiveAt: number
 }
@@ -155,8 +161,10 @@ export type Look = {
   shootingStars: boolean
   aurora: boolean
   fever: boolean
-  // 今 Clawd が抱えている贈り物（夢のプレゼントは箱で）、飾ってある夢のプレゼント
+  // 今 Clawd が抱えている贈り物（夢のプレゼントは箱で）
   gift: TreatId | 'box' | 'star' | null
+  // 描く夢のプレゼント（しまってあるものは入らない。庭 3 つ・空 2 つまでにそろえてあるのは lookOf の仕事で、
+  // drawScene はここにあるものをそのまま描く）
   dreams: DreamId[]
   // 贈った星の数。夜空に明るい星を足し、多くなったら天の川にする
   stars: number

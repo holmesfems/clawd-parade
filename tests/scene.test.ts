@@ -149,8 +149,8 @@ test('並び：仲間・Clawd・庭・ハートの湧く列', () => {
     { id: 'b', x: 14, w: 11 },
   ])
   expect(l.leader).toEqual({ x: 26, w: 18 })
-  // 庭は行進に使う左側（right まで）。入りきらない地面の飾りは、絵の右端（far）まではみ出せる
-  expect(l.yard).toEqual({ left: 56, right: 112, far: 178 })
+  // 庭は行進に使う左側（right まで）。右のセリフの空にははみ出さない
+  expect(l.yard).toEqual({ left: 56, right: 112 })
   expect(l.hearts).toEqual([45, 22, 49])
   // 入りきらない古い仲間から外れ、狭いと庭は無い
   expect(layout(60, 60, [friend('a'), friend('b')], 'clawd').friends.map(f => f.id)).toEqual(['b'])
@@ -159,37 +159,59 @@ test('並び：仲間・Clawd・庭・ハートの湧く列', () => {
 
 const ALL_GROUND: DreamId[] = ['house', 'library', 'moonTrip', 'telescope', 'greenTests']
 
-test('夢のプレゼント：入るときは行進の右端に右寄せ、入らないぶんだけセリフの空へはみ出す', () => {
-  // 仲間が 2 匹：行進の左側に全部入るので、前と同じく right に右寄せ
-  const roomy = layout(180, 114, [friend('a'), friend('b')], 'clawd').yard!
-  const fits = groundDecos(roomy, ALL_GROUND)
-  expect(fits.right).toBe(112)
-  expect(fits.placed.map(p => p.dream)).toEqual(ALL_GROUND)
+// 地面の夢から 3 つを選ぶ、すべての組み合わせ（庭の枠は 3 つ）
+const THREES = ALL_GROUND.flatMap((a, i) => ALL_GROUND.slice(i + 1).flatMap((b, j) => ALL_GROUND.slice(i + j + 2).map(c => [a, b, c])))
 
-  // 仲間が 6 匹：行進の左側には入らない。前は庭ごと無くなって何も飾れなかった
-  const crowded = layout(180, 114, ['a', 'b', 'c', 'd', 'e', 'f'].map(friend), 'clawd').yard!
-  expect(crowded.right - crowded.left).toBeLessThan(10)
-  const spill = groundDecos(crowded, ALL_GROUND)
-  expect(spill.placed.map(p => p.dream)).toEqual(ALL_GROUND)
-  expect(spill.right).toBeGreaterThan(crowded.right)
-  expect(spill.right).toBeLessThanOrEqual(crowded.far)
-  // 飾りどうしは重ならず、庭の左端より右
-  const xs = spill.placed.map(p => p.x)
-  expect(Math.min(...xs)).toBeGreaterThanOrEqual(crowded.left)
+test('夢のプレゼント：庭に右寄せで並べ、入らないぶんは飾らない。セリフの空や贈り物の札へははみ出さない（#44）', () => {
+  expect(THREES.length).toBe(10)
+  // 広いデスクトップ（180 ドット、札があれば行進はさらに 13 ドット狭い）：仲間が 4 匹（札があれば 2 匹）までなら、
+  // どの 3 つを選んでも庭に全部入る
+  for (const [paradeColumns, crowd] of [[114, 4], [101, 2]] as const) {
+    for (let n = 0; n <= crowd; n++) {
+      const yard = layout(180, paradeColumns, Array.from({ length: n }, (_, i) => friend(`f${i}`)), 'clawd').yard!
+      expect(yard.right).toBe(paradeColumns - 2)
+      for (const three of THREES) {
+        const placed = groundDecos(yard, three)
+        expect(placed.map(p => p.dream).sort()).toEqual([...three].sort())
+        expect(Math.min(...placed.map(p => p.x))).toBeGreaterThanOrEqual(yard.left)
+      }
+    }
+  }
+
+  // 仲間がとても多いと庭が狭く、右寄せの並び（おうち・図書館・ロケット・望遠鏡・旗の順）で入るぶんだけ。
+  // 前はセリフの空へはみ出して、セリフの文字と重なった
+  const crowded = layout(180, 114, ['a', 'b', 'c', 'd', 'e'].map(friend), 'clawd').yard!
+  const some = groundDecos(crowded, ['house', 'library', 'moonTrip'])
+  expect(some.map(p => p.dream)).toEqual(['house'])
+  expect(some[0]!.x + 14).toBe(crowded.right)
+  // 庭が狭すぎれば何も飾らない
+  expect(layout(180, 114, ['a', 'b', 'c', 'd', 'e', 'f'].map(friend), 'clawd').yard).toBeNull()
+
+  // 端末（行進に使う幅 = 絵の幅）も同じく、入らないぶんは飾らない
+  const terminal = layout(84, 84, [friend('a'), friend('b')], 'clawd').yard!
+  const cut = groundDecos(terminal, ALL_GROUND)
+  expect(cut.length).toBeLessThan(ALL_GROUND.length)
+  const xs = cut.map(p => p.x)
+  expect(Math.min(...xs)).toBeGreaterThanOrEqual(terminal.left)
   expect(xs).toEqual([...xs].sort((a, b) => b - a))
 
   // 行進に使う幅に仲間がひとりも入らないときは、仲間を出さず Clawd を左端に置く（前は全員が残って、Clawd が右へ押し出された）
   const tight = layout(114, 48, [friend('a'), friend('b')], 'clawd')
   expect(tight.friends).toEqual([])
   expect(tight.leader.x).toBe(2)
-  expect(tight.yard!.right - tight.yard!.left).toBeGreaterThanOrEqual(0)
+})
 
-  // 端末（行進に使う幅 = 絵の幅）は、はみ出す先が無いので、入らないぶんは前と同じく飾らない
-  const terminal = layout(84, 84, [friend('a'), friend('b')], 'clawd').yard!
-  expect(terminal.far).toBe(terminal.right)
-  const cut = groundDecos(terminal, ALL_GROUND)
-  expect(cut.right).toBe(terminal.right)
-  expect(cut.placed.length).toBeLessThan(ALL_GROUND.length)
+test('夢のプレゼント：広いデスクトップでは、仲間が多くても飾りの絵は行進の幅（庭の右端）までに収まる', () => {
+  const look = (dreams: DreamId[]): Look => ({ hat: null, shootingStars: false, aurora: false, fever: false, gift: null, dreams, stars: 0 })
+  for (const n of [0, 2, 4, 5, 6]) {
+    const crew = Array.from({ length: n }, (_, i) => friend(`f${i}`))
+    const draw = (dreams: DreamId[]) =>
+      drawScene({ columns: 180, paradeColumns: 114, headroom: 4, mood: 'idle', tick: 0, friends: crew, character: 'clawd', look: look(dreams) })
+    // 月への旅は、ロケット（庭）と月（空）がいっしょに出る
+    for (const dreams of [['house', 'library', 'moonTrip'], ['telescope', 'greenTests', 'moonTrip', 'constellation']] as DreamId[][]) {
+      for (const { x } of changed(draw(dreams), draw([]))) expect(x).toBeLessThanOrEqual(112)
+    }
+  }
 })
 
 test('当たり判定：リーダーは両脇 1 ドットまで、仲間はその幅だけ', () => {
