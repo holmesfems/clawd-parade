@@ -4,16 +4,17 @@
 
 import type { Character, Friend, Look, MoodKind } from '../types'
 import { C, NIGHT, coatOf } from './palette'
-import type { Palette } from './palette'
+import type { Calendar, Palette } from './palette'
 import { blit, hash, put } from './grid'
 import type { Grid, Px } from './grid'
 import { clawd, face, kitten, leader, miniClawd } from './sprites'
 import type { Wave } from './sprites'
 import {
   DECOS, GIFT_ICONS, drawAurora, drawConstellation, drawGiftedStars, drawHat, drawHeartRain, drawMilkyWay, drawRainbow,
-  drawShootingStar, drawSkyDreams, drawSun, drawYard, giftedStarSpots, glow, stampDeco, stampIcon, sunOf,
+  drawShootingStar, drawSkyDreams, drawSun, drawYard, giftedStarSpots, glow, skyDecoBox, skyDreamSpots, stampDeco, stampIcon, sunOf,
 } from './decor'
-import type { Box } from './decor'
+import type { Box, SkyRoom } from './decor'
+import { drawHolidayItem, drawParticles, drawSeasonSky, flowerOf, groundAccent, isDarkSky, seasonPlan } from './season'
 
 export const SCENE_ROWS = 7
 const H = SCENE_ROWS * 2
@@ -33,6 +34,8 @@ export type SceneInput = {
   look?: Look
   // 空・地面・星の色
   palette?: Palette
+  // 季節と行事（#41）。無ければ（null も）季節の飾りを描かない。日付はフックの時計から band.tsx が渡す
+  calendar?: Calendar | null
   mood: MoodKind
   // フックの何コマ目か（時刻ではない）。歩く・またたく・跳ねるのに使う
   tick: number
@@ -197,6 +200,7 @@ export function drawScene({
   headroom = 0,
   look = PLAIN,
   palette = NIGHT,
+  calendar = null,
   mood,
   tick,
   friends,
@@ -239,33 +243,43 @@ export function drawScene({
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
     put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? palette.star : palette.starDim)
   })
+  // 季節の花びら・葉・ほたる（#41）は、星の手前で、贈った星や夢の飾り・地面・みんなより奥。行進の幅（セリフの空と札の左）だけに出す
+  const isDark = isDarkSky(palette)
+  if (calendar) drawParticles(g, calendar.season, isDark, paradeW, ground, tick)
   // 贈った星は、昼も含めてどの時間帯でも出す（流れ星やオーロラと同じ）。セリフの空には出さない
   if (look.stars > 0) drawGiftedStars(g, look.stars, paradeW, skyRows, Math.floor(tick / twinkleTicks), leaderSpan(spots.leader), isBehindSun)
   if (yard && dreams.includes('constellation')) drawConstellation(g, yard, sky, tick, palette)
   if (yard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
   // 空飛ぶ船・ふたりの星は、Clawd 座・月・虹・地面の飾り・みんなから 1 ドットあけた空に（贈った星の手前）
-  if (yard) {
-    const stars = look.stars > 0 ? giftedStarSpots(paradeW, skyRows, leaderSpan(spots.leader)).slice(0, look.stars) : []
-    drawSkyDreams(g, { yard, dreams, sky, ground, sun, crowd: crowdOf(spots), stars }, tick)
-  }
+  const stars = yard && look.stars > 0 ? giftedStarSpots(paradeW, skyRows, leaderSpan(spots.leader)).slice(0, look.stars) : []
+  const room: SkyRoom | null = yard ? { yard, dreams, sky, ground, sun, crowd: crowdOf(spots), stars } : null
+  const skySpots = room ? skyDreamSpots(room) : []
+  drawSkyDreams(g, skySpots, tick)
+  // 季節の飾り（行事の地面の飾り・満月・入道雲）は、夢の飾りを置いたあとのあいている場所に（夢のほうは動かさない）
+  const plan = calendar ? seasonPlan(calendar, room, skySpots.map(({ dream, x, y }) => skyDecoBox(dream, x, y)), palette) : null
+  if (plan) drawSeasonSky(g, plan, ground)
   if (look.shootingStars) drawShootingStar(g, tick, palette)
   if (look.fever) drawHeartRain(g, tick)
 
-  // 地面と草花（左へ流れる）
+  // 地面と草花（左へ流れる）。季節があれば、地面の線に落ちた花びら・葉や、うすく積もった雪をまぜる
+  const season = calendar?.season ?? null
+  const flower = flowerOf(season, palette.flower)
   for (let x = 0; x < W; x++) {
     const at = x + scroll
     if (at % 6 < 3) g[ground]![x] = palette.ground
+    if (season) g[ground]![x] = groundAccent(season, at, g[ground]![x] ?? null)
     if (at % 29 === 0) {
       g[ground - 1]![x] = palette.grass
       g[ground]![x] = palette.grass
     }
     if (at % 47 === 13) {
-      g[ground - 2]![x] = palette.flower
+      g[ground - 2]![x] = flower
       g[ground - 1]![x] = palette.grass
     }
   }
 
   if (yard) drawYard(g, dreams, yard, ground, tick)
+  if (plan) drawHolidayItem(g, plan, ground, tick, isDark)
 
   // 並び：いちばん新しい仲間がリーダーのすぐ後ろ
   const byId = new Map(friends.map(f => [f.id, f]))

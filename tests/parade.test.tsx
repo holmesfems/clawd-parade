@@ -311,6 +311,43 @@ test('端末でもデスクトップでも、Clawd と仲間の端まで当た�
   }
 })
 
+test('季節と行事：/parade debug 12/25 でその日として描き（保存しない）、/parade debug today で今日にもどる（#41）', async ($, on) => {
+  // テストの時計は 1970/1/1（UTC）なので、今日はお正月。サンタぼうしは持っているが、かぶっているのは王冠
+  const { clock, held } = boot(on, { store: veteran({ owned: ['santa', 'crown'], hat: 'crown' }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const ui = await mountBand($, 'desktop')
+  const terminal = await mountBand($, 'terminal')
+  const hat = async () => ((await terminal.find({ key: 'parade' }))?.props as { props: { look: { hat: unknown }; calendar: unknown } }).props
+  // お正月：門松（竹の緑）があり、ツリーは無い。ぼうしは選んだまま
+  expect(await svgOf(ui)).toContain('#6dbb6a')
+  expect(await svgOf(ui)).not.toContain('#2e8b57')
+  expect((await hat()).look.hat).toBe('crown')
+  expect((await hat()).calendar).toEqual({ season: 'winter', holiday: 'newYear' })
+
+  expect((await runParade($, 'debug 12/25')).text).toBe('12/25（クリスマス・冬）として描くよ（/parade debug today で今日にもどる）')
+  await clock.advance(200)
+  // クリスマス：ツリーが立ち、サンタぼうしを持っているのでかぶる（保存の hat は王冠のまま）
+  expect(await svgOf(ui)).toContain('#2e8b57')
+  expect((await hat()).look.hat).toBe('santa')
+  expect((held.get('game') as { hat: unknown } | undefined)?.hat ?? 'crown').toBe('crown')
+  // 日付を変えても、当たり判定の枠の切り替え（/parade debug）はそのまま
+  expect((await runParade($, 'debug')).text).toMatch(/ピンクの枠/)
+  expect((await runParade($, 'debug 4/5')).text).toBe('4/5（春）として描くよ（/parade debug today で今日にもどる）')
+  expect((await runParade($, 'debug 2/30')).text).toMatch(/^日付は 月\/日 で打ってね/)
+  // なでなでもそのまま
+  const touch = await mountTouchBand($)
+  await petLeader(touch, clock, 1)
+  expect(await textOf(touch, /なでなで 1 回目/)).toBeDefined()
+  await touch.unmount()
+
+  expect((await runParade($, 'debug today')).text).toBe('日付を今日にもどしたよ')
+  await clock.advance(200)
+  expect(await svgOf(ui)).not.toContain('#2e8b57')
+  expect(await svgOf(ui)).toContain('#6dbb6a')
+  expect((await hat()).look.hat).toBe('crown')
+})
+
 // ---- なでなでゲーム ----
 
 test('なでなでゲーム：コンボ・フィーバー・実績・お店', async ($, on) => {

@@ -205,6 +205,8 @@ declare module 'claude-code' {
       game: Game
       // /parade debug：手ざわり層のふちを見えるようにする
       touchDebug: boolean
+      // /parade debug 12/25：この日として描く（このセッションだけ。保存しない）。null は今日
+      dateOverride: { month: number; day: number } | null
       synced: Synced
       holding: Holding
     }

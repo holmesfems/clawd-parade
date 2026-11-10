@@ -57,6 +57,42 @@ export function timeOfDay(hour: number): TimeOfDay {
   return 'night'
 }
 
+// 季節と行事（#41）。月と日から決める（calendarOf）。北半球（日本）の季節だけ
+export type Season = 'spring' | 'summer' | 'autumn' | 'winter'
+export type Holiday = 'christmas' | 'newYear' | 'halloween' | 'tanabata' | 'tsukimi'
+// その日の季節と、行事の日なら行事（無ければ null）
+export type Calendar = { season: Season; holiday: Holiday | null }
+
+// 春 3〜5 月、夏 6〜8 月、秋 9〜11 月、冬 12〜2 月。行事はクリスマス 12/24〜25、お正月 1/1〜3、ハロウィン 10/31、
+// 七夕 7/7、お月見 9/15（ほんとうの十五夜は年ごとに変わるが、計算がいらないよう 9/15 に決め打ちする）。
+// timeOfDay と同じく、タイムゾーンで結果が変わらないよう、日付のミリ秒ではなく「月」（1〜12）と「日」を受け取る
+export function calendarOf(month: number, day: number): Calendar {
+  const season: Season = month >= 3 && month <= 5 ? 'spring' : month >= 6 && month <= 8 ? 'summer' : month >= 9 && month <= 11 ? 'autumn' : 'winter'
+  const holiday: Holiday | null =
+    month === 12 && (day === 24 || day === 25) ? 'christmas' :
+    month === 1 && day >= 1 && day <= 3 ? 'newYear' :
+    month === 10 && day === 31 ? 'halloween' :
+    month === 7 && day === 7 ? 'tanabata' :
+    month === 9 && day === 15 ? 'tsukimi' :
+    null
+  return { season, holiday }
+}
+
+// 月ごとの日数（うるう年の 2/29 も選べるよう、2 月は 29 日まで）
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+// 「12/25」のような月/日。ありえない日なら null
+export function parseMonthDay(text: string): { month: number; day: number } | null {
+  const found = /^(\d{1,2})\/(\d{1,2})$/.exec(text)
+  if (!found) return null
+  const month = Number(found[1])
+  const day = Number(found[2])
+  return month >= 1 && month <= 12 && day >= 1 && day <= DAYS_IN_MONTH[month - 1]! ? { month, day } : null
+}
+
+export const SEASON_NAMES: Record<Season, string> = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' }
+export const HOLIDAY_NAMES: Record<Holiday, string> = { christmas: 'クリスマス', newYear: 'お正月', halloween: 'ハロウィン', tanabata: '七夕', tsukimi: 'お月見' }
+
 // 時間帯ごとの空の色。デスクトップでは空の上にセリフを重ねるので、どの空も、ふだんのセリフの色（#d97757）との
 // コントラスト比が 3.5 以上になる暗さにする（夜は 5.1）
 export const PALETTES: Record<TimeOfDay, Palette> = {

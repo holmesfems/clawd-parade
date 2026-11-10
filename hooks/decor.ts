@@ -311,8 +311,8 @@ export type Box = { x: number; y: number; w: number; h: number }
 const overlap = (a: Box, b: Box) =>
   Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
 // まわりに 1 ドットのすき間をとった箱
-const padded = (b: Box): Box => ({ x: b.x - 1, y: b.y - 1, w: b.w + 2, h: b.h + 2 })
-const boxOf = (rows: readonly string[], x: number, y: number): Box => ({ x, y, w: rows[0]?.length ?? 0, h: rows.length })
+export const padded = (b: Box): Box => ({ x: b.x - 1, y: b.y - 1, w: b.w + 2, h: b.h + 2 })
+export const boxOf = (rows: readonly string[], x: number, y: number): Box => ({ x, y, w: rows[0]?.length ?? 0, h: rows.length })
 const inBox = (b: Box, x: number, y: number) => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h
 
 // 地面の飾りの箱（右から順。groundDecos と同じ並び）
@@ -353,13 +353,29 @@ const SKY_ROWS = 6
 export const skyDecoBox = (dream: DreamId, x: number, y: number): Box => boxOf(DECOS[SKY_DECOS.find(([d]) => d === dream)![1]], x, y)
 
 // 空の夢を置く場所
-export function skyDreamSpots({ yard, dreams, sky, ground, sun, crowd, stars }: SkyRoom): { dream: DreamId; x: number; y: number }[] {
-  const wanted = SKY_DECOS.filter(([one]) => dreams.includes(one))
-  if (wanted.length === 0) return []
+export function skyDreamSpots(room: SkyRoom): { dream: DreamId; x: number; y: number }[] {
+  const wanted = SKY_DECOS.filter(([one]) => room.dreams.includes(one)).map(([dream, deco]) => ({ id: dream, rows: DECOS[deco] }))
+  return placeInSky(room, wanted).map(({ id, x, y }) => ({ dream: id, x, y }))
+}
+
+// 空の夢・季節の飾りがよける、もう置いてあるもの。地面の飾り・みんな・Clawd 座・月の箱と、虹のドット（1 ドットの箱）
+export function takenBoxes({ yard, dreams, sky, ground, crowd }: SkyRoom): Box[] {
   const top = Math.max(0, sky - 3)
-  // 1 ドットあけるもの。箱で持つもの（地面の飾り・月・Clawd 座・みんな・置いた空の夢）と、ドットで持つもの（虹）。
-  // 空の夢を置ける範囲（x は 0〜yard.right、y は星の出る高さまで）の格子に、まわり 1 ドットぶん広げて印をつけ、
-  // 累積和で「箱の中に印があるか」を 1 回で調べる（毎コマ描くので、候補ごとに全部の飾りと比べない）
+  const boxes = [...groundBoxes(yard, dreams, ground), ...crowd]
+  if (dreams.includes('constellation')) boxes.push({ x: Math.floor((yard.left + yard.right) / 2) - 6, y: top, w: 13, h: 9 })
+  if (dreams.includes('moonTrip')) boxes.push(boxOf(DECOS.moon, yard.right - 7, top))
+  if (dreams.includes('noBugs')) for (const { x, y } of rainbowDots(yard, dreams, ground)) boxes.push({ x, y, w: 1, h: 1 })
+  return boxes
+}
+
+// 絵（rows）を、行進の上の空のあいている場所に、渡した順に置く。extra はほかによける箱（季節の飾りを置くときの、置いた空の夢など）。
+// 先に渡したものから置くので、後ろに足したものは前のものの場所を変えない。置けなかったものは返さない
+export function placeInSky<T>(room: SkyRoom, items: { id: T; rows: readonly string[] }[], extra: Box[] = []): { id: T; x: number; y: number }[] {
+  if (items.length === 0) return []
+  const { yard, sky, sun, stars } = room
+  const top = Math.max(0, sky - 3)
+  // 1 ドットあけるもの（takenBoxes と extra）を、空の夢を置ける範囲（x は 0〜yard.right、y は星の出る高さまで）の格子に、
+  // まわり 1 ドットぶん広げて印をつけ、累積和で「箱の中に印があるか」を 1 回で調べる（毎コマ描くので、候補ごとに全部の飾りと比べない）
   const W = yard.right + 1
   const H = SKY_ROWS + sky
   const blocked: number[][] = Array.from({ length: H }, () => Array<number>(W).fill(0))
@@ -367,16 +383,12 @@ export function skyDreamSpots({ yard, dreams, sky, ground, sun, crowd, stars }: 
     for (let y = Math.max(0, b.y - 1); y < Math.min(H, b.y + b.h + 1); y++)
       for (let x = Math.max(0, b.x - 1); x < Math.min(W, b.x + b.w + 1); x++) blocked[y]![x] = 1
   }
-  for (const b of groundBoxes(yard, dreams, ground)) mark(b)
-  for (const b of crowd) mark(b)
-  if (dreams.includes('constellation')) mark({ x: Math.floor((yard.left + yard.right) / 2) - 6, y: top, w: 13, h: 9 })
-  if (dreams.includes('moonTrip')) mark(boxOf(DECOS.moon, yard.right - 7, top))
-  if (dreams.includes('noBugs')) for (const { x, y } of rainbowDots(yard, dreams, ground)) mark({ x, y, w: 1, h: 1 })
+  for (const b of takenBoxes(room)) mark(b)
+  for (const b of extra) mark(b)
   const sunArea = sun ? padded(sunBox(sun)) : null
 
-  const placed: { dream: DreamId; x: number; y: number }[] = []
-  for (const [dream, deco] of wanted) {
-    const rows = DECOS[deco]
+  const placed: { id: T; x: number; y: number }[] = []
+  for (const { id, rows } of items) {
     const w = rows[0]?.length ?? 0
     // 累積和：sum[y][x] は (0,0)〜(x-1,y-1) の印の数
     const sum = Array.from({ length: H + 1 }, () => Array<number>(W + 1).fill(0))
@@ -392,10 +404,22 @@ export function skyDreamSpots({ yard, dreams, sky, ground, sun, crowd, stars }: 
         if (!best || isLess(score, best.score)) best = { x, y, score }
       }
     if (!best) continue
-    placed.push({ dream, x: best.x, y: best.y })
+    placed.push({ id, x: best.x, y: best.y })
     mark(boxOf(rows, best.x, best.y))
   }
   return placed
+}
+
+// 地面に立てる絵（rows）を、庭のあいているいちばん右に置く x。takenBoxes と extra から 1 ドットあける。あいていなければ null
+export function groundSpot(room: SkyRoom, rows: readonly string[], extra: Box[] = []): number | null {
+  const { yard, ground } = room
+  const w = rows[0]?.length ?? 0
+  const others = [...takenBoxes(room), ...extra]
+  for (let x = yard.right - w; x >= yard.left; x--) {
+    const box = padded(boxOf(rows, x, ground - rows.length))
+    if (others.every(b => overlap(box, b) === 0)) return x
+  }
+  return null
 }
 
 // 数の並びを前から比べて小さいか（同じなら先に見つけたほう：上の行・右）
@@ -404,8 +428,8 @@ const isLess = (a: number[], b: number[]) => {
   return false
 }
 
-export function drawSkyDreams(g: Grid, room: SkyRoom, tick: number) {
-  for (const { dream, x, y } of skyDreamSpots(room)) {
+export function drawSkyDreams(g: Grid, spots: { dream: DreamId; x: number; y: number }[], tick: number) {
+  for (const { dream, x, y } of spots) {
     const deco = SKY_DECOS.find(([d]) => d === dream)![1]
     // ふたりの星は、白い芯が左右かわりばんこにまたたく
     const rows = deco === 'twinStars' ? DECOS.twinStars.map(row => (tick % 8 < 4 ? row.replace('XXKXX', 'XXXXX') : row.replace('CCKCC', 'CCCCC'))) : DECOS[deco]

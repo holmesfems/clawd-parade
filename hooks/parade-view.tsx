@@ -8,7 +8,7 @@ import type { Character, ClientMessage, Friend, Look, MoodKind } from '../types'
 import { putHeart } from './decor'
 import { toRuns } from './encode'
 import { drawScene, hitTest, layout, strokeMeter } from './scene'
-import type { Palette } from './palette'
+import type { Calendar, Palette } from './palette'
 
 export type ViewProps = {
   columns: number
@@ -20,6 +20,8 @@ export type ViewProps = {
   look?: Look
   // 時間帯の空・地面・星の色（端末は空を塗らないので、星と地面だけが変わる）
   palette?: Palette
+  // 季節と行事（#41）。無ければ季節の飾りを描かない
+  calendar?: Calendar | null
 }
 
 type Heart = { x: number; y: number; age: number; isBig: boolean }

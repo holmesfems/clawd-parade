@@ -2,6 +2,7 @@
 // $ に触らない純粋な関数だけで書く。保存や表示は register.tsx の仕事。
 
 import type { AchievementId, CosmeticId, DreamId, Friend, Game, GiftId, Hat, Holding, Look, Pets, TouchKind, TreatId, UpgradeId, Work } from '../types'
+import type { Holiday } from './palette'
 
 // ---- 数字 ---------------------------------------------------------------
 
@@ -787,10 +788,12 @@ export function grant(g: Game, list: Achievement[], now: number): Game {
 // いまかかえている贈り物（かかえはじめてから GIFT_SHOW_MS のあいだ）
 export const heldGift = (h: Holding, now: number): GiftId | null => (h && now - h.from < GIFT_SHOW_MS ? h.id : null)
 
-export function lookOf(g: Game, now: number, holding: Holding): Look {
+// holiday は今日の行事（#41）。クリスマスには、サンタぼうしを持っていれば、選んだぼうしにかかわらずかぶる
+// （見た目だけ。保存の hat は変えないので、次の日にはもとのぼうしにもどる）
+export function lookOf(g: Game, now: number, holding: Holding, holiday: Holiday | null = null): Look {
   const gift = heldGift(holding, now)
   return {
-    hat: g.hat,
+    hat: holiday === 'christmas' && g.owned.includes('santa') ? 'santa' : g.hat,
     shootingStars: isLit(g, 'shootingStars'),
     aurora: isLit(g, 'aurora'),
     fever: isFever(g, now),
@@ -821,7 +824,7 @@ export function formatHearts(n: number): string {
   const v = Math.min(HEART_CAP, Math.max(0, n || 0))
   // 垓の次（1e24 以上）は単位がないので指数で。仮数は有効数字 3 桁（1.00e+25 のような繰り上がりも toExponential が直す）
   if (v >= 1e24) {
-    const [mantissa, exponent] = v.toExponential(2).split('e+')
+    const [mantissa = '', exponent = ''] = v.toExponential(2).split('e+')
     return `${mantissa.replace(/\.?0+$/, '')}e${exponent}`
   }
   const unit = UNITS.find(([size]) => v >= size)

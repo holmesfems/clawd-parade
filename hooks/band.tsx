@@ -8,11 +8,11 @@ import { ACHIEVEMENTS, HOOK_FRAME_MS, affectionsOf, clockText, formatHearts, for
 import type { ViewProps } from './parade-view'
 import { QUICK_GIFT_DOTS, putHeart, putQuickGift, quickGiftSpot } from './decor'
 import { encodeCells, toSvg } from './encode'
-import { NIGHT, PALETTES, coatOf, hex, timeOfDay } from './palette'
+import { NIGHT, PALETTES, calendarOf, coatOf, hex, timeOfDay } from './palette'
 import { SCENE_ROWS, drawScene, frameOf, layout } from './scene'
 import { clawdText, kaomoji } from './sprites'
 import type { AffectionName } from './game'
-import type { TimeOfDay } from './palette'
+import type { Calendar, Holiday, Season, TimeOfDay } from './palette'
 import type { Frame } from './scene'
 import type { TouchProps } from './touch-pad'
 
@@ -101,10 +101,31 @@ const AFFECTION_LINES: Partial<Record<AffectionName, Partial<Record<MoodKind, st
   },
 }
 
-// 表情のセリフ。時間帯のセリフ（無ければふだんのセリフ）の後ろに、届いたなかよし度の段のセリフを足す
-export function linesOf(kind: MoodKind, time: TimeOfDay, given: number): string[] {
+// 季節ごとに、ふだんのセリフの後ろに足すセリフ（#41）。なかよし度のセリフと同じく足すだけなので、いちばん目のセリフと
+// 25 コマごとの入れかわりはそのまま。表に季節が無いと型で落ちる。今のところ、ひまなとき（idle）だけ
+const SEASON_LINES: Record<Season, Partial<Record<MoodKind, string[]>>> = {
+  spring: { idle: ['さくら、きれいだね', 'ぽかぽかで、ねむくなっちゃう'] },
+  summer: { idle: ['あついね〜、水分とってる？', 'アイス、たべたくなるね'] },
+  autumn: { idle: ['おちば、ふかふかだね', '食欲の秋…おなかすいた？'] },
+  winter: { idle: ['さむいね…あったかくしてね', 'こたつで、いっしょにコーディングしよ'] },
+}
+
+// 行事の日のセリフ。季節のセリフより前に足して、入れかわりの早いうちに出る
+const HOLIDAY_LINES: Record<Holiday, Partial<Record<MoodKind, string[]>>> = {
+  christmas: { idle: ['メリークリスマス！', 'サンタさん、来るかな？', 'プレゼントは、きみのコードがいいな'] },
+  newYear: { idle: ['あけましておめでとう！', 'ことしもよろしくね！', 'おもち、なんこ食べた？'] },
+  halloween: { idle: ['トリック・オア・トリート！', 'おかしくれないと、バグっちゃうぞ〜'] },
+  tanabata: { idle: ['ねがいごと、なににする？', 'ことしは晴れるといいね'] },
+  tsukimi: { idle: ['おつきさま、まんまるだね', 'おだんご、いっしょに食べよ？'] },
+}
+
+// 表情のセリフ。時間帯のセリフ（無ければふだんのセリフ）の後ろに、行事・季節のセリフ、届いたなかよし度の段のセリフを足す。
+// calendar が無ければ（null）季節のセリフは足さない
+export function linesOf(kind: MoodKind, time: TimeOfDay, given: number, calendar: Calendar | null = null): string[] {
   const base = TIME_LINES[time][kind] ?? LINES[kind]
-  return [...base, ...affectionsOf(given).flatMap(name => AFFECTION_LINES[name]?.[kind] ?? [])]
+  const holiday = calendar?.holiday ? HOLIDAY_LINES[calendar.holiday][kind] ?? [] : []
+  const season = calendar ? SEASON_LINES[calendar.season][kind] ?? [] : []
+  return [...base, ...holiday, ...season, ...affectionsOf(given).flatMap(name => AFFECTION_LINES[name]?.[kind] ?? [])]
 }
 
 // なでられたときの、時間帯ごとのひとこと（表情ごとの PETTED_LINES が無いとき）
@@ -147,8 +168,22 @@ function groupBy<T, K>(list: T[], keyOf: (one: T) => K): Map<K, T[]> {
   return out
 }
 
-// 帯に出す文字を作るのに使う状態。hour は今の「時」（0〜23、使う人のタイムゾーン）
-export type BandState = { mood: Mood; work: Work; friends: Friend[]; pets: Pets; game: Game; holding: Holding; tick: Tick; hour: number }
+// 帯に出す文字を作るのに使う状態。hour は今の「時」（0〜23、使う人のタイムゾーン）。
+// date は今日の「月」（1〜12）と「日」（同じタイムゾーン。/parade debug 12/25 で見たい日にもできる）。無ければ季節の飾りもセリフも出さない
+export type BandState = {
+  mood: Mood
+  work: Work
+  friends: Friend[]
+  pets: Pets
+  game: Game
+  holding: Holding
+  tick: Tick
+  hour: number
+  date?: { month: number; day: number }
+}
+
+// 今日の季節と行事。日付が無ければ null（季節なし）
+export const calendarOfState = (s: Pick<BandState, 'date'>): Calendar | null => (s.date ? calendarOf(s.date.month, s.date.day) : null)
 
 export type BandText = {
   // セリフと、その色（なでられている・お礼のときはピンク）。tone は表情の色
@@ -174,7 +209,7 @@ export function bandText(s: BandState): BandText {
   const holdingId = heldGift(s.holding, now)
   const thanked = holdingId ? giftOf(holdingId) : undefined
   const time = timeOfDay(s.hour)
-  const lines = linesOf(m.kind, time, g.given)
+  const lines = linesOf(m.kind, time, g.given, calendarOfState(s))
   const say = thanked
     ? thanked.thanks
     : petted
@@ -341,14 +376,16 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
 
   const { isWide, columns: sceneColumns } = frame
   const room = SCENE_ROWS + (isWide ? 0 : 3 + list.length)
+  const calendar = calendarOfState(input)
   const sceneProps: ViewProps = {
     columns: sceneColumns,
     mood: m.kind,
     tick: t.n,
     friends: list,
     character: who,
-    look: lookOf(g, t.at, held),
+    look: lookOf(g, t.at, held, calendar?.holiday ?? null),
     palette: PALETTES[timeOfDay(input.hour)],
+    calendar,
   }
   // デスクトップの絵は px で描くので、行数の余裕は見ない
   const canDraw = cols >= MIN_SCENE_CELLS && (isDesktop || (input.surface === 'terminal' && input.maxRows >= room))

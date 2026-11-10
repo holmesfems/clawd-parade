@@ -4,7 +4,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Friend, Look, MoodKind } from '../types'
 import { encodeCells, toSvg } from '../hooks/encode'
-import { NIGHT, PALETTES } from '../hooks/palette'
+import { NIGHT, PALETTES, calendarOf } from '../hooks/palette'
 import { drawScene } from '../hooks/scene'
 
 // FNV-1a（32 bit）
@@ -145,4 +145,69 @@ const DREAMY_EXPECTED: Record<string, string> = {
   'wave/terminal': '13bec198',
   'wave-neko/desktop': '0a44fab6',
   'wave-neko/terminal': 'b2bc8af6',
+}
+
+// 1.8.0（#41）の季節と行事の場面。季節は夜と昼（夏は夜がほたる・昼が入道雲）、行事は夜（お月見は満月の出ない昼も）。
+// 夢の飾りと贈った星もいっしょに出して、季節の飾りがそれをよけているところを残す。
+// 上の指紋は季節なし（calendar を渡さない）で取っているので、季節を足しても変わらない
+const SEASONAL: { name: string; date: [number, number]; palette: keyof typeof PALETTES }[] = [
+  ...(['night', 'day'] as const).flatMap(palette => [
+    { name: `spring-${palette}`, date: [4, 5] as [number, number], palette },
+    { name: `summer-${palette}`, date: [8, 1] as [number, number], palette },
+    { name: `autumn-${palette}`, date: [10, 10] as [number, number], palette },
+    { name: `winter-${palette}`, date: [1, 20] as [number, number], palette },
+  ]),
+  { name: 'christmas', date: [12, 25], palette: 'night' },
+  { name: 'newYear', date: [1, 1], palette: 'night' },
+  { name: 'halloween', date: [10, 31], palette: 'night' },
+  { name: 'tanabata', date: [7, 7], palette: 'night' },
+  { name: 'tsukimi', date: [9, 15], palette: 'night' },
+  { name: 'tsukimi-day', date: [9, 15], palette: 'day' },
+]
+
+test('1.8.0 の季節と行事のある絵の指紋', () => {
+  const got: Record<string, string> = {}
+  for (const s of SEASONAL) {
+    const palette = PALETTES[s.palette]
+    const calendar = calendarOf(...s.date)
+    const look: Look = { ...plain, dreams: ['house', 'starHill', 'airship'], stars: 5 }
+    const input = { mood: 'idle' as const, character: 'clawd' as const, friends: crew(1), look, tick: 5, palette, calendar }
+    got[`${s.name}/desktop`] = fingerprint(toSvg(drawScene({ ...input, columns: 180, paradeColumns: 114, headroom: 4, twinkleTicks: 4 }), 16, palette).source)
+    // 端末は空が低く庭が狭いので、低い旗と空飛ぶ船に（行事の飾りが入るように）
+    got[`${s.name}/terminal`] = fingerprint(JSON.stringify(encodeCells(drawScene({ ...input, look: { ...look, dreams: ['greenTests', 'airship'] }, columns: 84 }))))
+  }
+  expect(got).toEqual(SEASONAL_EXPECTED)
+})
+
+// 1.8.0 で季節と行事を足したときの絵から取った指紋。tsukimi-day/terminal が autumn-day/terminal と同じなのは、狭い端末の昼は
+// 太陽と空飛ぶ船で庭の上がふさがり、おだんごを置く場所が無い（出さない）から
+const SEASONAL_EXPECTED: Record<string, string> = {
+  'spring-night/desktop': 'c6ad7c49',
+  'spring-night/terminal': 'c4044cfe',
+  'summer-night/desktop': 'aab85d41',
+  'summer-night/terminal': '8f76e6f0',
+  'autumn-night/desktop': 'eca55e7a',
+  'autumn-night/terminal': 'e1696e16',
+  'winter-night/desktop': '25aa8b2d',
+  'winter-night/terminal': 'f651f02e',
+  'spring-day/desktop': 'e490a31f',
+  'spring-day/terminal': 'fafb995b',
+  'summer-day/desktop': '5e9afca3',
+  'summer-day/terminal': '64b7b57c',
+  'autumn-day/desktop': '04c0e636',
+  'autumn-day/terminal': '6cb4973f',
+  'winter-day/desktop': '8ee8933d',
+  'winter-day/terminal': 'ddd07cba',
+  'christmas/desktop': 'dbf3d728',
+  'christmas/terminal': '56accbc6',
+  'newYear/desktop': '08230b4c',
+  'newYear/terminal': 'cb3f9540',
+  'halloween/desktop': '587ce8a8',
+  'halloween/terminal': '3c357ca3',
+  'tanabata/desktop': 'ced95fde',
+  'tanabata/terminal': 'd6b4cd70',
+  'tsukimi/desktop': '94d64c17',
+  'tsukimi/terminal': '0c469570',
+  'tsukimi-day/desktop': '2ef66905',
+  'tsukimi-day/terminal': '6cb4973f',
 }
