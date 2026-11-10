@@ -425,6 +425,11 @@ const DREAM_TABLE: Record<DreamId, Omit<Dream, 'kind' | 'id'>> = {
   constellation: { name: 'Clawd 座', price: 3_000_000, shows: '夜空に Clawd の星座', thanks: '空に Clawd 座が…！ずっと見ててね' },
   moonTrip: { name: '月への旅', price: 12_000_000, shows: '月とロケット', thanks: '月まで行けちゃう！おみやげ持って帰るね' },
   noBugs: { name: 'バグのない世界', price: 100_000_000, shows: '空に虹', thanks: '…夢みたい。でも、きみといっしょに直す時間も好きだったよ' },
+  // 1.7.0（#40）：1 億より先の、一度きりの目標。星（#39）で兆・京まで育ったあとにも、ひとつずつ手が届くよう 10 倍ずつにした
+  starHill: { name: '流れ星の丘', price: 1e9, shows: '星のおりてくる小さな丘', thanks: '流れ星の丘…！ねがいごと、いっしょにしよ？' },
+  airship: { name: '空飛ぶ船', price: 1e10, shows: '空をゆく小さな船', thanks: '空飛ぶ船だ！どこへでも連れてってあげるね' },
+  statue: { name: 'Clawd の銅像', price: 1e11, shows: '台にのった Clawd の銅像', thanks: 'Clawd の銅像…！？てれちゃう…でもうれしい' },
+  twinStars: { name: 'ふたりの星', price: 1e12, shows: '空にならんだふたつの星', thanks: 'きみの星と、Clawd の星。ずっとならんで光ってるね' },
 }
 
 // 夢のプレゼントを飾る場所と、その枠の数（♡ では増やせない）。
@@ -444,6 +449,10 @@ const DREAM_SPOTS: Record<DreamId, DreamSpot> = {
   constellation: 'sky',
   moonTrip: 'yard',
   noBugs: 'sky',
+  starHill: 'yard',
+  airship: 'sky',
+  statue: 'yard',
+  twinStars: 'sky',
 }
 const SPOTS = Object.keys(SLOTS) as DreamSpot[]
 
@@ -581,7 +590,9 @@ export function pickFavorite(g: Game, id: TreatId | null): Dealt {
   return ok({ ...g, favorite: id })
 }
 
-// なかよし度：贈った ♡ の合計で上がる
+// なかよし度：贈った ♡ の合計で上がる。段は名前で数える（保存には入らず、贈った ♡ の合計から毎回決める）。
+// 「だいすき」からはセリフが増え、「あいぼう」からはときどき手をふる（band.tsx の AFFECTION_LINES と lookOf）。
+// 星（#39）で ♡ が兆・京まで育つので、1.7.0（#40）で「ずっといっしょ」の先に 3 段足した
 const AFFECTION = [
   { name: 'しりあい', at: 0 },
   { name: 'ともだち', at: 300 },
@@ -590,10 +601,21 @@ const AFFECTION = [
   { name: 'しんゆう', at: 300_000 },
   { name: 'あいぼう', at: 3_000_000 },
   { name: 'ずっといっしょ', at: 100_000_000 },
+  { name: 'かぞく', at: 1e10 },
+  { name: 'うんめいのふたり', at: 1e12 },
+  { name: 'えいえん', at: 1e16 },
 ] as const
 
+export type AffectionName = (typeof AFFECTION)[number]['name']
+
 // なかよし度の段に届く、贈った ♡ の合計
-const affectionAt = (name: (typeof AFFECTION)[number]['name']) => AFFECTION.find(a => a.name === name)!.at
+const affectionAt = (name: AffectionName) => AFFECTION.find(a => a.name === name)!.at
+
+// なかよし度が name の段（かそれより上）に届いているか
+export const isFond = (given: number, name: AffectionName) => given >= affectionAt(name)
+
+// 届いている段の名前（低い順）
+export const affectionsOf = (given: number): AffectionName[] => AFFECTION.filter(a => given >= a.at).map(a => a.name)
 
 export function affectionOf(given: number): { name: string; next?: { name: string; at: number } } {
   const reached = AFFECTION.filter(a => given >= a.at)
@@ -683,6 +705,9 @@ export type Facts = { game: Game; pets: number; rate: number }
 
 type AchievementSpec = { id: AchievementId; name: string; about: string; test: (f: Facts) => boolean }
 
+// その夢のプレゼントを贈ったか（しまってあっても）
+const hasGiven = (g: Game, id: DreamId) => (g.gifts[id] ?? 0) > 0
+
 const spent = (g: Game) => Object.values(g.levels).reduce((n, l) => n + (l ?? 0), 0) + g.owned.length
 
 // id は保存（achievements・lastUnlock）に入るので、変えないこと
@@ -718,6 +743,7 @@ export const ACHIEVEMENTS = [
   },
   { id: 'letter', name: 'きもちをこめて', about: 'ありがとうの手紙をあげる', test: f => (f.game.gifts.letter ?? 0) >= 1 },
   { id: 'dream1', name: '夢をひとつ', about: '夢のプレゼントを贈る', test: f => dreamsOf(f.game).length >= 1 },
+  // 1.7.0 で夢が 11 になったので、条件も 11 全部になった。前に取った実績は保存に残り、消えない（unlocked はまだ持っていないものだけを見る）
   { id: 'dreamAll', name: '夢をぜんぶ', about: '夢のプレゼントを全部贈る', test: f => dreamsOf(f.game).length === DREAMS.length },
   { id: 'bff', name: 'しんゆう', about: 'なかよし度を「しんゆう」にする', test: f => f.game.given >= affectionAt('しんゆう') },
   { id: 'earned10b', name: '♡大富豪', about: '♡ を 100 億稼ぐ', test: f => f.game.earned >= 1e10 },
@@ -726,6 +752,14 @@ export const ACHIEVEMENTS = [
   { id: 'stars10', name: '星をあつめて', about: '星を 10 個贈る', test: f => starCount(f.game) >= 10 },
   { id: 'stars50', name: '満天の星', about: '星を 50 個贈る', test: f => starCount(f.game) >= 50 },
   { id: 'stars100', name: 'ふたりの天の川', about: '星を 100 個贈る', test: f => starCount(f.game) >= 100 },
+  // 1.7.0（#40）：「ずっといっしょ」の先のなかよし度と、1 億より先の夢のプレゼント
+  { id: 'family', name: 'かぞく', about: 'なかよし度を「かぞく」にする', test: f => isFond(f.game.given, 'かぞく') },
+  { id: 'destiny', name: 'うんめいのふたり', about: 'なかよし度を「うんめいのふたり」にする', test: f => isFond(f.game.given, 'うんめいのふたり') },
+  { id: 'forever', name: 'えいえん', about: 'なかよし度を「えいえん」にする', test: f => isFond(f.game.given, 'えいえん') },
+  { id: 'dreamHill', name: 'ねがいごとの丘', about: '流れ星の丘を贈る', test: f => hasGiven(f.game, 'starHill') },
+  { id: 'dreamAirship', name: '空のたびびと', about: '空飛ぶ船を贈る', test: f => hasGiven(f.game, 'airship') },
+  { id: 'dreamStatue', name: 'りっぱな銅像', about: 'Clawd の銅像を贈る', test: f => hasGiven(f.game, 'statue') },
+  { id: 'dreamTwinStars', name: 'ならんだふたつ星', about: 'ふたりの星を贈る', test: f => hasGiven(f.game, 'twinStars') },
 ] as const satisfies readonly AchievementSpec[]
 
 export type Achievement = (typeof ACHIEVEMENTS)[number]
@@ -765,6 +799,8 @@ export function lookOf(g: Game, now: number, holding: Holding): Look {
     // 飾ると選んだものだけ（庭 3 つ・空 2 つまで）
     dreams: shownDreams(g),
     stars: starCount(g),
+    // 「あいぼう」からは、ひまなときにときどき手をふる（いつふるかは drawScene が tick から決める）
+    waves: isFond(g.given, 'あいぼう'),
   }
 }
 

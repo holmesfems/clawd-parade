@@ -68,7 +68,19 @@ export type CosmeticId = Hat | 'shootingStars' | 'aurora'
 
 // 小さな贈り物（何度でも）と、夢のプレゼント（1 回きりで、ずっと飾られる）
 export type TreatId = 'cookie' | 'cocoa' | 'cake' | 'letter' | 'cushion' | 'keyboard'
-export type DreamId = 'greenTests' | 'telescope' | 'house' | 'library' | 'constellation' | 'moonTrip' | 'noBugs'
+// 1.7.0 で足した 4 つ（流れ星の丘・空飛ぶ船・Clawd の銅像・ふたりの星）は、後ろに足した。id は保存に入るので変えないこと
+export type DreamId =
+  | 'greenTests'
+  | 'telescope'
+  | 'house'
+  | 'library'
+  | 'constellation'
+  | 'moonTrip'
+  | 'noBugs'
+  | 'starHill'
+  | 'airship'
+  | 'statue'
+  | 'twinStars'
 // 星は何度でも贈れて、贈るたびに値段が上がる（数は gifts.star に入る）
 export type GiftId = TreatId | DreamId | 'star'
 
@@ -109,6 +121,13 @@ export type AchievementId =
   | 'stars10'
   | 'stars50'
   | 'stars100'
+  | 'family'
+  | 'destiny'
+  | 'forever'
+  | 'dreamHill'
+  | 'dreamAirship'
+  | 'dreamStatue'
+  | 'dreamTwinStars'
 
 export type Game = {
   // 保存形式の版。v の無い保存（1.1.2 まで）は v1 として読む
@@ -168,6 +187,9 @@ export type Look = {
   dreams: DreamId[]
   // 贈った星の数。夜空に明るい星を足し、多くなったら天の川にする
   stars: number
+  // なかよし度が「あいぼう」から：ひまなとき、ときどき手をふる（ねこは耳をぴくっとさせる）。
+  // 無ければふらない（前からある絵は、この項目が無くても同じに描ける）
+  waves?: boolean
 }
 
 declare module 'claude-code' {

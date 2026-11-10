@@ -41,6 +41,8 @@ export type Plan = {
   pets: number
   burst: number
   gapMs: number
+  // 夢のプレゼントも買うか（1.6.0 までのまねっこは買わなかった）
+  dreams: boolean
 }
 
 // 1 日 8 時間開いて、うち 4 時間 Claude が働く。ツールは 20 秒に 1 回、はじめの 1 時間はサブエージェント 2 匹。
@@ -53,6 +55,7 @@ export const WORKDAY: Plan = {
   pets: 500,
   burst: 50,
   gapMs: 150,
+  dreams: true,
 }
 
 const situationAt = (plan: Plan, minute: number): Situation => ({
@@ -75,14 +78,19 @@ function dailyIncome(g: Game, plan: Plan, now: number): number {
 
 type Buy = { name: string; price: number; deal: (g: Game, now: number) => Dealt }
 
-// 買えるもの：上限の無い強化（とフィーバー延長）と、星
-function choices(g: Game): Buy[] {
+// 買えるもの：上限の無い強化（とフィーバー延長）と、星と、まだ贈っていない夢のプレゼント（1.7.0 の 1 億より先の夢も）
+function choices(g: Game, plan: Plan): Buy[] {
   const ups: Buy[] = UPGRADES.filter(u => !isMaxed(u, levelOf(g, u.id))).map(u => ({
     name: u.id,
     price: priceOf(u, levelOf(g, u.id)),
     deal: one => buyUpgrade(one, u.id),
   }))
-  return [...ups, { name: STAR.id, price: starPrice(g), deal: (one, now) => giveGift(one, 'star', now) }]
+  const dreams: Buy[] = DREAMS.filter(d => plan.dreams && (g.gifts[d.id] ?? 0) === 0).map(d => ({
+    name: d.id,
+    price: d.price,
+    deal: (one, now) => giveGift(one, d.id, now),
+  }))
+  return [...ups, ...dreams, { name: STAR.id, price: starPrice(g), deal: (one, now) => giveGift(one, 'star', now) }]
 }
 
 // いちばん「♡ 1 あたりで稼ぎが増える」ものを、買えるあいだ買う。いちばんのものが買えなければ貯める
@@ -90,7 +98,7 @@ function shop(g: Game, plan: Plan, now: number, bought: Record<string, number>):
   for (;;) {
     const before = dailyIncome(g, plan, now)
     let best: { buy: Buy; next: Game; worth: number } | undefined
-    for (const buy of choices(g)) {
+    for (const buy of choices(g, plan)) {
       if (buy.price >= HEART_CAP) continue
       // 値段を気にせず買ったことにして、増える稼ぎを見る
       const dealt = buy.deal({ ...g, hearts: HEART_CAP }, now)
@@ -145,7 +153,8 @@ export function playUntil(start: Game, done: (g: Game) => boolean, maxDays: numb
 }
 
 // 1 億を稼いだ人（#39 の作者）のころのセーブ：一度きりのものは全部持っていて、♡ は 1 億。
-// 強化の Lv は、値段と効き目から見て 1 億を稼ぐうちに上げていそうなところ
+// 強化の Lv は、値段と効き目から見て 1 億を稼ぐうちに上げていそうなところ。
+// 夢のプレゼントは 1 億までのもの（1.6.0 までの 7 つ）。1.7.0 で足した 10 億からの夢は、遊びながら買う
 export const VETERAN_LEVELS: Record<UpgradeId, number> = {
   glove: 45,
   brush: 20,
@@ -157,15 +166,17 @@ export const VETERAN_LEVELS: Record<UpgradeId, number> = {
   stardust: 50,
 }
 
+export const VETERAN_DREAMS = DREAMS.filter(d => d.price <= 100_000_000)
+
 export function veteranGame(): Game {
-  const dreams = DREAMS.reduce((sum, d) => sum + d.price, 0)
+  const dreams = VETERAN_DREAMS.reduce((sum, d) => sum + d.price, 0)
   return {
     ...newGame(0, 1_000),
     hearts: 100_000_000,
     earned: 500_000_000,
     levels: { ...VETERAN_LEVELS },
     owned: COSMETICS.map(c => c.id),
-    gifts: Object.fromEntries(DREAMS.map(d => [d.id, 1])),
+    gifts: Object.fromEntries(VETERAN_DREAMS.map(d => [d.id, 1])),
     given: dreams,
   }
 }

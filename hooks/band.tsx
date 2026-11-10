@@ -4,13 +4,14 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
 import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, TreatId, Work } from '../types'
-import { ACHIEVEMENTS, HOOK_FRAME_MS, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf, treatOf } from './game'
+import { ACHIEVEMENTS, HOOK_FRAME_MS, affectionsOf, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf, treatOf } from './game'
 import type { ViewProps } from './parade-view'
 import { QUICK_GIFT_DOTS, putHeart, putQuickGift, quickGiftSpot } from './decor'
 import { encodeCells, toSvg } from './encode'
 import { NIGHT, PALETTES, coatOf, hex, timeOfDay } from './palette'
 import { SCENE_ROWS, drawScene, frameOf, layout } from './scene'
 import { clawdText, kaomoji } from './sprites'
+import type { AffectionName } from './game'
 import type { TimeOfDay } from './palette'
 import type { Frame } from './scene'
 import type { TouchProps } from './touch-pad'
@@ -68,6 +69,42 @@ const TIME_LINES: Record<TimeOfDay, Partial<Record<MoodKind, string[]>>> = {
     done: ['おわったよ…ほめて…そして寝よ？'],
     sleeping: ['すやすや…（もう夜おそいね。話しかけたら起きるよ）'],
   },
+}
+
+// なかよし度の段ごとに、ふだんのセリフ（LINES・TIME_LINES）の後ろに足すセリフ。届いた段のぶんを、低い段から順に全部足す。
+// 足すだけなので、どの段でもいちばん目のセリフは今までと同じで、25 コマごとの入れかわりに混ざる（乱数は使わない）。
+// 帯は狭いので、どれも 20 字くらいまでにする
+const AFFECTION_LINES: Partial<Record<AffectionName, Partial<Record<MoodKind, string[]>>>> = {
+  // 「だいすき」から：ふだんのあいさつが少しあまえんぼうに
+  だいすき: {
+    idle: ['きみがいると、なんだか安心する', 'ねえねえ、今日もいっしょだね♡'],
+  },
+  // 「しんゆう」から：寝言と、おわったときのひとこと
+  しんゆう: {
+    sleeping: ['むにゃ…テスト、ぜんぶとおった…', 'すぅ…きみのコード、すき…'],
+    done: ['おわったよ！ふたりならなんでもできるね', 'いっしょだと、あっというまだね♡'],
+  },
+  あいぼう: {
+    idle: ['あいぼう、つぎは何しよっか？'],
+  },
+  かぞく: {
+    idle: ['ここがおうちだね。ただいま♡'],
+    done: ['おわったよ！おいわいにごはん食べよ？'],
+  },
+  うんめいのふたり: {
+    idle: ['きみに会えたのは、きっとうんめいだね'],
+    sleeping: ['むにゃ…どこにもいかないでね…'],
+  },
+  えいえん: {
+    idle: ['これからも、ずっとずっといっしょだよ♡', 'えいえんに、きみのとなりにいるね'],
+    done: ['おわったよ。つぎも、そのつぎも、いっしょだよ'],
+  },
+}
+
+// 表情のセリフ。時間帯のセリフ（無ければふだんのセリフ）の後ろに、届いたなかよし度の段のセリフを足す
+export function linesOf(kind: MoodKind, time: TimeOfDay, given: number): string[] {
+  const base = TIME_LINES[time][kind] ?? LINES[kind]
+  return [...base, ...affectionsOf(given).flatMap(name => AFFECTION_LINES[name]?.[kind] ?? [])]
 }
 
 // なでられたときの、時間帯ごとのひとこと（表情ごとの PETTED_LINES が無いとき）
@@ -137,7 +174,7 @@ export function bandText(s: BandState): BandText {
   const holdingId = heldGift(s.holding, now)
   const thanked = holdingId ? giftOf(holdingId) : undefined
   const time = timeOfDay(s.hour)
-  const lines = TIME_LINES[time][m.kind] ?? LINES[m.kind]
+  const lines = linesOf(m.kind, time, g.given)
   const say = thanked
     ? thanked.thanks
     : petted

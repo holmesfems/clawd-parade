@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Friend, Pets, TreatId, Work } from '../types'
 import type { BandState } from '../hooks/band'
-import { bandText } from '../hooks/band'
+import { bandText, linesOf } from '../hooks/band'
 import { clockText, isPetted, newGame } from '../hooks/game'
 
 const NOW = 100_000
@@ -122,4 +122,53 @@ test('isPetted と clockText', () => {
   expect(isPetted({ ...untouched, at: NOW - 3_999 }, NOW)).toBe(true)
   expect(clockText(83_400)).toBe('1:23')
   expect(clockText(-5)).toBe('0:00')
+})
+
+test('なかよし度でセリフが増える：だいすきからはあまえたあいさつ、しんゆうからは寝言とおわったときのひとこと', () => {
+  const say = (given: number, kind: BandState['mood']['kind'], n: number, hour = 21) =>
+    bandText(state({ hour, mood: { kind, at: 0 }, tick: { n, at: NOW }, game: { ...newGame(0, NOW), given } })).say
+  // まだ贈っていなければ今までと同じ（いちばん目のセリフも、入れかわりも）
+  expect(linesOf('idle', 'night', 0)).toEqual(['よろしくね！なんでも言ってね', 'こんばんは！夜のコーディング、わくわくするね', '星がきれいな夜だね'])
+  expect(linesOf('idle', 'night', 29_999)).toEqual(linesOf('idle', 'night', 0))
+  // だいすき：時間帯のセリフの後ろに足す。いちばん目は変わらず、25 コマごとの入れかわりに混ざる
+  const fond = linesOf('idle', 'night', 30_000)
+  expect(fond.slice(0, 3)).toEqual(linesOf('idle', 'night', 0))
+  expect(fond.length).toBe(5)
+  expect(say(30_000, 'idle', 0)).toBe('よろしくね！なんでも言ってね')
+  expect(say(30_000, 'idle', 75)).toBe('きみがいると、なんだか安心する')
+  expect(say(30_000, 'idle', 100)).toBe('ねえねえ、今日もいっしょだね♡')
+  expect(say(30_000, 'idle', 125)).toBe('よろしくね！なんでも言ってね')
+  // 朝のあいさつも残る
+  expect(say(30_000, 'idle', 0, 7)).toBe('おはよう！今日もよろしくね')
+  // だいすきでは、寝言とおわったときのひとことはまだ
+  expect(linesOf('sleeping', 'night', 30_000)).toEqual(linesOf('sleeping', 'night', 0))
+  expect(linesOf('done', 'night', 30_000)).toEqual(['おわったよ！ほめてほめて〜'])
+  // しんゆう：寝言と、おわったときのひとこと
+  expect(say(300_000, 'sleeping', 25)).toBe('むにゃ…テスト、ぜんぶとおった…')
+  expect(say(300_000, 'done', 25)).toBe('おわったよ！ふたりならなんでもできるね')
+  expect(say(300_000, 'done', 25, 3)).toBe('おわったよ！ふたりならなんでもできるね')
+  // ほかの表情（許可待ちなど）は増えない
+  expect(linesOf('permission', 'night', 1e16)).toEqual(['これ、やってもいい？おねがい〜'])
+})
+
+test('なかよし度でセリフが増える：上の段ほど、そのぶん足される', () => {
+  const extra = (given: number) => linesOf('idle', 'night', given).slice(3)
+  expect(extra(3_000_000)).toContain('あいぼう、つぎは何しよっか？')
+  expect(extra(1e8)).toEqual(extra(3_000_000))
+  expect(extra(1e10)).toContain('ここがおうちだね。ただいま♡')
+  expect(extra(1e12)).toContain('きみに会えたのは、きっとうんめいだね')
+  expect(extra(1e16)).toContain('これからも、ずっとずっといっしょだよ♡')
+  for (const given of [1e10, 1e12, 1e16]) expect(extra(given).length).toBeGreaterThan(extra(given / 100).length)
+  expect(linesOf('done', 'night', 1e16)).toContain('おわったよ。つぎも、そのつぎも、いっしょだよ')
+  expect(linesOf('sleeping', 'night', 1e12)).toContain('むにゃ…どこにもいかないでね…')
+  // 帯は狭いので、足したセリフはどれも 22 字まで
+  for (const kind of ['idle', 'done', 'sleeping'] as const)
+    for (const line of linesOf(kind, 'night', 1e16).slice(linesOf(kind, 'night', 0).length)) expect([...line].length).toBeLessThanOrEqual(22)
+})
+
+test('なでられている・お礼のときは、なかよし度のセリフより先', () => {
+  const game = { ...newGame(0, NOW), given: 1e16 }
+  expect(bandText(state({ game, pets: { ...untouched, at: NOW - 1_000 } })).say).toBe('えへへ…♡ もっとなでて〜')
+  expect(bandText(state({ game, holding: { id: 'twinStars', from: NOW } })).say).toBe('きみの星と、Clawd の星。ずっとならんで光ってるね')
+  expect(bandText(state({ game, holding: { id: 'twinStars', from: NOW } })).info).toBe('🎁 ふたりの星 がやってきた！')
 })

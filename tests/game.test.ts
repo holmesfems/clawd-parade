@@ -15,6 +15,7 @@ import {
   TREATS,
   UPGRADES,
   affectionOf,
+  affectionsOf,
   accrue,
   buyCosmetic,
   buyUpgrade,
@@ -22,9 +23,11 @@ import {
   formatRate,
   giftOf,
   giveGift,
+  grant,
   idleDue,
   isSame,
   isDream,
+  isFond,
   isMaxed,
   lookOf,
   mergeGame,
@@ -476,7 +479,16 @@ test('affectionOf：贈った ♡ でなかよし度が上がり、次の段を�
   expect(affectionOf(0)).toEqual({ name: 'しりあい', next: { name: 'ともだち', at: 300 } })
   expect(affectionOf(300)).toEqual({ name: 'ともだち', next: { name: 'なかよし', at: 3_000 } })
   expect(affectionOf(299_999).name).toBe('だいすき')
-  expect(affectionOf(100_000_000)).toEqual({ name: 'ずっといっしょ' })
+  // 1.7.0 で「ずっといっしょ」の先に 3 段（100 億・1 兆・1 京）を足した
+  expect(affectionOf(100_000_000)).toEqual({ name: 'ずっといっしょ', next: { name: 'かぞく', at: 1e10 } })
+  expect(affectionOf(1e10)).toEqual({ name: 'かぞく', next: { name: 'うんめいのふたり', at: 1e12 } })
+  expect(affectionOf(1e12)).toEqual({ name: 'うんめいのふたり', next: { name: 'えいえん', at: 1e16 } })
+  expect(affectionOf(1e16 - 1e3).name).toBe('うんめいのふたり')
+  expect(affectionOf(1e16)).toEqual({ name: 'えいえん' })
+  expect(affectionOf(HEART_CAP)).toEqual({ name: 'えいえん' })
+  expect(affectionsOf(3_000_000)).toEqual(['しりあい', 'ともだち', 'なかよし', 'だいすき', 'しんゆう', 'あいぼう'])
+  expect(isFond(2_999_999, 'あいぼう')).toBe(false)
+  expect(isFond(3_000_000, 'あいぼう')).toBe(true)
 })
 
 // ---- お店 ----
@@ -858,8 +870,12 @@ test('実績：100 億・1 兆・1 京を稼ぐ、星を 10・50・100 個贈る
 // ---- 飾る数の上限と、飾る・しまう（#44） ----
 
 const ALL_DREAMS = DREAMS.map(d => d.id)
-// 夢を全部贈ってあるセーブ
-const dreamer = (over: Partial<Game> = {}) => game({ gifts: Object.fromEntries(ALL_DREAMS.map(id => [id, 1])), ...over })
+// 1.6.0 までの 7 つの夢（1.7.0 で 10 億からの 4 つを後ろに足した）
+const OLD_DREAMS: DreamId[] = ['greenTests', 'telescope', 'house', 'library', 'constellation', 'moonTrip', 'noBugs']
+// 1.6.0 までの夢を全部贈ってあるセーブ（#44 の飾る・しまうのテストは、このころの夢で書いてある）
+const dreamer = (over: Partial<Game> = {}) => game({ gifts: Object.fromEntries(OLD_DREAMS.map(id => [id, 1])), ...over })
+// 1.7.0 の夢まで全部贈ってあるセーブ
+const allDreamer = (over: Partial<Game> = {}) => game({ gifts: Object.fromEntries(ALL_DREAMS.map(id => [id, 1])), ...over })
 
 test('飾る場所：庭 3 つ・空 2 つ。夢はどれも庭か空のどちらか 1 つ（月への旅はロケットが庭の幅を取るので庭）', () => {
   expect(SLOTS).toEqual({ yard: 3, sky: 2 })
@@ -871,6 +887,10 @@ test('飾る場所：庭 3 つ・空 2 つ。夢はどれも庭か空のどち�
     constellation: 'sky',
     moonTrip: 'yard',
     noBugs: 'sky',
+    starHill: 'yard',
+    airship: 'sky',
+    statue: 'yard',
+    twinStars: 'sky',
   })
 })
 
@@ -916,7 +936,11 @@ test('飾る・しまう：変わるのは絵だけ。♡ の +10%・実績・�
   for (const id of shownDreams(stowed)) none = bought(toggleDream(none, id))
   expect(lookOf(none, 5_000, null).dreams).toEqual([])
   expect(giftRate(none, 5_000)).toBe(giftRate(g, 5_000))
-  expect(unlocked({ game: { ...none, achievements: [] }, pets: 0, rate: 0 }).map(a => a.id)).toContain('dreamAll')
+  // 夢をぜんぶ（1.7.0 からは 11 個全部）贈ってあれば、全部しまっても実績の条件は満たしたまま
+  let allNone = allDreamer()
+  for (const id of shownDreams(allNone)) allNone = bought(toggleDream(allNone, id))
+  expect(lookOf(allNone, 5_000, null).dreams).toEqual([])
+  expect(unlocked({ game: allNone, pets: 0, rate: 0 }).map(a => a.id)).toContain('dreamAll')
 
   // あいた庭に、しまってあった旗を飾る。もう 1 つは入らない
   const flag = bought(toggleDream(stowed, 'greenTests'))
@@ -1009,7 +1033,7 @@ test('restore：1.5.0 のセーブ（星があり、飾る夢を選んでいな�
   const g = restore(JSON.parse(JSON.stringify(saved)), newGame(0, 5_000))
   expect(g).toMatchObject(saved)
   expect(g).toMatchObject({ shown: null, off: [] })
-  expect(dreamsOf(g)).toEqual(ALL_DREAMS)
+  expect(dreamsOf(g)).toEqual(OLD_DREAMS)
   // ♡ の稼ぎは全部の夢のぶん（+70%）のまま
   near(giftRate(g, 5_000), 1.7 * STAR_RATE ** 12)
   expect(lookOf(g, 5_000, null)).toMatchObject({
@@ -1035,4 +1059,130 @@ test('mergeGame：飾る夢・しまった空の飾りは、このセッショ�
   expect(merged.off).toEqual(['aurora'])
   // 両方で贈った夢が重なっても、贈った数は 1 回にそろう（飾る選び方とは別）
   expect(merged.gifts).toEqual(base.gifts)
+})
+
+// ---- 1 億より先の夢・なかよし度（#40） ----
+
+test('1.7.0 の夢：10 億・100 億・1000 億・1 兆。表の後ろに足し、前からある 7 つの並びと値段は変わらない', () => {
+  expect(DREAMS.map(d => [d.id, d.price])).toEqual([
+    ['greenTests', 30_000],
+    ['telescope', 80_000],
+    ['house', 250_000],
+    ['library', 800_000],
+    ['constellation', 3_000_000],
+    ['moonTrip', 12_000_000],
+    ['noBugs', 100_000_000],
+    ['starHill', 1e9],
+    ['airship', 1e10],
+    ['statue', 1e11],
+    ['twinStars', 1e12],
+  ])
+  for (const d of DREAMS) {
+    expect(d.thanks.length).toBeGreaterThan(0)
+    // 帯に出すお礼は、前からあるいちばん長いものくらいまで
+    expect(d.thanks.length).toBeLessThanOrEqual(30)
+  }
+  // 贈ると箱をかかえてお礼を言い、♡ の稼ぎが +10%
+  const g = bought(giveGift(allDreamer({ gifts: Object.fromEntries(OLD_DREAMS.map(id => [id, 1])), hearts: 2e9 }), 'starHill', 2_000))
+  expect(g.hearts).toBe(1e9)
+  expect(g.given).toBe(1e9)
+  expect(lookOf(g, 2_100, { id: 'starHill', from: 2_000 }).gift).toBe('box')
+  near(giftRate(g, 2_000), 1.8)
+  expect(giveGift(g, 'starHill', 3_000)).toEqual({ ok: false, reason: '流れ星の丘 はもう贈ったよ' })
+})
+
+test('1.7.0 の夢：全部贈ったセーブは、庭に銅像・丘・ロケットと月、空に空飛ぶ船とふたりの星（場所ごとに高いもの）', () => {
+  const g = allDreamer()
+  expect(shownDreams(g)).toEqual(['moonTrip', 'starHill', 'airship', 'statue', 'twinStars'])
+  expect(slotsUsed(g)).toEqual({ yard: 3, sky: 2 })
+  near(giftRate(g, 5_000), 2.1)
+})
+
+test('1.7.0 の夢：1.6.0 で飾りを選んであるセーブに新しい夢を贈ると、枠があいていれば飾り、いっぱいならしまっておく', () => {
+  // 庭も空もいっぱい（まだ選んでいない 1.6.0 のセーブ）：新しい夢はしまっておき、飾ってあるものはそのまま
+  const full = dreamer({ hearts: 2e12 })
+  const before = shownDreams(full)
+  for (const id of ['starHill', 'airship', 'statue', 'twinStars'] as const) {
+    const next = bought(giveGift(full, id, 2_000))
+    expect(shownDreams(next)).toEqual(before)
+    expect(lookOf(next, 2_100, { id, from: 2_000 }).gift).toBe('box')
+    expect(dreamsOf(next)).toContain(id)
+  }
+  // 空を 1 つあけてあれば、空飛ぶ船は飾る（庭がいっぱいなので丘はしまっておく）
+  const roomy = dreamer({ hearts: 2e12, shown: ['house', 'library', 'moonTrip', 'constellation'] })
+  const ship = bought(giveGift(roomy, 'airship', 2_000))
+  expect(shownDreams(ship)).toEqual(['house', 'library', 'constellation', 'moonTrip', 'airship'])
+  const hill = bought(giveGift(ship, 'starHill', 3_000))
+  expect(shownDreams(hill)).toEqual(shownDreams(ship))
+  // しまってある新しい夢も、ショップで入れ替えて飾れる
+  const swapped = bought(toggleDream(bought(toggleDream(hill, 'house')), 'starHill'))
+  expect(shownDreams(swapped)).toEqual(['library', 'constellation', 'moonTrip', 'starHill', 'airship'])
+})
+
+test('実績：「夢をぜんぶ」は 11 個全部。1.6.0 で 7 つ全部贈って取ったものは、読み直しても消えない', () => {
+  const ids = (g: Game) => unlocked({ game: g, pets: 0, rate: 0 }).map(a => a.id)
+  // 1.6.0 の 7 つだけでは、まだ取れない
+  expect(ids(dreamer())).not.toContain('dreamAll')
+  expect(ids(allDreamer())).toContain('dreamAll')
+  // 前に取ったセーブは、そのまま持っている（unlocked はまだ持っていないものだけを見て、grant は足すだけ）
+  const saved = restore(JSON.parse(JSON.stringify(dreamer({ achievements: ['dream1', 'dreamAll'] }))), newGame(0, 5_000))
+  expect(saved.achievements).toEqual(['dream1', 'dreamAll'])
+  expect(ids(saved)).not.toContain('dreamAll')
+  const later = grant(saved, unlocked({ game: { ...saved, gifts: { ...saved.gifts, starHill: 1 } }, pets: 0, rate: 0 }), 6_000)
+  expect(later.achievements).toEqual(['dream1', 'dreamAll', 'dreamHill'])
+})
+
+test('実績：1.7.0 の夢をひとつずつ贈る、なかよし度「かぞく」「うんめいのふたり」「えいえん」', () => {
+  const ids = (over: Partial<Game>) => unlocked({ game: game(over), pets: 0, rate: 0 }).map(a => a.id)
+  expect(ids({ gifts: { starHill: 1 } })).toContain('dreamHill')
+  expect(ids({ gifts: { airship: 1 } })).toContain('dreamAirship')
+  expect(ids({ gifts: { statue: 1 } })).toContain('dreamStatue')
+  expect(ids({ gifts: { twinStars: 1 } })).toContain('dreamTwinStars')
+  expect(ids({ gifts: { house: 1 } })).not.toContain('dreamHill')
+  expect(ids({ given: 1e10 - 1 })).not.toContain('family')
+  for (const id of ['bff', 'family'] as const) expect(ids({ given: 1e10 })).toContain(id)
+  expect(ids({ given: 1e12 })).toContain('destiny')
+  expect(ids({ given: 1e12 })).not.toContain('forever')
+  for (const id of ['family', 'destiny', 'forever'] as const) expect(ids({ given: 1e16 })).toContain(id)
+})
+
+test('restore：1.6.0 のセーブ（飾りを選んである）は、♡・強化・贈り物・星・飾り・実績がそのまま', () => {
+  const saved = {
+    v: 1,
+    hearts: 7.5e13,
+    earned: 3e14,
+    combo: 0,
+    comboAt: 0,
+    maxCombo: 140,
+    feverUntil: 0,
+    fevers: 900,
+    workPets: 30_000,
+    hugs: 40,
+    wakes: 9,
+    levels: { glove: 80, brush: 40, coffee: 30, fan: 70, toolTip: 50, allowance: 40, feverTime: 5, stardust: 90 },
+    owned: ['ribbon', 'catEars', 'santa', 'shootingStars', 'crown', 'aurora'],
+    hat: 'santa',
+    achievements: ['pets1', 'dream1', 'dreamAll', 'bff', 'stars10', 'earned1t'],
+    lastUnlock: { id: 'earned1t', at: 70 },
+    gifts: { cake: 4, greenTests: 1, telescope: 1, house: 1, library: 1, constellation: 1, moonTrip: 1, noBugs: 1, star: 24 },
+    given: 9e12,
+    happyUntil: 0,
+    lastGift: { id: 'star', at: 60 },
+    favorite: 'cocoa',
+    shown: ['greenTests', 'telescope', 'house', 'noBugs'],
+    off: ['aurora'],
+    passiveAt: 55,
+  }
+  const g = restore(JSON.parse(JSON.stringify(saved)), newGame(0, 5_000))
+  expect(g).toEqual({ ...saved, passiveAt: 5_000 } as Game)
+  expect(shownDreams(g)).toEqual(['greenTests', 'telescope', 'house', 'noBugs'])
+  expect(lookOf(g, 5_000, null)).toMatchObject({ aurora: false, shootingStars: true, dreams: ['greenTests', 'telescope', 'house', 'noBugs'], stars: 24 })
+  // 新しい段：贈った ♡ 9 兆は「うんめいのふたり」。実績はまだ渡していないので、次に見たときに取れる
+  expect(affectionOf(g.given).name).toBe('うんめいのふたり')
+  for (const id of ['family', 'destiny'] as const) expect(unlocked({ game: g, pets: 0, rate: 0 }).map(a => a.id)).toContain(id)
+})
+
+test('lookOf：なかよし度が「あいぼう」からは、手をふる', () => {
+  expect(lookOf(game({ given: 2_999_999 }), 5_000, null).waves).toBe(false)
+  expect(lookOf(game({ given: 3_000_000 }), 5_000, null).waves).toBe(true)
 })

@@ -8,10 +8,12 @@ import type { Palette } from './palette'
 import { blit, hash, put } from './grid'
 import type { Grid, Px } from './grid'
 import { clawd, face, kitten, leader, miniClawd } from './sprites'
+import type { Wave } from './sprites'
 import {
   DECOS, GIFT_ICONS, drawAurora, drawConstellation, drawGiftedStars, drawHat, drawHeartRain, drawMilkyWay, drawRainbow,
-  drawShootingStar, drawSun, drawYard, glow, stampDeco, stampIcon, sunOf,
+  drawShootingStar, drawSkyDreams, drawSun, drawYard, giftedStarSpots, glow, stampDeco, stampIcon, sunOf,
 } from './decor'
+import type { Box } from './decor'
 
 export const SCENE_ROWS = 7
 const H = SCENE_ROWS * 2
@@ -165,6 +167,26 @@ export function isMarching(mood: MoodKind, friends: Friend[]) {
 
 const PLAIN: Look = { hat: null, shootingStars: false, aurora: false, fever: false, gift: null, dreams: [], stars: 0 }
 
+// 手ふり（なかよし度「あいぼう」から）：WAVE_EVERY コマごとに、はじめの WAVE_TICKS コマだけ、2 つのコマを交互に。
+// 乱数は使わず tick だけで決めるので、どの面でも同じときにふる。落ち着いている間はフックが 3 コマに 1 回しか
+// tick を進めないので、ふるのは 30 秒くらいごとに 2 秒ほど
+export const WAVE_EVERY = 50
+const WAVE_TICKS = 4
+
+// 手をふるか。ひまなとき（idle で、行進していない）だけ。なでられている・贈り物をかかえているとき（pose）はふらない。
+// スプライトの大きさは変わらないので、なでなでの当たり判定（layout）にもかからない
+export function waveOf(look: Look, mood: MoodKind, isPosing: boolean, marching: boolean, tick: number): Wave | null {
+  if (!look.waves || isPosing || marching || mood !== 'idle') return null
+  const phase = tick % WAVE_EVERY
+  return phase < WAVE_TICKS ? ((phase % 2) as Wave) : null
+}
+
+// 空の夢が避ける、リーダーと仲間の場所（上から地面まで）。リーダーは、なでられて傾くぶん・ぼうし・
+// 右の小物（！や ♡、かかえた贈り物）・なでなでのハートの湧く列（layout の hearts）までを含める。仲間は跳ねてハートを出すので列ごと
+export function crowdOf({ leader: { x, w }, friends }: Layout): Box[] {
+  return [{ x: x - 4, y: 0, w: w + 14, h: H * 4 }, ...friends.map(f => ({ x: f.x, y: 0, w: f.w, h: H * 4 }))]
+}
+
 // リーダーの頭の上の列（なでられて傾くぶん、2 ドットの余白をとる）。贈った星はここに置かない
 const leaderSpan = ({ x, w }: Layout['leader']) => ({ from: x - 2, to: x + w + 1 })
 
@@ -206,7 +228,7 @@ export function drawScene({
   const spots = layout(W, paradeColumns, friends, character)
   const { yard } = spots
   const dreams = yard ? look.dreams : []
-  if (yard && dreams.includes('noBugs')) drawRainbow(g, yard.right, ground)
+  if (yard && dreams.includes('noBugs')) drawRainbow(g, yard, dreams, ground)
 
   // 空の星。遠くにあるので歩いても動かさない
   starsOf(W, skyRows).forEach(({ x, y }, i) => {
@@ -221,6 +243,11 @@ export function drawScene({
   if (look.stars > 0) drawGiftedStars(g, look.stars, paradeW, skyRows, Math.floor(tick / twinkleTicks), leaderSpan(spots.leader), isBehindSun)
   if (yard && dreams.includes('constellation')) drawConstellation(g, yard, sky, tick, palette)
   if (yard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
+  // 空飛ぶ船・ふたりの星は、Clawd 座・月・虹・地面の飾り・みんなから 1 ドットあけた空に（贈った星の手前）
+  if (yard) {
+    const stars = look.stars > 0 ? giftedStarSpots(paradeW, skyRows, leaderSpan(spots.leader)).slice(0, look.stars) : []
+    drawSkyDreams(g, { yard, dreams, sky, ground, sun, crowd: crowdOf(spots), stars }, tick)
+  }
   if (look.shootingStars) drawShootingStar(g, tick, palette)
   if (look.fever) drawHeartRain(g, tick)
 
@@ -263,7 +290,9 @@ export function drawScene({
   const { gift } = look
   const pose = petted ?? (gift !== null ? { sway: 0 } : null)
   const feel: MoodKind = pose ? 'done' : mood
-  const { eyes, mouth } = pose ? { eyes: 'happy' as const, mouth: 'smile' as const } : face(mood, tick)
+  // 手をふるあいだは、にっこりした目にする
+  const wave = waveOf(look, mood, pose !== null, marching, tick)
+  const { eyes, mouth } = pose || wave !== null ? { eyes: 'happy' as const, mouth: 'smile' as const } : face(mood, tick)
   const bob =
     pose ? 0 :
     mood === 'sleeping' ? (Math.floor(tick / 3) % 2) :
@@ -273,8 +302,8 @@ export function drawScene({
   // 歩く Clawd は足を伸ばして上下する。跳ねる・寝息のときは体ごと持ち上げる
   const reach = isClawd && step && mood !== 'done' ? bob : 0
   const s = isClawd
-    ? clawd(feel, eyes, step, tick, reach)
-    : leader(eyes, mouth, step ? tick : 0, feel === 'error' ? tick : null)
+    ? clawd(feel, eyes, step, tick, reach, wave)
+    : leader(eyes, mouth, step ? tick : 0, feel === 'error' ? tick : null, wave)
   const leaderX = spots.leader.x + (pose ? Math.max(-2, Math.min(2, pose.sway)) : 0)
   const top = ground - s.h - (bob - reach)
   if (look.fever) glow(g, s, leaderX, top, tick % 2 ? C.spark : C.feverGlow)
