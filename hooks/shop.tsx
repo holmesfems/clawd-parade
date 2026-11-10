@@ -9,6 +9,9 @@ import {
   ACHIEVEMENTS,
   COSMETICS,
   DREAMS,
+  MILESTONE_LEVELS,
+  STAR,
+  STAR_RATE,
   TREATS,
   UPGRADES,
   affectionOf,
@@ -21,11 +24,17 @@ import {
   isHappy,
   isMaxed,
   levelOf,
+  milestoneOf,
   perPet,
   perSecond,
   pickFavorite,
   priceOf,
+  starCount,
+  starPrice,
+  starRate,
+  toMilestone,
   wear,
+  workRate,
 } from './game'
 
 export const SHOP = 'parade-shop'
@@ -56,7 +65,7 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
     </Box>
   )
 
-  const workBoost = at.isWorking ? `（お仕事中 ×${2 + 0.5 * levelOf(g, 'coffee')}）` : ''
+  const workBoost = at.isWorking ? `（お仕事中 ×${formatRate(workRate(g, at))}）` : ''
   const done = ACHIEVEMENTS.filter(a => g.achievements.includes(a.id)).length
   const affection = affectionOf(g.given)
   const lasts = (ms: number) => (ms >= 60_000 ? `${ms / 60_000} 分` : `${ms / 1000} 秒`)
@@ -71,11 +80,15 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
       </Text>
       <Text dimColor>なで続けると コンボ、30 コンボで フィーバー（♡×3）！</Text>
 
-      {header('おかいもの')}
+      {header(`おかいもの（Lv${MILESTONE_LEVELS} ごとに効き目 2 倍）`)}
       {UPGRADES.map(u => {
         const level = levelOf(g, u.id)
         const isTop = isMaxed(u, level)
         const price = priceOf(u, level)
+        // 節目の倍率（×2 から）と、次の節目までの Lv
+        const boost = milestoneOf(u, level)
+        const toNext = toMilestone(u, level)
+        const milestone = toNext === null ? '' : ` · あと ${toNext} Lv で ×${formatRate(boost * 2)}`
         return (
           <Box key={`u-${u.id}`} columnGap={1}>
             <Button
@@ -87,6 +100,8 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
             </Button>
             <Text dimColor wrap="truncate-end">
               {u.about}
+              {boost > 1 ? `（×${formatRate(boost)}）` : ''}
+              {milestone}
             </Text>
           </Box>
         )
@@ -176,6 +191,20 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
           </Box>
         )
       })}
+
+      {header(`星を贈る（何度でも · ひとつごとに ♡ ずっと ×${STAR_RATE}）`)}
+      <Box key="star" columnGap={1}>
+        <Button
+          key="gift-star"
+          variant={g.hearts >= starPrice(g) ? 'primary' : 'secondary'}
+          onPress={buy(`🌟 ${STAR.name}を贈ったよ！夜空がまたひとつ明るくなる`, (one, when) => giveGift(one, 'star', when))}
+        >
+          星を贈る <Text dimColor>{formatHearts(starPrice(g))}♡</Text>
+        </Button>
+        <Text dimColor wrap="truncate-end">
+          {starCount(g) > 0 ? `${starCount(g)} 個贈った · ♡ の稼ぎ ×${formatRate(starRate(g))}` : '贈るたびに値段が上がる'}
+        </Text>
+      </Box>
 
       {header(`実績 ${done}/${ACHIEVEMENTS.length}`)}
       {ACHIEVEMENTS.map(a => {

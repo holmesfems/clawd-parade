@@ -4,7 +4,7 @@
 import type { DreamId, Hat, Look, TreatId } from '../types'
 import { C, mix } from './palette'
 import type { Palette } from './palette'
-import { dot, put, stampWith } from './grid'
+import { dot, hash, put, stampWith } from './grid'
 import type { Grid, Sprite } from './grid'
 import type { Yard } from './scene'
 
@@ -155,6 +155,7 @@ export const GIFT_ICONS: Record<NonNullable<Look['gift']>, string[]> = {
   cushion: ['.uuuuuu.', 'utuuuutu', 'uuuuuuuu', '.uuuuuu.'],
   keyboard: ['qqqqqqqqq', 'qxqxqxqxq', 'qqxqxqxqq', 'qqxxxxxqq', 'qqqqqqqqq'],
   box: ['.h.h.', '..h..', 'bbhbb', 'bbhbb', 'bbhbb'],
+  star: ['..y..', '.yyy.', 'yyyyy', '.yyy.', '.y.y.'],
 }
 
 export const stampDeco = stampWith({
@@ -285,6 +286,99 @@ export function drawConstellation(g: Grid, yard: Yard, sky: number, tick: number
     }
   }
   CONSTELLATION.forEach(([x, y], i) => dot(g, ox + x, oy + y, (tick + i) % 5 === 0 ? C.white : palette.star))
+}
+
+// ---- 贈った星 ------------------------------------------------------------
+// 星をひとつ贈るごとに、空に明るい星（白い芯と、うすい桃色の十字の光）をひとつ足す。ふつうの大きな星（金色の十字）と
+// 色で見分けられ、昼の空でも見える色にする。飾りが多すぎないよう、1 つずつ描くのは GIFTED_STARS 個まで。
+// そこから先は星を足さず、天の川を少しずつ濃くする
+export const GIFTED_STARS = 12
+const GIFTED_CORE = C.white
+const GIFTED_ARM = 0xffb3d9
+const GIFTED_TWINKLE = 0xffe6f2
+const MILKY_WAY = [0x3f4472, 0x565b8f, 0x7a7fb3]
+// 天の川の濃さ：はじめの濃さ、星 10 個ごとに足す濃さ、いちばん濃いとき
+const MILKY_START = 0.12
+const MILKY_STEP = 0.02
+const MILKY_MAX = 0.4
+
+// x がこの列の範囲にある場所には置かない（リーダーの頭の上）
+export type Span = { from: number; to: number }
+
+// 贈った星の中心を、贈った順に GIFTED_STARS 個ぶん。width は行進に使う幅（セリフの空には出さない）、skyRows は空の高さ、
+// avoid はリーダーの頭の上の列。星ごとに決まった乱数で場所を選び、空の上のほうに寄せる。
+// 前の星とは十字の光のあいだに 1 ドットすき間をあけ（縦か横に 4 ドット以上はなす）、リーダーの頭の上も避ける。
+// 選べなければ条件をゆるめて（十字が重ならないだけ → どこでも）選び直す。星を足しても前の星は動かない。
+// 十字の光まで空に収まるよう、ふちから 1 ドット内側に置く
+export function giftedStarSpots(width: number, skyRows: number, avoid: Span | null = null): { x: number; y: number }[] {
+  const key = `${width}x${skyRows}:${avoid ? `${avoid.from}-${avoid.to}` : ''}`
+  const known = spotCache.get(key)
+  if (known) return known
+  const spots: { x: number; y: number }[] = []
+  const apart = (spot: { x: number; y: number }, gap: number) => spots.every(s => Math.abs(s.x - spot.x) >= gap || Math.abs(s.y - spot.y) >= gap)
+  const isClear = (spot: { x: number; y: number }) => !avoid || spot.x + 1 < avoid.from || spot.x - 1 > avoid.to
+  const rules = [(spot: { x: number; y: number }) => isClear(spot) && apart(spot, 4), (spot: { x: number; y: number }) => isClear(spot) && apart(spot, 3)]
+  for (let k = 0; k < GIFTED_STARS; k++) {
+    const candidates = Array.from({ length: SPOT_TRIES }, (_, attempt) => {
+      const n = (k * SPOT_TRIES + attempt) * 2
+      // 3 乗して上の行に寄せる
+      const up = hash(50_001 + n) ** 3
+      return { x: 1 + Math.floor(hash(50_000 + n) * Math.max(1, width - 2)), y: 1 + Math.floor(up * Math.max(1, skyRows - 2)) }
+    })
+    let spot = candidates.at(-1)!
+    for (const rule of rules) {
+      const found = candidates.find(rule)
+      if (found) {
+        spot = found
+        break
+      }
+    }
+    spots.push(spot)
+  }
+  spotCache.set(key, spots)
+  return spots
+}
+const SPOT_TRIES = 40
+// 幅ごとに 1 回だけ選ぶ（毎コマ同じ場所なので）
+const spotCache = new Map<string, { x: number; y: number }[]>()
+
+// 贈った星を描く。isHidden の場所（太陽の上など）には出さない。twinkle は何コマ目か（星ごとにずらして、ときどき光が白くまたたく）
+export function drawGiftedStars(
+  g: Grid,
+  count: number,
+  width: number,
+  skyRows: number,
+  twinkle: number,
+  avoid: Span | null,
+  isHidden: (x: number, y: number) => boolean,
+) {
+  giftedStarSpots(width, skyRows, avoid).slice(0, count).forEach(({ x, y }, k) => {
+    if (isHidden(x, y)) return
+    const arm = (twinkle + k * 3) % 9 === 0 ? GIFTED_TWINKLE : GIFTED_ARM
+    for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) dot(g, x + dx, y + dy, arm)
+    dot(g, x, y, GIFTED_CORE)
+  })
+}
+
+// 天の川の濃さ（0 は描かない）。GIFTED_STARS 個を超えたぶん、10 個ごとに少しずつ濃くなり、MILKY_MAX で止まる
+export const milkyWayDensity = (count: number) =>
+  count <= GIFTED_STARS ? 0 : Math.min(MILKY_MAX, MILKY_START + MILKY_STEP * Math.floor((count - GIFTED_STARS) / 10))
+
+// 天の川：行進の上の空を、左下から右上へ横切るうすい光の帯。点は決まった場所に出て、動かない
+export function drawMilkyWay(g: Grid, count: number, width: number, skyRows: number) {
+  const density = milkyWayDensity(count)
+  if (density === 0) return
+  for (let x = 0; x < width; x++) {
+    const center = (skyRows - 1) * (0.85 - (0.7 * x) / Math.max(1, width - 1))
+    for (let y = 0; y < skyRows; y++) {
+      const off = Math.abs(y - center)
+      if (off > 2) continue
+      // 帯のまんなかほど濃く、ふちはうすく
+      const n = x * 64 + y
+      if (hash(n + 7919) >= density * (1 - off / 3)) continue
+      dot(g, x, y, MILKY_WAY[Math.floor(hash(n + 104_729) * MILKY_WAY.length)]!)
+    }
+  }
 }
 
 // ---- なでなでのハートと、Client 用の文字への変換 --------------------------

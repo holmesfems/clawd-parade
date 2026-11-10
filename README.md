@@ -23,11 +23,13 @@ Claude Code の入力欄の上で、Clawd が行進する mod です。Claude �
 - Claude が作業中はなでなでの ♡ が 2 倍。放っておいても ♡ が入る
 - `/parade shop` でショップ
   - 強化：やわらか手袋、ふわふわブラシ、コーヒー差し入れ、応援うちわ、ツールのおだちん、サブエージェント手当、フィーバー延長、星のかけら
+    - フィーバー延長のほかは Lv の上限が無く、Lv25 ごとに効き目が 2 倍になる（Lv25 で ×2、Lv50 で ×4…）。ショップに次の節目まであと何 Lv かが出る
   - きせかえ：リボン、ねこみみ、サンタぼうし、王冠、流れ星、オーロラ
   - プレゼント：♡ で Clawd に贈り物ができる。贈った ♡ の合計で「なかよし度」が上がる（しりあい → … → ずっといっしょ）
     - 小さな贈り物（何度でも）：クッキー、あったかいココア、いちごのショートケーキ、ありがとうの手紙、ふかふかクッション、新しいキーボード。Clawd がかかえてお礼を言い、しばらく「ごきげん」（♡×1.5）
     - 小さな贈り物の ☆ を押すと、帯にワンぽちで贈れるボタンが出る（もう一度押すと下ろす）。広いデスクトップでは、ボタンの代わりに夜空へ贈り物の札が出て、押すと贈れる
     - 夢のプレゼント（1 回きり）：全部グリーンのテスト、望遠鏡、小さなおうち、世界中の本がある図書館、Clawd 座、月への旅、バグのない世界。夜空と庭にずっと飾られて、ひとつごとに ♡ の稼ぎが +10%
+    - 星を贈る（何度でも）：1 個目は 1 億 ♡ で、贈るたびに値段が 1.6 倍。ひとつごとに ♡ の稼ぎが全部（なでなで・放置・お給料・おだちん・手当）ずっと ×1.2。贈った星は、昼も夜も空に明るい星（白い芯と桃色の光）として 12 個まで 1 つずつ増え、13 個目からは天の川が少しずつ濃くなる。1 億を稼いだころから遊んで、2〜3 週間で 1 兆、その先の京・垓まで伸び続けるくらいの速さ
 - 実績（ショップで、取った数と一覧を見られる）
 - セッションをいくつ開いていても、♡・お買い物・実績は 1 つのセーブにまとまる。お仕事中のお給料は働いているセッションごとに、放置の ♡ はいくつ開いていても 1 つぶん入る
   - 別のセッションと同時に買って ♡ が足りなくなったら、♡ は負（借金）になる。同じものを両方で買ったら、1 つぶん返ってくる
@@ -89,7 +91,7 @@ claude plugin enable clawd-parade@clawd-parade
 | `hooks/touch-pad.tsx` | デスクトップで SVG に重ねる、見えない手ざわり層の Client |
 | `types/index.d.ts` | 状態と保存（`$.store`）の型 |
 | `.claude-plugin/icon.png` | プラグインのアイコン（`hooks/scene.ts` の `drawScene` で描いた、なでられてよろこぶ Clawd を真ん中に置き、1 ドット 36px に拡大した 792×792 の PNG） |
-| `tests/` | `claude plugin test .` で動くテスト |
+| `tests/` | `claude plugin test .` で動くテスト（`tests/simulate.ts` は毎日の遊び方をまねて ♡ の増え方を数える道具で、`tests/balance.test.ts` が星と節目の数字を確かめる） |
 | `.github/workflows/ci.yml` | PR と main への push で validate・test・version の確認を回す CI |
 | `CHANGELOG.md` | 変更履歴 |
 
@@ -113,7 +115,7 @@ CI は、`hooks/`・`types/` を変えた PR で version が上がっている�
 
 ## English
 
-A Claude Code mod: Clawd marches above the prompt while Claude works, a friend joins for each subagent, and Clawd's face reacts to how the turn ended. Pet Clawd (click or drag) to earn ♡, chain combos into fevers, and spend ♡ in `/parade shop` on upgrades, cosmetics (hats, shooting stars, an aurora) and gifts for Clawd, from a cookie to dream gifts (a little house, a library, a trip to the moon, a world without bugs) that stay in the scene. Works in the terminal and in the desktop app's Code tab. Install it from a terminal session:
+A Claude Code mod: Clawd marches above the prompt while Claude works, a friend joins for each subagent, and Clawd's face reacts to how the turn ended. Pet Clawd (click or drag) to earn ♡, chain combos into fevers, and spend ♡ in `/parade shop` on upgrades, cosmetics (hats, shooting stars, an aurora) and gifts for Clawd, from a cookie to dream gifts (a little house, a library, a trip to the moon, a world without bugs) that stay in the scene, and stars you can give again and again: each one multiplies all ♡ income and lights up the sky. Works in the terminal and in the desktop app's Code tab. Install it from a terminal session:
 
 ```
 /plugin install clawd-parade --marketplace holmesfems/clawd-parade

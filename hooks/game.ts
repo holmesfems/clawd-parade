@@ -21,8 +21,10 @@ export const HEART_CAP = 1e300
 // 上限（と下限）に収める。NaN（Infinity どうしの引き算など）は 0 にして、保存を壊さない
 const clampHearts = (n: number) => (Number.isNaN(n) ? 0 : Math.max(-HEART_CAP, Math.min(HEART_CAP, n)))
 
-// ♡ を稼いだ（hearts と earned に同じだけ足す）。足す場所はここを通して、上限を 1 か所で守る
-const earn = (g: Game, gained: number): Game => ({ ...g, hearts: clampHearts(g.hearts + gained), earned: clampHearts(g.earned + gained) })
+// ♡ を稼いだ（hearts と earned に同じだけ足す）。足す場所はここを通して、上限を 1 か所で守る。
+// 稼ぎが NaN（0 × Infinity など）になっても、今の ♡ を 0 にしないよう、足さずにおく
+const earn = (g: Game, gained: number): Game =>
+  Number.isNaN(gained) ? g : { ...g, hearts: clampHearts(g.hearts + gained), earned: clampHearts(g.earned + gained) }
 
 // 保存形式の版。形を変えたら上げて、restore で古い形を読めるようにする。
 // 古い版のセッションが同時に開いていることがあるので、今ある項目の型は変えずに、新しい項目を足す
@@ -166,6 +168,8 @@ export function mergeGame(theirs: Game, base: Game, mine: Game): Game {
 // 2 つのセッションが base からほぼ同時に買ったとき、払った ♡ を本当の値段にそろえる。
 // - 強化：両方で上げたら、合わせた Lv（上限まで）を base から順に買った値段との差を返す・もらう。
 //   同じ Lv を両方で買うと、片方は次の Lv の値段になる（安いままでは上がらない）
+// - 星：両方で贈ったら、数は合わせたぶん（counts で足してある）。base から順に贈った値段との差を ♡ からもらい、
+//   贈った ♡ の合計（なかよし度）にも同じだけ足す
 // - きせかえ：両方で新しく買ったもの（持つのは 1 つ）は、1 つぶん返す
 // - 夢のプレゼント：2 回贈ったことになったものは 1 回にして返す（贈った ♡ の合計からも引く）
 // ♡ が足りなくなったら負（借金）のまま。ただでは買えず、稼いだら返る
@@ -178,6 +182,12 @@ function settle(g: Game, theirs: Game, base: Game, mine: Game): Game {
     const paid = costOf(u, b, t) + costOf(u, b, m)
     out = { ...out, hearts: out.hearts + paid - costOf(u, b, level), levels: { ...out.levels, [u.id]: level } }
   }
+  const [b, t, m] = [starCount(base), starCount(theirs), starCount(mine)]
+  if (t > b && m > b) {
+    // 順に贈ると後の星ほど高いので、たいてい負（足りなかったぶん）
+    const refund = costOf(STAR, b, t) + costOf(STAR, b, m) - costOf(STAR, b, t + m - b)
+    out = { ...out, hearts: out.hearts + refund, given: out.given - refund }
+  }
   const isNew = (one: Game, id: CosmeticId) => one.owned.includes(id) && !base.owned.includes(id)
   for (const c of COSMETICS) if (isNew(theirs, c.id) && isNew(mine, c.id)) out = { ...out, hearts: out.hearts + c.price }
   for (const d of DREAMS) {
@@ -189,8 +199,8 @@ function settle(g: Game, theirs: Game, base: Game, mine: Game): Game {
   return out
 }
 
-// Lv from から to まで順に上げる値段
-const costOf = (u: Upgrade, from: number, to: number) => {
+// Lv from から to まで順に上げる値段（星なら from 個目から to 個目まで順に贈る値段）
+const costOf = (u: Ladder, from: number, to: number) => {
   let sum = 0
   for (let level = from; level < to; level++) sum += priceOf(u, level)
   return sum
@@ -283,7 +293,10 @@ export function isSame(a: unknown, b: unknown): boolean {
 
 // ---- お店 ---------------------------------------------------------------
 
-export type Upgrade = { id: UpgradeId; name: string; about: string; base: number; growth: number; max?: number }
+// 買うたびに値段が growth 倍になるもの（強化と星）。base は最初の値段
+export type Ladder = { base: number; growth: number }
+
+export type Upgrade = Ladder & { id: UpgradeId; name: string; about: string; max?: number }
 
 export const UPGRADES: Upgrade[] = [
   { id: 'glove', name: 'やわらか手袋', about: '1 なでの ♡ +1', base: 15, growth: 1.15 },
@@ -318,9 +331,27 @@ const short = (price: number, g: Game) => no(`♡ が ${formatHearts(price - g.h
 export const levelOf = (g: Game, id: UpgradeId) => g.levels[id] ?? 0
 
 // 高い Lv では growth ** level が Infinity になるので、上限で止める（上限の値段は買えない。buyUpgrade を見る）
-export const priceOf = (u: Upgrade, level: number) => Math.min(HEART_CAP, Math.ceil(u.base * u.growth ** level))
+export const priceOf = (u: Ladder, level: number) => Math.min(HEART_CAP, Math.ceil(u.base * u.growth ** level))
 
 export const isMaxed = (u: Upgrade, level: number) => u.max !== undefined && level >= u.max
+
+// 節目：上限の無い強化は、Lv25 ごとに効き目が 2 倍（Lv25 で ×2、Lv50 で ×4…）。
+// 値段は Lv ごとに掛け算で上がるのに、効き目は Lv ぶんの足し算でしか伸びず、稼ぎが値段に追いつけなかったので
+export const MILESTONE_LEVELS = 25
+
+export const milestoneOf = (u: Upgrade, level: number) =>
+  u.max !== undefined ? 1 : Math.min(HEART_CAP, 2 ** Math.floor(level / MILESTONE_LEVELS))
+
+// 次の節目まであと何 Lv か。上限のある強化には節目が無いので null
+export const toMilestone = (u: Upgrade, level: number) => (u.max !== undefined ? null : MILESTONE_LEVELS - (level % MILESTONE_LEVELS))
+
+const UPGRADE_BY_ID = Object.fromEntries(UPGRADES.map(u => [u.id, u])) as Record<UpgradeId, Upgrade>
+
+// 強化の効き目：Lv × 節目の倍率。Infinity にならないよう上限で止める（0 × Infinity の NaN も防ぐ）
+const powerOf = (g: Game, id: UpgradeId) => {
+  const level = levelOf(g, id)
+  return Math.min(HEART_CAP, level * milestoneOf(UPGRADE_BY_ID[id], level))
+}
 
 export function buyUpgrade(g: Game, id: UpgradeId): Dealt {
   const u = UPGRADES.find(one => one.id === id)
@@ -353,7 +384,9 @@ type GiftBase = { name: string; price: number; thanks: string }
 // icon は帯のワンぽちのボタンに出す絵文字
 export type Treat = GiftBase & { kind: 'treat'; id: TreatId; happyMs: number; icon: string }
 export type Dream = GiftBase & { kind: 'dream'; id: DreamId; shows: string }
-export type Gift = Treat | Dream
+// 星：値段は決まっておらず、贈った数で上がる（starPrice）
+export type Star = Omit<GiftBase, 'price'> & Ladder & { kind: 'star'; id: 'star' }
+export type Gift = Treat | Dream | Star
 
 // id を鍵にした表。贈り物の id を足したら、ここに足すまで型エラーになる（表の順がお店の並び）
 const TREAT_TABLE: Record<TreatId, Omit<Treat, 'kind' | 'id'>> = {
@@ -383,12 +416,33 @@ export const TREATS: Treat[] = entries(TREAT_TABLE).map(([id, t]) => ({ kind: 't
 // 夢のプレゼント：1 回きり。ずっと飾られて、ひとつごとに ♡ の稼ぎが +10%
 export const DREAMS: Dream[] = entries(DREAM_TABLE).map(([id, d]) => ({ kind: 'dream', id, ...d }))
 
-// 全部の贈り物を id で引く表（TREAT_TABLE と DREAM_TABLE がそろっているので、どの id もある）
-const GIFTS = Object.fromEntries([...TREATS, ...DREAMS].map(g => [g.id, g])) as Record<GiftId, Gift>
+// 星を贈る：何度でも贈れて、贈るたびに値段が growth 倍。ひとつごとに ♡ の稼ぎが全部 STAR_RATE 倍になる（ずっと続く）。
+// 強化の節目と合わせると、次の星の値段がいつも 1 日の稼ぎの数日ぶんにとどまり、♡ が掛け算で増え続ける。
+// 稼ぎの倍率を値段の倍率に近づけすぎると、強化どうしの掛け算と重なって 1 日で何桁も跳ねたので、少し下げてある
+// （数字は tests/balance.test.ts のまねっこで決めた。1 億から 1 兆まで 2〜3 週間）
+export const STAR: Star = {
+  kind: 'star',
+  id: 'star',
+  name: '星',
+  base: 100_000_000,
+  growth: 1.6,
+  thanks: 'お星さま…！夜空がまたひとつ明るくなったね♡',
+}
+export const STAR_RATE = 1.2
+
+// 全部の贈り物を id で引く表（TREAT_TABLE と DREAM_TABLE と STAR がそろっているので、どの id もある）
+const GIFTS = Object.fromEntries([...TREATS, ...DREAMS, STAR].map(g => [g.id, g])) as Record<GiftId, Gift>
 
 export const GIFT_SHOW_MS = 6000
 const HAPPY_RATE = 1.5
 const DREAM_BONUS = 0.1
+
+// 贈った星の数（gifts.star）と、次の星の値段
+export const starCount = (g: Game) => g.gifts.star ?? 0
+export const starPrice = (g: Game) => priceOf(STAR, starCount(g))
+
+// 星のぶんの、♡ の稼ぎの倍率。壊れた保存（とても大きな数）でも Infinity にしない
+export const starRate = (g: Game) => Math.min(HEART_CAP, STAR_RATE ** starCount(g))
 
 export const giftOf = (id: GiftId): Gift => GIFTS[id]
 
@@ -401,12 +455,13 @@ export const isHappy = (g: Game, now: number) => now < g.happyUntil
 
 export const dreamsOf = (g: Game): DreamId[] => DREAMS.filter(d => (g.gifts[d.id] ?? 0) > 0).map(d => d.id)
 
-// ごきげん中は ×1.5、夢のプレゼントひとつごとに +10%
+// ごきげん中は ×1.5、夢のプレゼントひとつごとに +10%、星ひとつごとに ×STAR_RATE
 export const giftRate = (g: Game, now: number) =>
-  (isHappy(g, now) ? HAPPY_RATE : 1) * (1 + DREAM_BONUS * dreamsOf(g).length)
+  (isHappy(g, now) ? HAPPY_RATE : 1) * (1 + DREAM_BONUS * dreamsOf(g).length) * starRate(g)
 
 export function giveGift(g: Game, id: GiftId, now: number): Dealt {
   const gift = giftOf(id)
+  if (gift.kind === 'star') return giveStar(g, now)
   if (gift.kind === 'dream' && (g.gifts[id] ?? 0) > 0) return no(`${gift.name} はもう飾ってあるよ`)
   if (g.hearts < gift.price) return short(gift.price, g)
   const happyMs = gift.kind === 'treat' ? gift.happyMs : 0
@@ -417,6 +472,19 @@ export function giveGift(g: Game, id: GiftId, now: number): Dealt {
     gifts: { ...g.gifts, [id]: (g.gifts[id] ?? 0) + 1 },
     happyUntil: happyMs > 0 ? Math.max(now, g.happyUntil) + happyMs : g.happyUntil,
     lastGift: { id, at: now },
+  })
+}
+
+// 星を贈る。強化と同じく、上限で止めた値段は本当の値段ではないので買えない
+function giveStar(g: Game, now: number): Dealt {
+  const price = starPrice(g)
+  if (g.hearts < price || price >= HEART_CAP) return short(price, g)
+  return ok({
+    ...g,
+    hearts: g.hearts - price,
+    given: clampHearts(g.given + price),
+    gifts: { ...g.gifts, star: starCount(g) + 1 },
+    lastGift: { id: 'star', at: now },
   })
 }
 
@@ -449,22 +517,24 @@ export function affectionOf(given: number): { name: string; next?: { name: strin
 
 export const isFever = (g: Game, now: number) => now < g.feverUntil
 
-const comboRate = (g: Game, combo: number) => 1 + Math.min(combo, 100) * 0.01 * (1 + 0.5 * levelOf(g, 'brush'))
+// 強化の効き目は powerOf（Lv × 節目の倍率）で数える。フィーバー延長だけは Lv のまま（touchGame）
+const comboRate = (g: Game, combo: number) => 1 + Math.min(combo, 100) * 0.01 * (1 + 0.5 * powerOf(g, 'brush'))
 
-const workRate = (g: Game, at: Situation) => (at.isWorking ? 2 + 0.5 * levelOf(g, 'coffee') : 1)
+// お仕事中の倍率（ショップにも出す）
+export const workRate = (g: Game, at: Situation) => (at.isWorking ? 2 + 0.5 * powerOf(g, 'coffee') : 1)
 
 export function perPet(g: Game, at: Situation, now: number, combo = g.combo): number {
   const fever = isFever(g, now) ? FEVER_RATE : 1
-  return (1 + levelOf(g, 'glove')) * comboRate(g, combo) * workRate(g, at) * fever * giftRate(g, now)
+  return (1 + powerOf(g, 'glove')) * comboRate(g, combo) * workRate(g, at) * fever * giftRate(g, now)
 }
 
 // 放置で入る ♡/秒（応援うちわ・星のかけら）。セッションをいくつ開いていても 1 つぶん
 export const idlePerSecond = (g: Game, now = g.passiveAt) =>
-  (0.2 * levelOf(g, 'fan') + 2 * levelOf(g, 'stardust')) * giftRate(g, now)
+  (0.2 * powerOf(g, 'fan') + 2 * powerOf(g, 'stardust')) * giftRate(g, now)
 
 // お仕事中は Clawd にもお給料（♡ +1/秒）が出る。こちらは働いているセッションごとに入る
 const workPerSecond = (g: Game, at: Situation, now: number) =>
-  ((at.isWorking ? 1 : 0) + at.workers * levelOf(g, 'allowance')) * giftRate(g, now)
+  ((at.isWorking ? 1 : 0) + at.workers * powerOf(g, 'allowance')) * giftRate(g, now)
 
 export const perSecond = (g: Game, at: Situation, now = g.passiveAt) => idlePerSecond(g, now) + workPerSecond(g, at, now)
 
@@ -510,8 +580,9 @@ export function payIdle(g: Game, ms: number, now: number): Game {
   return gained === 0 ? g : earn(g, gained)
 }
 
+// ツールのおだちん。ごきげんや夢のプレゼントは今までどおり効かず、星の倍率だけがかかる
 export function toolTip(g: Game): Game {
-  const gained = 3 * levelOf(g, 'toolTip')
+  const gained = 3 * powerOf(g, 'toolTip') * starRate(g)
   return gained === 0 ? g : earn(g, gained)
 }
 
@@ -561,6 +632,12 @@ export const ACHIEVEMENTS = [
   { id: 'dream1', name: '夢をひとつ', about: '夢のプレゼントを贈る', test: f => dreamsOf(f.game).length >= 1 },
   { id: 'dreamAll', name: '夢をぜんぶ', about: '夢のプレゼントを全部贈る', test: f => dreamsOf(f.game).length === DREAMS.length },
   { id: 'bff', name: 'しんゆう', about: 'なかよし度を「しんゆう」にする', test: f => f.game.given >= affectionAt('しんゆう') },
+  { id: 'earned10b', name: '♡大富豪', about: '♡ を 100 億稼ぐ', test: f => f.game.earned >= 1e10 },
+  { id: 'earned1t', name: '♡兆万長者', about: '♡ を 1 兆稼ぐ', test: f => f.game.earned >= 1e12 },
+  { id: 'earned10q', name: 'けたちがいの♡', about: '♡ を 1 京稼ぐ', test: f => f.game.earned >= 1e16 },
+  { id: 'stars10', name: '星をあつめて', about: '星を 10 個贈る', test: f => starCount(f.game) >= 10 },
+  { id: 'stars50', name: '満天の星', about: '星を 50 個贈る', test: f => starCount(f.game) >= 50 },
+  { id: 'stars100', name: 'ふたりの天の川', about: '星を 100 個贈る', test: f => starCount(f.game) >= 100 },
 ] as const satisfies readonly AchievementSpec[]
 
 export type Achievement = (typeof ACHIEVEMENTS)[number]
@@ -595,9 +672,10 @@ export function lookOf(g: Game, now: number, holding: Holding): Look {
     shootingStars: g.owned.includes('shootingStars'),
     aurora: g.owned.includes('aurora'),
     fever: isFever(g, now),
-    // 夢のプレゼントは箱で抱えて、そのあと庭や夜空にずっと飾る
+    // 夢のプレゼントは箱で抱えて、そのあと庭や夜空にずっと飾る。星はそのまま抱えて、夜空に足す
     gift: gift === null ? null : isDream(gift) ? 'box' : gift,
     dreams: dreamsOf(g),
+    stars: starCount(g),
   }
 }
 

@@ -10,6 +10,8 @@ import {
   FEVER_MS,
   HEART_CAP,
   DREAMS,
+  STAR,
+  STAR_RATE,
   TREATS,
   UPGRADES,
   affectionOf,
@@ -24,12 +26,18 @@ import {
   isSame,
   isDream,
   isMaxed,
+  lookOf,
   mergeGame,
+  milestoneOf,
   newGame,
   payIdle,
   pickFavorite,
   priceOf,
   restore,
+  starCount,
+  starPrice,
+  starRate,
+  toMilestone,
   toolTip,
   touchGame,
   treatOf,
@@ -664,3 +672,175 @@ test('2^53（約 9007 兆）以上では、+1 ♡ ほどの小さな稼ぎは丸
   expect(payIdle(rich(limit), 2_000, 1_000).hearts).toBe(limit + 2)
 })
 
+
+// ---- 星を贈る・強化の節目（#39） ----
+
+const working: Situation = { isWorking: true, workers: 2 }
+
+// 小数の誤差を許して等しい
+const near = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThan(1e-9 * Math.max(1, Math.abs(b)))
+
+// n 個目まで順に贈った値段の合計
+const starsCost = (n: number) => Array.from({ length: n }, (_, k) => priceOf(STAR, k)).reduce((a, b) => a + b, 0)
+
+test('星：何度でも贈れて、贈るたびに値段が 1.6 倍。贈った ♡ はなかよし度に入り、Clawd がかかえてお礼を言う', () => {
+  expect(starPrice(game())).toBe(100_000_000)
+  const g = game({ hearts: 300_000_000, happyUntil: 0 })
+  const one = bought(giveGift(g, 'star', 2_000))
+  expect(one.hearts).toBe(200_000_000)
+  expect(one.given).toBe(100_000_000)
+  expect(one.gifts).toEqual({ star: 1 })
+  expect(one.lastGift).toEqual({ id: 'star', at: 2_000 })
+  // ごきげんにはならない（ずっと続く倍率のほう）
+  expect(one.happyUntil).toBe(0)
+  expect(starPrice(one)).toBe(160_000_000)
+  const two = bought(giveGift(one, 'star', 3_000))
+  expect(starCount(two)).toBe(2)
+  expect(two.hearts).toBe(40_000_000)
+  expect(two.given).toBe(260_000_000)
+  // 次は 2.56 億。足りなければ断る
+  expect(giveGift(two, 'star', 4_000)).toEqual({ ok: false, reason: '♡ が 2.16億 足りないよ' })
+  expect(giftOf('star')).toMatchObject({ kind: 'star', name: '星' })
+  expect(giftOf('star').thanks).toMatch(/星/)
+  expect(isDream('star')).toBe(false)
+  // かかえている間は星の絵を持ち、空の星の数も見た目に渡す
+  expect(lookOf(two, 3_500, { id: 'star', from: 3_000 })).toMatchObject({ gift: 'star', stars: 2 })
+  expect(lookOf(game(), 0, null).stars).toBe(0)
+})
+
+test('星：ひとつごとに ♡ の稼ぎが全部 ×1.2（なでる・放置・お給料・手当・おだちん）', () => {
+  const levels = { glove: 3, fan: 5, stardust: 2, allowance: 2, toolTip: 4 }
+  const plain = game({ levels })
+  const starry = game({ levels, gifts: { star: 2 } })
+  const k = STAR_RATE ** 2
+  near(starRate(starry), 1.44)
+  const ratio = (a: number, b: number) => near(a / b, k)
+  ratio(touchGame(starry, 2_000, working, pet).gained, touchGame(plain, 2_000, working, pet).gained)
+  ratio(payIdle(starry, 2_000, 1_000).earned, payIdle(plain, 2_000, 1_000).earned)
+  ratio(accrue(starry, 31_000, working).earned, accrue(plain, 31_000, working).earned)
+  ratio(toolTip(starry).earned, toolTip(plain).earned)
+})
+
+test('星：とても多くても数があふれず、上限の値段の星は買えない', () => {
+  const lots = game({ hearts: HEART_CAP, gifts: { star: 1e6 }, levels: { glove: 1e308, allowance: 1e308, fan: 0 } })
+  expect(starRate(lots)).toBe(HEART_CAP)
+  expect(starPrice(lots)).toBe(HEART_CAP)
+  expect(giveGift(lots, 'star', 2_000).ok).toBe(false)
+  // 稼ぎが 0 のところ（放置の強化なし・働いている仲間なし）に大きな倍率がかかっても、NaN で ♡ が消えない
+  const rich = { ...lots, hearts: 5e20, earned: 5e20 }
+  expect(payIdle(rich, 60_000, 1_000)).toBe(rich)
+  const rested = accrue(rich, 61_000, resting)
+  expect(rested.hearts).toBe(5e20)
+  for (const g of [touchGame(rich, 2_000, working, pet).game, accrue(rich, 61_000, working), toolTip({ ...rich, levels: { toolTip: 1e308 } })]) {
+    expect(Number.isFinite(g.hearts)).toBe(true)
+    expect(g.hearts).toBeGreaterThan(0)
+  }
+})
+
+test('節目：上限の無い強化は Lv25 ごとに効き目が 2 倍。フィーバー延長は変わらない', () => {
+  const glove = upgrade('glove')
+  expect([0, 24, 25, 49, 50, 75].map(level => milestoneOf(glove, level))).toEqual([1, 1, 2, 2, 4, 8])
+  expect(milestoneOf(upgrade('feverTime'), 5)).toBe(1)
+  expect(toMilestone(glove, 22)).toBe(3)
+  expect(toMilestone(glove, 25)).toBe(25)
+  expect(toMilestone(upgrade('feverTime'), 3)).toBeNull()
+  // 1 なで：Lv24 は 1 + 24、Lv25 は 1 + 25 × 2、Lv50 は 1 + 50 × 4（コンボ 0、休み中）
+  const gained = (level: number) => touchGame(game({ levels: { glove: level }, comboAt: -1e9 }), 2_000, resting, pet).gained / 1.01
+  near(gained(24), 25)
+  near(gained(25), 51)
+  near(gained(50), 201)
+  // 放置：応援うちわ Lv25 は 0.2 × 25 × 2 = 10/秒
+  near(payIdle(game({ levels: { fan: 25 } }), 1_000, 1_000).hearts, 10)
+  // おだちん：Lv25 は 3 × 25 × 2
+  expect(toolTip(game({ levels: { toolTip: 25 } })).hearts).toBe(150)
+  // フィーバー延長 Lv5 は 2 秒 × 5 のまま
+  let g = game({ levels: { feverTime: 5 } })
+  for (let i = 0; i < FEVER_COMBO; i++) g = touchGame(g, 2_000 + i * 100, resting, pet).game
+  expect(g.feverUntil).toBe(2_000 + (FEVER_COMBO - 1) * 100 + FEVER_MS + 10_000)
+  // 高い Lv でも有限
+  expect(milestoneOf(glove, 1e9)).toBe(HEART_CAP)
+})
+
+test('同時の星：2 つのセッションが同じ base から贈ったら、数は合わせたぶん、♡ は順に贈った値段', () => {
+  const base = game({ hearts: 1_000_000_000, given: 5_000 })
+  // 向こうは 1 個、こちらは 2 個（どちらも 1 個目を 1 億で買ったつもり）
+  const theirs = bought(giveGift(base, 'star', 2_000))
+  const mine = bought(giveGift(bought(giveGift(base, 'star', 2_100)), 'star', 2_200))
+  const merged = mergeGame(theirs, base, mine)
+  expect(starCount(merged)).toBe(3)
+  // 1 億 + 1.6 億 + 2.56 億 を払ったことになる（二重払いも、安いままの 2 個目も無い）
+  const cost = starsCost(3)
+  expect(Math.round(cost / 1e6)).toBe(516)
+  expect(merged.hearts).toBe(1_000_000_000 - cost)
+  expect(merged.given).toBe(5_000 + cost)
+  // 次に合わせるときに、もう一度そろえたりしない
+  const later = mergeGame(merged, merged, { ...merged, hearts: merged.hearts + 1 })
+  expect(later.hearts).toBe(merged.hearts + 1)
+  expect(later.given).toBe(merged.given)
+  expect(starCount(later)).toBe(3)
+  // 片方だけが贈ったときは、そのまま
+  const one = mergeGame(theirs, base, base)
+  expect(starCount(one)).toBe(1)
+  expect(one.hearts).toBe(900_000_000)
+  expect(one.given).toBe(5_000 + 100_000_000)
+  // 同じ 1 個目を両方で贈ったら、片方は 2 個目の値段
+  const both = mergeGame(theirs, base, bought(giveGift(base, 'star', 2_300)))
+  expect(starCount(both)).toBe(2)
+  expect(both.hearts).toBe(1_000_000_000 - starsCost(2))
+  expect(both.given).toBe(5_000 + starsCost(2))
+})
+
+test('同時の星：♡ が足りなくなったら借金のまま', () => {
+  const base = game({ hearts: 150_000_000 })
+  const theirs = bought(giveGift(base, 'star', 2_000))
+  const mine = bought(giveGift(base, 'star', 2_000))
+  const merged = mergeGame(theirs, base, mine)
+  expect(starCount(merged)).toBe(2)
+  expect(merged.hearts).toBe(150_000_000 - starsCost(2))
+  expect(giveGift(merged, 'star', 3_000).ok).toBe(false)
+})
+
+test('restore：1.4.3 のセーブ（星の無いころ）はそのまま読める', () => {
+  const saved = {
+    v: 1,
+    hearts: 123_456_789.5,
+    earned: 987_654_321,
+    combo: 4,
+    comboAt: 9,
+    maxCombo: 88,
+    feverUntil: 0,
+    fevers: 321,
+    workPets: 4_000,
+    hugs: 12,
+    wakes: 3,
+    levels: { glove: 45, brush: 20, coffee: 15, fan: 45, toolTip: 25, allowance: 20, feverTime: 5, stardust: 50 },
+    owned: ['ribbon', 'catEars', 'santa', 'shootingStars', 'crown', 'aurora'],
+    hat: 'crown',
+    achievements: ['pets1', 'earned100m', 'dreamAll', 'bff'],
+    lastUnlock: { id: 'dreamAll', at: 50 },
+    gifts: { cookie: 10, greenTests: 1, telescope: 1, house: 1, library: 1, constellation: 1, moonTrip: 1, noBugs: 1 },
+    given: 116_130_500,
+    happyUntil: 0,
+    lastGift: { id: 'noBugs', at: 40 },
+    favorite: 'cookie',
+    passiveAt: 77,
+  }
+  const g = restore(JSON.parse(JSON.stringify(saved)), newGame(0, 5_000))
+  expect(g).toEqual({ ...saved, passiveAt: 5_000 } as Game)
+  expect(starCount(g)).toBe(0)
+  expect(starRate(g)).toBe(1)
+})
+
+test('実績：100 億・1 兆・1 京を稼ぐ、星を 10・50・100 個贈る', () => {
+  const ids = (over: Partial<Game>) => unlocked({ game: game(over), pets: 0, rate: 0 }).map(a => a.id)
+  expect(ids({ earned: 1e10 - 1 })).not.toContain('earned10b')
+  expect(ids({ earned: 1e10 })).toContain('earned10b')
+  expect(ids({ earned: 1e12 })).toContain('earned1t')
+  expect(ids({ earned: 1e16 - 1e3 })).not.toContain('earned10q')
+  for (const id of ['earned10b', 'earned1t', 'earned10q'] as const) expect(ids({ earned: 1e16 })).toContain(id)
+  expect(ids({ gifts: { star: 9 } })).not.toContain('stars10')
+  expect(ids({ gifts: { star: 10 } })).toContain('stars10')
+  for (const id of ['stars10', 'stars50'] as const) expect(ids({ gifts: { star: 50 } })).toContain(id)
+  expect(ids({ gifts: { star: 100 } })).toContain('stars100')
+  expect(STAR.growth).toBe(1.6)
+})

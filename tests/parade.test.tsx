@@ -406,6 +406,64 @@ test('贈り物：お礼を言ってごきげんになり、夢のプレゼン�
   expect(toasts.at(-1)).toMatch(/足りないよ/)
 })
 
+test('星を贈る：何度でも贈れて値段が上がり、お礼を言って夜空に星が増える。強化には次の節目が出る', async ($, on) => {
+  const { clock, held, toasts } = boot(on, { store: veteran({ hearts: 300_000_000, levels: { glove: 22 } }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const ui = await mountBand($, 'desktop')
+  const shop = await mountShop($)
+  const before = await svgOf(ui)
+
+  // 強化の行に、次の節目（Lv25 で ×2）までの Lv が出る
+  expect(await textOf(shop, /おかいもの（Lv25 ごとに効き目 2 倍）/)).toBeDefined()
+  expect(await textOf(shop, /1 なでの ♡ \+1 · あと 3 Lv で ×2/)).toBeDefined()
+  expect(await textOf(shop, /星を贈る 1億♡/)).toBeDefined()
+  expect(await textOf(shop, /贈るたびに値段が上がる/)).toBeDefined()
+
+  await shop.press({ key: 'gift-star' })
+  expect(toasts).toContain('🌟 星を贈ったよ！夜空がまたひとつ明るくなる')
+  await clock.advance(200)
+  // お礼を言って星をかかえ、info には何個目か
+  expect(await textOf(ui, /お星さま…！/)).toBeDefined()
+  expect(await textOf(ui, /🎁 星 · 1 個目/)).toBeDefined()
+  expect(await textOf(shop, /1 個贈った · ♡ の稼ぎ ×1.2/)).toBeDefined()
+  expect(await textOf(shop, /星を贈る 1.6億♡/)).toBeDefined()
+  expect((held.get('game') as { gifts: Record<string, number>; given: number }).gifts.star).toBe(1)
+  expect((held.get('game') as { given: number }).given).toBe(100_000_000)
+
+  await shop.press({ key: 'gift-star' })
+  expect((held.get('game') as { gifts: Record<string, number> }).gifts.star).toBe(2)
+  // 3 個目（2.56 億）は足りない
+  await shop.press({ key: 'gift-star' })
+  expect(toasts.at(-1)).toMatch(/足りないよ/)
+  expect((held.get('game') as { gifts: Record<string, number> }).gifts.star).toBe(2)
+
+  // かかえ終わっても、夜空に贈った星（白い芯と桃色の光）が残る
+  await clock.advance(10_000)
+  const after = await svgOf(ui)
+  expect(after).not.toBe(before)
+  expect(after).toContain('#ffb3d9')
+})
+
+test('複数のセッション：同時に星を贈ったら、数は合わせたぶん、♡ は順に贈った値段にそろえる', async ($, on) => {
+  const { clock, held, toasts } = boot(on, { store: veteran({ hearts: 1_000_000_000 }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const shop = await mountShop($)
+
+  // 別のセッションが同じ 10 億 ♡ から星を 1 個贈って保存した。こちらはまだそれを読んでいない
+  const other = held.get('game') as Record<string, unknown>
+  held.set('game', { ...other, hearts: 900_000_000, given: 100_000_000, gifts: { star: 1 }, lastGift: { id: 'star', at: 500 } })
+
+  await shop.press({ key: 'gift-star' })
+  expect(toasts).toContain('🌟 星を贈ったよ！夜空がまたひとつ明るくなる')
+  const saved = held.get('game') as { hearts: number; given: number; gifts: Record<string, number> }
+  expect(saved.gifts.star).toBe(2)
+  // 1 個目（1 億）と 2 個目（1.6 億）を払ったことになる（放置収入などの端数は無い）
+  expect(Math.round(saved.hearts)).toBe(740_000_000)
+  expect(saved.given).toBe(260_000_000)
+})
+
 test('帯に出した贈り物を、ワンぽちで贈れる', async ($, on) => {
   const { clock, held, toasts } = boot(on, { store: veteran({ hearts: 1_000 }) })
   await startSession($, 'desktop')

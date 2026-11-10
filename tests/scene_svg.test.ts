@@ -4,7 +4,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Friend, Look, MoodKind } from '../types'
 import { encodeCells, toSvg } from '../hooks/encode'
-import { NIGHT } from '../hooks/palette'
+import { NIGHT, PALETTES } from '../hooks/palette'
 import { drawScene } from '../hooks/scene'
 
 // FNV-1a（32 bit）
@@ -17,7 +17,7 @@ const fingerprint = (text: string) => {
 const crew = (n: number): Friend[] =>
   Array.from({ length: n }, (_, i) => ({ id: `f${i}`, type: ['Explore', 'Plan', 'general-purpose', 'mystery'][i % 4]!, label: '', tool: null, doneAt: i === 2 ? 5 : null }))
 
-const plain: Look = { hat: null, shootingStars: false, aurora: false, fever: false, gift: null, dreams: [] }
+const plain: Look = { hat: null, shootingStars: false, aurora: false, fever: false, gift: null, dreams: [], stars: 0 }
 const dressed: Look = {
   hat: 'crown',
   shootingStars: true,
@@ -25,6 +25,7 @@ const dressed: Look = {
   fever: true,
   gift: 'cake',
   dreams: ['greenTests', 'telescope', 'house', 'library', 'constellation', 'moonTrip', 'noBugs'],
+  stars: 0,
 }
 
 const SCENES: { name: string; mood: MoodKind; character: 'clawd' | 'neko'; friends: number; look: Look; tick: number; petted?: boolean }[] = [
@@ -64,4 +65,38 @@ const EXPECTED: Record<string, string> = {
   'asking/terminal': '55b95308',
   'neko-error/desktop': '5e6c0178',
   'neko-error/terminal': '167e4f09',
+}
+
+// 贈った星（#39）のある場面。数個・ちょうど 12 個（1 つずつ描く最後）・13 個（天の川のはじまり）・たくさんと、昼の空
+const STARRY: { name: string; stars: number; palette: keyof typeof PALETTES; tick: number }[] = [
+  { name: 'stars5', stars: 5, palette: 'night', tick: 0 },
+  { name: 'stars12', stars: 12, palette: 'night', tick: 3 },
+  { name: 'stars13', stars: 13, palette: 'night', tick: 0 },
+  { name: 'milkyWay', stars: 200, palette: 'night', tick: 0 },
+  { name: 'stars12-day', stars: 12, palette: 'day', tick: 1 },
+]
+
+test('贈った星のある絵の指紋', () => {
+  const got: Record<string, string> = {}
+  for (const s of STARRY) {
+    const palette = PALETTES[s.palette]
+    const input = { mood: 'idle' as const, character: 'clawd' as const, friends: crew(1), look: { ...plain, stars: s.stars }, tick: s.tick, palette }
+    got[`${s.name}/desktop`] = fingerprint(toSvg(drawScene({ ...input, columns: 180, paradeColumns: 114, headroom: 4, twinkleTicks: 4 }), 16, palette).source)
+    got[`${s.name}/terminal`] = fingerprint(JSON.stringify(encodeCells(drawScene({ ...input, columns: 84 }))))
+  }
+  expect(got).toEqual(STARRY_EXPECTED)
+})
+
+// 1.5.0 で星を足したときの絵から取った指紋（1 つずつは 12 個まで、桃色の光）
+const STARRY_EXPECTED: Record<string, string> = {
+  'stars5/desktop': '41872af7',
+  'stars5/terminal': '29137e68',
+  'stars12/desktop': 'dd9eae7c',
+  'stars12/terminal': '1f783847',
+  'stars13/desktop': 'ec79b7c6',
+  'stars13/terminal': '8e542990',
+  'milkyWay/desktop': '93a409d5',
+  'milkyWay/terminal': 'a1cc2272',
+  'stars12-day/desktop': 'd5a768fa',
+  'stars12-day/terminal': '72235606',
 }

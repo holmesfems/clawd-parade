@@ -47,6 +47,15 @@ export function put(g: Grid, glyph: string, x: number, y: number, color: number)
   stampGlyph(g, GLYPHS[glyph] ?? [], x, y)
 }
 
+// 0 以上 1 未満の、n ごとに決まった値（星の場所など、毎コマ同じにしたいばらつき）
+export function hash(n: number): number {
+  let h = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b)
+  h ^= h >>> 13
+  h = Math.imul(h, 0xc2b2ae35)
+  h ^= h >>> 16
+  return (h >>> 0) / 2 ** 32
+}
+
 export function blit(g: Grid, s: Sprite, x: number, y: number) {
   s.px.forEach((row, dy) => row.forEach((c, dx) => c !== null && dot(g, x + dx, y + dy, c)))
 }

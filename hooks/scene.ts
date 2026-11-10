@@ -5,12 +5,12 @@
 import type { Character, Friend, Look, MoodKind } from '../types'
 import { C, NIGHT, coatOf } from './palette'
 import type { Palette } from './palette'
-import { blit, put } from './grid'
+import { blit, hash, put } from './grid'
 import type { Grid, Px } from './grid'
 import { clawd, face, kitten, leader, miniClawd } from './sprites'
 import {
-  DECOS, GIFT_ICONS, drawAurora, drawConstellation, drawHat, drawHeartRain, drawRainbow, drawShootingStar, drawSun, drawYard,
-  glow, groundDecos, stampDeco, stampIcon, sunOf,
+  DECOS, GIFT_ICONS, drawAurora, drawConstellation, drawGiftedStars, drawHat, drawHeartRain, drawMilkyWay, drawRainbow,
+  drawShootingStar, drawSun, drawYard, glow, groundDecos, stampDeco, stampIcon, sunOf,
 } from './decor'
 
 export const SCENE_ROWS = 7
@@ -164,7 +164,10 @@ export function isMarching(mood: MoodKind, friends: Friend[]) {
   return WORKING.includes(mood) || friends.some(f => f.doneAt === null)
 }
 
-const PLAIN: Look = { hat: null, shootingStars: false, aurora: false, fever: false, gift: null, dreams: [] }
+const PLAIN: Look = { hat: null, shootingStars: false, aurora: false, fever: false, gift: null, dreams: [], stars: 0 }
+
+// リーダーの頭の上の列（なでられて傾くぶん、2 ドットの余白をとる）。贈った星はここに置かない
+const leaderSpan = ({ x, w }: Layout['leader']) => ({ from: x - 2, to: x + w + 1 })
 
 export function drawScene({
   columns,
@@ -189,10 +192,16 @@ export function drawScene({
   const marching = isMarching(mood, friends)
   const scroll = marching ? tick : 0
 
+  // 行進に使う幅（右のセリフの空を除く）と、星の出る空の高さ
+  const paradeW = Math.max(20, Math.min(W, paradeColumns))
+  const skyRows = 6 + sky
   if (look.aurora) drawAurora(g, tick)
+  // 贈った星が多いときの天の川は、太陽よりも奥
+  if (look.stars > 0) drawMilkyWay(g, look.stars, paradeW, skyRows)
   // 太陽は空のいちばん奥。夢のプレゼント（虹・Clawd 座・月）と地面、みんなはあとから描くので、その前に出る
-  const sun = palette.sun ? sunOf(palette.sun, ground, Math.max(20, Math.min(W, paradeColumns))) : null
+  const sun = palette.sun ? sunOf(palette.sun, ground, paradeW) : null
   if (sun) drawSun(g, sun)
+  const isBehindSun = (x: number, y: number) => sun !== null && (x - sun.cx) ** 2 + (y - sun.cy) ** 2 <= (sun.halo + 2) ** 2
 
   // 並びを先に決めて、行進の右にあいた「庭」に夢のプレゼントを飾る
   const spots = layout(W, paradeColumns, friends, character)
@@ -201,14 +210,16 @@ export function drawScene({
   if (yard && dreams.includes('noBugs')) drawRainbow(g, groundDecos(yard, dreams).right, ground)
 
   // 空の星。遠くにあるので歩いても動かさない
-  starsOf(W, 6 + sky).forEach(({ x, y }, i) => {
+  starsOf(W, skyRows).forEach(({ x, y }, i) => {
     // 星が少ない時間帯は、決まった星だけを残す（毎コマ同じ星）。星の場所の hash（i * 2、i * 2 + 1）とは別の値で決める
     if (palette.stars < 1 && hash(-1 - i) >= palette.stars) return
     // 太陽の上には星を出さない
-    if (sun && (x - sun.cx) ** 2 + (y - sun.cy) ** 2 <= (sun.halo + 2) ** 2) return
+    if (isBehindSun(x, y)) return
     const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
     put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? palette.star : palette.starDim)
   })
+  // 贈った星は、昼も含めてどの時間帯でも出す（流れ星やオーロラと同じ）。セリフの空には出さない
+  if (look.stars > 0) drawGiftedStars(g, look.stars, paradeW, skyRows, Math.floor(tick / twinkleTicks), leaderSpan(spots.leader), isBehindSun)
   // 空の飾りはセリフの空へはみ出さないので、行進の右に YARD_MIN あるときだけ
   const skyYard = yard && yard.right - yard.left >= YARD_MIN ? yard : null
   if (skyYard && dreams.includes('constellation')) drawConstellation(g, skyYard, sky, tick, palette)
@@ -328,15 +339,6 @@ export function drawScene({
 }
 
 // ---- 星 -------------------------------------------------------------------
-
-// 0 以上 1 未満の、n ごとに決まった値
-function hash(n: number): number {
-  let h = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b)
-  h ^= h >>> 13
-  h = Math.imul(h, 0xc2b2ae35)
-  h ^= h >>> 16
-  return (h >>> 0) / 2 ** 32
-}
 
 // 星の場所。幅を星の数で等分した枠に 1 つずつ置き、枠の中でずらす。
 // 歩幅を決め打ちにすると、幅によっては星が数本の列に固まって縦に並んだ

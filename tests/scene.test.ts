@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { DreamId, Friend } from '../types'
-import { groundDecos } from '../hooks/decor'
-import { toSvg } from '../hooks/encode'
+import type { DreamId, Friend, Look } from '../types'
+import { GIFTED_STARS, giftedStarSpots, groundDecos, milkyWayDensity } from '../hooks/decor'
+import { encodeCells, toSvg } from '../hooks/encode'
 import { NIGHT, PALETTES, timeOfDay } from '../hooks/palette'
 import { STROKE_DOTS, drawScene, frameOf, hitTest, layout, starsOf, strokeMeter } from '../hooks/scene'
 
@@ -112,7 +112,7 @@ test('太陽：朝は右から昇り、昼は上に小さく、夕方は左に�
 
 test('太陽は空のいちばん奥：夢のプレゼント・地面・みんなを上書きしない', () => {
   const dreams: DreamId[] = ['house', 'library', 'moonTrip', 'telescope', 'greenTests', 'constellation', 'noBugs']
-  const look = { hat: 'crown' as const, shootingStars: false, aurora: false, fever: false, gift: null, dreams }
+  const look = { hat: 'crown' as const, shootingStars: false, aurora: false, fever: false, gift: null, dreams, stars: 0 }
   const crew = [friend('a'), friend('b')]
   for (const [columns, paradeColumns, headroom] of [[84, 84, 0], [90, 90, 4], [180, 114, 4]] as const) {
     for (const time of ['morning', 'day', 'evening'] as const) {
@@ -213,4 +213,83 @@ test('なでた手が横に STROKE_DOTS 動くごとに 1 回。端数は持ち�
   expect(meter.move(0)).toBe(1)
   expect(meter.move(STROKE_DOTS * 3)).toBe(3)
   expect(meter.move(STROKE_DOTS * 3 + 1)).toBe(0)
+})
+
+// ---- 贈った星（#39） ----
+
+const starLook = (stars: number): Look => ({ hat: null, shootingStars: false, aurora: false, fever: false, gift: null, dreams: [], stars })
+
+// 前の絵から変わったドット
+const changed = (a: (number | null)[][], b: (number | null)[][]) =>
+  a.flatMap((row, y) => row.flatMap((c, x) => (c !== b[y]![x] ? [{ x, y }] : [])))
+
+test('贈った星：行進の上の空に 1 つずつ足し、足しても前の星は動かない', () => {
+  for (const [columns, paradeColumns, headroom] of [[84, 84, 0], [180, 114, 4], [600, 534, 4]] as const) {
+    const skyRows = 6 + headroom
+    const draw = (stars: number) =>
+      drawScene({ columns, paradeColumns, headroom, mood: 'idle', tick: 0, friends: [], character: 'clawd', look: starLook(stars) })
+    const { leader } = layout(columns, paradeColumns, [], 'clawd')
+    const spots = giftedStarSpots(paradeColumns, skyRows, { from: leader.x - 2, to: leader.x + leader.w + 1 })
+    expect(spots.length).toBe(GIFTED_STARS)
+    // リーダーの頭の上（傾くぶんの余白も）には、十字の光もかからない
+    for (const { x } of spots) expect(x + 1 < leader.x - 2 || x - 1 > leader.x + leader.w + 1).toBe(true)
+    // 空の上のほうに寄せる
+    const meanY = spots.reduce((sum, p) => sum + p.y, 0) / spots.length
+    expect(meanY).toBeLessThan((skyRows - 1) / 2)
+    // 十字の光まで、セリフの空（paradeColumns より右）と地面の側に出ない
+    for (const { x, y } of spots) expect(x >= 1 && x <= paradeColumns - 2 && y >= 1 && y <= skyRows - 2).toBe(true)
+    for (let n = 0; n < GIFTED_STARS; n++) {
+      // n + 1 個目を足して変わるのは、その星の十字のドットだけ（前の星は動かない）
+      const { x, y } = spots[n]!
+      for (const d of changed(draw(n + 1), draw(n))) expect(Math.abs(d.x - x) + Math.abs(d.y - y)).toBeLessThanOrEqual(1)
+    }
+  }
+})
+
+test('贈った星：1 つずつ描くのは 12 個まで。十字どうしは 1 ドットあけ、13 個目からは天の川を少しずつ濃くする（空がうるさくならない）', () => {
+  expect(GIFTED_STARS).toBe(12)
+  // 端末の狭い空でも広いデスクトップの空でも、十字の光のあいだに 1 ドットのすき間がある
+  for (const [width, skyRows] of [[84, 6], [114, 10]] as const) {
+    const { leader } = layout(width, width, [], 'clawd')
+    const spots = giftedStarSpots(width, skyRows, { from: leader.x - 2, to: leader.x + leader.w + 1 })
+    for (const [i, a] of spots.entries())
+      for (const b of spots.slice(i + 1)) expect(Math.abs(a.x - b.x) >= 4 || Math.abs(a.y - b.y) >= 4).toBe(true)
+  }
+  // 天の川は 12 個を超えてから。濃さは上がり続けず、上で止まる
+  expect(milkyWayDensity(0)).toBe(0)
+  expect(milkyWayDensity(GIFTED_STARS)).toBe(0)
+  expect(milkyWayDensity(GIFTED_STARS + 1)).toBeGreaterThan(0)
+  expect(milkyWayDensity(100)).toBeGreaterThan(milkyWayDensity(40))
+  expect(milkyWayDensity(10_000)).toBe(milkyWayDensity(1_000_000))
+  expect(milkyWayDensity(1_000_000)).toBeLessThanOrEqual(0.4)
+  const draw = (stars: number) =>
+    drawScene({ columns: 180, paradeColumns: 114, headroom: 4, mood: 'idle', tick: 0, friends: [], character: 'clawd', look: starLook(stars) })
+  const lit = (stars: number) => changed(draw(stars), draw(0))
+  // 12 個を超えると、星は増やさずに天の川のぶんだけ変わる。どれだけ増えても、セリフの空には出ない
+  expect(lit(13).length).toBeGreaterThan(lit(12).length)
+  expect(lit(200).length).toBeGreaterThan(lit(13).length)
+  expect(lit(1e9)).toEqual(lit(10_000))
+  for (const { x, y } of lit(1e9)) expect(x < 114 && y < 10).toBe(true)
+  // 空（行進の上、10 行 × 114 列）の半分より多くは埋まらない
+  expect(lit(1e9).length).toBeLessThan((114 * 10) / 2)
+})
+
+test('贈った星は昼も出て、端末でもドットで見える。星が無ければ絵は変わらない', () => {
+  for (const time of Object.keys(PALETTES) as (keyof typeof PALETTES)[]) {
+    const draw = (stars: number) =>
+      drawScene({ columns: 180, paradeColumns: 114, headroom: 4, mood: 'idle', tick: 0, friends: [], character: 'clawd', look: starLook(stars), palette: PALETTES[time] })
+    // 白い芯の星が、時間帯によらず出る（太陽の上の星だけは出さない）
+    const cores = changed(draw(12), draw(0)).filter(({ x, y }) => draw(12)[y]![x] === 0xffffff)
+    expect(cores.length).toBeGreaterThanOrEqual(10)
+    // 贈った星の光は、ふつうの大きな星（金色）とは違う色
+    expect(draw(12).flat()).toContain(0xffb3d9)
+    expect(draw(12).flat()).not.toContain(0xffd166)
+  }
+  // 端末は空を塗らないが、星のドットはセルに出る
+  const terminal = (stars: number) =>
+    encodeCells(drawScene({ columns: 84, mood: 'idle', tick: 0, friends: [], character: 'clawd', look: starLook(stars), palette: PALETTES.day }))
+  expect(terminal(5).cells).not.toBe(terminal(0).cells)
+  // 星が 0 個なら、look の無い絵と 1 ドットも変わらない
+  const plain = drawScene({ columns: 180, paradeColumns: 114, headroom: 4, mood: 'idle', tick: 0, friends: [], character: 'clawd' })
+  expect(drawScene({ columns: 180, paradeColumns: 114, headroom: 4, mood: 'idle', tick: 0, friends: [], character: 'clawd', look: starLook(0) })).toEqual(plain)
 })

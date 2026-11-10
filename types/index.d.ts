@@ -69,7 +69,8 @@ export type CosmeticId = Hat | 'shootingStars' | 'aurora'
 // 小さな贈り物（何度でも）と、夢のプレゼント（1 回きりで、ずっと飾られる）
 export type TreatId = 'cookie' | 'cocoa' | 'cake' | 'letter' | 'cushion' | 'keyboard'
 export type DreamId = 'greenTests' | 'telescope' | 'house' | 'library' | 'constellation' | 'moonTrip' | 'noBugs'
-export type GiftId = TreatId | DreamId
+// 星は何度でも贈れて、贈るたびに値段が上がる（数は gifts.star に入る）
+export type GiftId = TreatId | DreamId | 'star'
 
 // 実績の id（hooks/game.ts の ACHIEVEMENTS と同じ並び）。保存に入るので、変えないこと。
 // plugin.json の types は 1 ファイルで閉じている決まりなので、game.ts から引かずにここに並べる
@@ -102,6 +103,12 @@ export type AchievementId =
   | 'dream1'
   | 'dreamAll'
   | 'bff'
+  | 'earned10b'
+  | 'earned1t'
+  | 'earned10q'
+  | 'stars10'
+  | 'stars50'
+  | 'stars100'
 
 export type Game = {
   // 保存形式の版。v の無い保存（1.1.2 まで）は v1 として読む
@@ -149,8 +156,10 @@ export type Look = {
   aurora: boolean
   fever: boolean
   // 今 Clawd が抱えている贈り物（夢のプレゼントは箱で）、飾ってある夢のプレゼント
-  gift: TreatId | 'box' | null
+  gift: TreatId | 'box' | 'star' | null
   dreams: DreamId[]
+  // 贈った星の数。夜空に明るい星を足し、多くなったら天の川にする
+  stars: number
 }
 
 declare module 'claude-code' {
