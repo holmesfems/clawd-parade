@@ -3,8 +3,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Work } from '../types'
+import type { Character, DiaryKind, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
 import { bandView } from './band'
+import { dayOf, record, tidyDiary } from './diary'
 import type { Deal, Situation } from './game'
 import {
   HOOK_FRAME_MS,
@@ -30,7 +31,9 @@ import {
   unlocked,
 } from './game'
 import { messageOf } from './message'
+import { HOLIDAY_NAMES, SEASON_NAMES, calendarOf, parseMonthDay } from './palette'
 import { isMarching } from './scene'
+import { WEATHER_NAMES, WEATHER_WORDS, weatherAt } from './weather'
 import { SHOP, shopView } from './shop'
 
 const CHARACTER_KEY = 'character'
@@ -74,6 +77,10 @@ const pets = atom({ plugin: 'clawd-parade', key: 'pets' } as const, {
 // passiveAt が 0 のうちは、まだ保存から読み込んでいない
 const game = atom({ plugin: 'clawd-parade', key: 'game' } as const, newGame(0, 0) as Game)
 const touchDebug = atom({ plugin: 'clawd-parade', key: 'touchDebug' } as const, false)
+// /parade debug 12/25 で選んだ、見てみたい日（季節と行事の飾りを確かめるため）。このセッションだけで、保存しない
+const dateOverride = atom({ plugin: 'clawd-parade', key: 'dateOverride' } as const, null as { month: number; day: number } | null)
+// /parade debug rain で選んだ天気（#42。天気の絵を確かめるため）。このセッションだけで、保存しない
+const weatherOverride = atom({ plugin: 'clawd-parade', key: 'weatherOverride' } as const, null as Weather | null)
 // 前回 store から読んだ（store に書いた）ゲームとなでた回数。次に保存するときは、ここからの差分を足し込む
 const synced = atom({ plugin: 'clawd-parade', key: 'synced' } as const, { game: newGame(0, 0), pets: 0 } as Synced)
 const holding = atom({ plugin: 'clawd-parade', key: 'holding' } as const, null as Holding)
@@ -115,7 +122,8 @@ async function saveNow($: EngineInterface, now: number) {
   // まだ保存が無い・壊れている項目は、前回読んだ（書いた）ものとみなす
   // store には compare-and-set が無いので、書く直前に読み、書いたあとに読み直して確かめる
   const theirs = restore(await $.store.get(GAME_KEY), base.game)
-  const written = mergeGame(theirs, base.game, g)
+  // 日記の古い日は、合わせたあとのものから消す（差分にしないので、ほかのセッションと同時に消しても負にならない）
+  const written = tidyDiary(mergeGame(theirs, base.game, g), dayOf(now))
   const writtenPets = (Number(await $.store.get(PETS_KEY)) || 0) + p.total - base.pets
   await $.store.set(GAME_KEY, written)
   await $.store.set(PETS_KEY, writtenPets)
@@ -135,6 +143,13 @@ async function saveNow($: EngineInterface, now: number) {
     await update($, holding, () => ({ id, from: now }))
   }
   await update($, pets, one => ({ ...one, total: total + one.total - p.total }))
+}
+
+// きょうの日記（#43）に数を足す。日は時計の今の日付（PC のタイムゾーン）で、/parade debug 12/25 の日付は使わない。
+// 数だけを渡す（ツールの名前やプロンプトは渡さない）。読み込む前（passiveAt が 0）は数えない
+async function jot($: EngineInterface, add: Partial<Record<DiaryKind, number>>) {
+  const day = dayOf(await $.clock.now())
+  await update($, game, g => (g.passiveAt === 0 ? g : record(g, day, add)))
 }
 
 // 放置収入は、開いているセッションのどれか 1 つが払う。最後に払った時刻を store で分け合う
@@ -186,6 +201,7 @@ async function pet($: EngineInterface, kind: TouchKind, touch: { hand?: number; 
     return touched.game
   })
   if (isFeverStart) $.ui.toast('★ フィーバー！ ♡ 3 倍！ ★')
+  await jot($, { pets: 1 })
   await award($, now, after.total, at)
 }
 
@@ -314,6 +330,31 @@ export const register: Register = on => {
 
       return { text: isOn ? 'なでなでの当たり判定を、ピンクの枠で見えるようにしたよ（/parade debug で消える）' : '当たり判定の枠を消したよ' }
     }
+    // /parade debug 12/25 でその日として描き、/parade debug rain でその天気で描き、/parade debug today で両方を今日にもどす
+    // （季節と行事の飾り・天気の絵を確かめるため）
+    if (arg.startsWith('debug ')) {
+      const when = arg.slice('debug '.length).trim()
+      if (when === 'today' || when === 'きょう' || when === '今日') {
+        await update($, dateOverride, () => null)
+        const hadWeather = (await read($, weatherOverride)) !== null
+        await update($, weatherOverride, () => null)
+
+        return { text: hadWeather ? '日付と天気を今日にもどしたよ' : '日付を今日にもどしたよ' }
+      }
+      const forced = WEATHER_WORDS[when]
+      if (forced) {
+        await update($, weatherOverride, () => forced)
+
+        return { text: `${WEATHER_NAMES[forced]}の日として描くよ（ほんとうの天気ではないよ。/parade debug today でもどる）` }
+      }
+      const date = parseMonthDay(when)
+      if (!date) return { text: '日付は 月/日 で打ってね（例: /parade debug 12/25。天気は /parade debug rain・snow・cloudy・clear。もどすときは /parade debug today）' }
+      await update($, dateOverride, () => date)
+      const { season, holiday } = calendarOf(date.month, date.day)
+      const label = holiday ? `${HOLIDAY_NAMES[holiday]}・${SEASON_NAMES[season]}` : SEASON_NAMES[season]
+
+      return { text: `${date.month}/${date.day}（${label}）として描くよ（/parade debug today で今日にもどる）` }
+    }
     const picked = CHARACTERS[arg]
     if (picked) {
       await update($, character, () => picked)
@@ -322,7 +363,7 @@ export const register: Register = on => {
 
       return { text: picked === 'clawd' ? 'Clawd がやってきた！' : 'ねこたちがやってきた！' }
     }
-    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade clawd / /parade cat / /parade debug' }
+    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade clawd / /parade cat / /parade debug / /parade debug 12/25 / /parade debug rain' }
 
     const hidden = await update($, isHidden, v => !v)
 
@@ -364,8 +405,9 @@ export const register: Register = on => {
 
     const ran = await next(e)
 
-    // ツールを使うたびに、おだちんの ♡
+    // ツールを使うたびに、おだちんの ♡。日記には回数だけ（仲間が使ったぶんも）
     await update($, game, g => (g.passiveAt === 0 ? g : toolTip(g)))
+    await jot($, { tools: 1 })
     const [m, w] = await Promise.all([read($, mood), read($, work)])
     if (w.isRunning && ASKING.includes(m.kind)) await setMood($, 'working')
 
@@ -390,6 +432,7 @@ export const register: Register = on => {
       }
       await update($, friends, all => [...all.filter(f => f.id !== friend.id), friend])
       await update($, work, w => ({ ...w, helpers: w.helpers + 1 }))
+      await jot($, { agents: 1 })
     }
 
     return spawned
@@ -412,6 +455,8 @@ export const register: Register = on => {
       asksBack(e.answer) ? 'waiting' : 'done'
     await update($, work, w => ({ ...w, durationMs: e.durationMs, isRunning: false }))
     await update($, mood, () => ({ kind, at: now }))
+    // 働いた時間は帯の「1:23 でおわり」と同じ、ターンの始めから終わりまで。日をまたいだターンは、終わった日にまとめて数える
+    await jot($, { turns: 1, workMs: e.durationMs })
     if (kind === 'aborted') {
       await update($, friends, all => all.map(f => (f.doneAt === null ? { ...f, doneAt: now } : f)))
     }
@@ -425,7 +470,7 @@ export const register: Register = on => {
     const draft = await $.prompt.read().catch(() => ({ text: '' }))
     if (/\[Image #\d+\]/.test(draft.text)) return next(e)
 
-    const [m, list, w, t, who, p, g, isDebug, held] = await Promise.all([
+    const [m, list, w, t, who, p, g, isDebug, held, pinned, forced] = await Promise.all([
       read($, mood),
       read($, friends),
       read($, work),
@@ -435,12 +480,20 @@ export const register: Register = on => {
       read($, game),
       read($, touchDebug),
       read($, holding),
+      read($, dateOverride),
+      read($, weatherOverride),
     ])
     // フックの中の Date は使う人のタイムゾーンで動く（claude plugin test の中は UTC）。
-    // tick.at は始めのコマまで 0 なので、時計から読む
-    const hour = new Date(await $.clock.now()).getHours()
+    // tick.at は始めのコマまで 0 なので、時計から読む。季節と行事（#41）も、同じ時計の月と日から決める
+    const clock = new Date(await $.clock.now())
+    const hour = clock.getHours()
+    const date = pinned ?? { month: clock.getMonth() + 1, day: clock.getDate() }
+    // 天気（#42）も同じ日付と時刻から決める（ほんとうの天気ではない）。見たい日を選んでいれば、その日の天気（年は今年）
+    const weather = forced ?? weatherAt(clock.getFullYear(), date.month, date.day, hour)
     return bandView($.ui.resolve(e), {
       hour,
+      date,
+      weather,
       mood: m,
       work: w,
       friends: list,
@@ -461,13 +514,15 @@ export const register: Register = on => {
   // なでなでショップ（/parade shop で開くパネル）
   on('ui.render', { component: 'Pane', requestId: SHOP }, async ($, e) => {
     const [g, w, list, p, who] = await Promise.all([read($, game), read($, work), read($, friends), read($, pets), read($, character)])
+    // 日記のきょうも、時計の今の日付（/parade debug 12/25 の日付ではない）
+    const today = dayOf(await $.clock.now())
     return shopView($.ui.resolve(e), {
+      today,
       game: g,
       at: situationOf(w, list),
       petsTotal: p.total,
       character: who,
       buy: (label, deal) => () => buy($, label, deal),
-      say: text => async () => $.ui.toast(text),
     })
   })
 }

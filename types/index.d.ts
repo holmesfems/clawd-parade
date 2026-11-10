@@ -58,6 +58,10 @@ export type Pets = {
 
 export type Tick = { n: number; at: number }
 
+// 天気（#42）。日付から決まる、つくりものの天気（ほんとうの天気ではない。hooks/weather.ts の weatherOf）。
+// 保存には入らない
+export type Weather = 'clear' | 'cloudy' | 'rain' | 'snow'
+
 // ---- なでなでゲーム ----
 
 export type UpgradeId = 'glove' | 'brush' | 'coffee' | 'fan' | 'allowance' | 'toolTip' | 'stardust' | 'feverTime'
@@ -68,8 +72,21 @@ export type CosmeticId = Hat | 'shootingStars' | 'aurora'
 
 // 小さな贈り物（何度でも）と、夢のプレゼント（1 回きりで、ずっと飾られる）
 export type TreatId = 'cookie' | 'cocoa' | 'cake' | 'letter' | 'cushion' | 'keyboard'
-export type DreamId = 'greenTests' | 'telescope' | 'house' | 'library' | 'constellation' | 'moonTrip' | 'noBugs'
-export type GiftId = TreatId | DreamId
+// 1.7.0 で足した 4 つ（流れ星の丘・空飛ぶ船・Clawd の銅像・ふたりの星）は、後ろに足した。id は保存に入るので変えないこと
+export type DreamId =
+  | 'greenTests'
+  | 'telescope'
+  | 'house'
+  | 'library'
+  | 'constellation'
+  | 'moonTrip'
+  | 'noBugs'
+  | 'starHill'
+  | 'airship'
+  | 'statue'
+  | 'twinStars'
+// 星は何度でも贈れて、贈るたびに値段が上がる（数は gifts.star に入る）
+export type GiftId = TreatId | DreamId | 'star'
 
 // 実績の id（hooks/game.ts の ACHIEVEMENTS と同じ並び）。保存に入るので、変えないこと。
 // plugin.json の types は 1 ファイルで閉じている決まりなので、game.ts から引かずにここに並べる
@@ -102,6 +119,34 @@ export type AchievementId =
   | 'dream1'
   | 'dreamAll'
   | 'bff'
+  | 'earned10b'
+  | 'earned1t'
+  | 'earned10q'
+  | 'stars10'
+  | 'stars50'
+  | 'stars100'
+  | 'family'
+  | 'destiny'
+  | 'forever'
+  | 'dreamHill'
+  | 'dreamAirship'
+  | 'dreamStatue'
+  | 'dreamTwinStars'
+  // 1.10.0（#43）：きょうの日記と、つづけて使った日数
+  | 'streak3'
+  | 'streak7'
+  | 'streak30'
+  | 'tools100'
+  | 'agents100'
+  | 'hours100'
+  | 'turns1000'
+
+// きょうの日記（#43）で、日ごとに数えるもの：Claude が働いた時間（ミリ秒）、終わったターン、ツールを使った回数、
+// 来てくれた仲間（サブエージェント）、なでた回数（ぎゅっも）。数だけを持ち、何をしたか（文やファイルやツールの名前）は持たない
+export type DiaryKind = 'workMs' | 'turns' | 'tools' | 'agents' | 'pets'
+
+// これまでの合計を持つもの。なでた回数の合計は、前からある store の pets がそれなので、ここには入れない
+export type TotalKind = Exclude<DiaryKind, 'pets'>
 
 export type Game = {
   // 保存形式の版。v の無い保存（1.1.2 まで）は v1 として読む
@@ -131,6 +176,20 @@ export type Game = {
   lastGift: { id: GiftId; at: number } | null
   // 帯に出して、ワンぽちで贈れる小さな贈り物（ショップの ☆ で選ぶ）。null は出さない
   favorite: TreatId | null
+  // 飾ると選んだ夢のプレゼント（ショップの「飾る／しまう」で選ぶ）。null はまだ選んでいない
+  // （場所ごとに高いものから枠の数まで飾る。hooks/game.ts の shownDreams）。
+  // しまっても絵から消えるだけで、♡ の +10%・なかよし度・実績・贈ったことはそのまま
+  shown: DreamId[] | null
+  // しまってある、買った空の飾り（流れ星・オーロラ）。入っていなければ出す
+  off: CosmeticId[]
+  // きょうの日記（#43）。'2026-11-10.tools' のように「PC のタイムゾーンの日付.数えるもの」を鍵にした数だけの表で、
+  // 30 日より前の日は保存するときに消す。'2026-10-11.streak' だけは、消した日までつづいていた日数（つづけて使った日数を、
+  // 30 日より長くても数えられるように残す。hooks/diary.ts の pruneDiary）
+  diary: Partial<Record<string, number>>
+  // これまでの合計（日記を消しても減らない）
+  totals: Partial<Record<TotalKind, number>>
+  // いちばん長くつづけて使った日数（日記を消しても残るよう、この数だけは持つ）
+  bestStreak: number
   // 最後に放置収入を足した時刻。0 はこのセッションでまだ読み込んでいない
   passiveAt: number
 }
@@ -148,9 +207,16 @@ export type Look = {
   shootingStars: boolean
   aurora: boolean
   fever: boolean
-  // 今 Clawd が抱えている贈り物（夢のプレゼントは箱で）、飾ってある夢のプレゼント
-  gift: TreatId | 'box' | null
+  // 今 Clawd が抱えている贈り物（夢のプレゼントは箱で）
+  gift: TreatId | 'box' | 'star' | null
+  // 描く夢のプレゼント（しまってあるものは入らない。庭 3 つ・空 2 つまでにそろえてあるのは lookOf の仕事で、
+  // drawScene はここにあるものをそのまま描く）
   dreams: DreamId[]
+  // 贈った星の数。夜空に明るい星を足し、多くなったら天の川にする
+  stars: number
+  // なかよし度が「あいぼう」から：ひまなとき、ときどき手をふる（ねこは耳をぴくっとさせる）。
+  // 無ければふらない（前からある絵は、この項目が無くても同じに描ける）
+  waves?: boolean
 }
 
 declare module 'claude-code' {
@@ -166,6 +232,10 @@ declare module 'claude-code' {
       game: Game
       // /parade debug：手ざわり層のふちを見えるようにする
       touchDebug: boolean
+      // /parade debug 12/25：この日として描く（このセッションだけ。保存しない）。null は今日
+      dateOverride: { month: number; day: number } | null
+      // /parade debug rain：この天気で描く（このセッションだけ。保存しない）。null は日付から決める
+      weatherOverride: Weather | null
       synced: Synced
       holding: Holding
     }

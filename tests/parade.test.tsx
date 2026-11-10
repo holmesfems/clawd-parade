@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ACHIEVEMENTS } from '../hooks/game'
+import { ACHIEVEMENTS, DIARY_KEY } from '../hooks/game'
 import {
   ALL_ACHIEVEMENTS,
   boot,
@@ -53,7 +53,9 @@ test('仲間が増えて、終わると表情とセリフが変わる', async ($
   expect(await done.find({ key: 'parade' })).toBeUndefined()
   await done.unmount()
 
-  await clock.advance(4 * 60 * 1000)
+  // 3 分で寝る（おわってから 3 秒たっているので、ここから 3 分でちょうど寝たあと）。
+  // おわったあとは毎コマ描き直すので、1 コマずつ進む時計を長く進めると、このテストだけで数秒かかった
+  await clock.advance(3 * 60 * 1000)
   const sleepy = await mountBand($, 'terminal')
   expect(await textOf(sleepy, /すやすや/)).toBeDefined()
   await sleepy.unmount()
@@ -311,6 +313,80 @@ test('端末でもデスクトップでも、Clawd と仲間の端まで当た�
   }
 })
 
+test('季節と行事：/parade debug 12/25 でその日として描き（保存しない）、/parade debug today で今日にもどる（#41）', async ($, on) => {
+  // テストの時計は 1970/1/1（UTC）なので、今日はお正月。サンタぼうしは持っているが、かぶっているのは王冠
+  const { clock, held } = boot(on, { store: veteran({ owned: ['santa', 'crown'], hat: 'crown' }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const ui = await mountBand($, 'desktop')
+  const terminal = await mountBand($, 'terminal')
+  const hat = async () => ((await terminal.find({ key: 'parade' }))?.props as { props: { look: { hat: unknown }; calendar: unknown } }).props
+  // お正月：門松（竹の緑）があり、ツリーは無い。ぼうしは選んだまま
+  expect(await svgOf(ui)).toContain('#6dbb6a')
+  expect(await svgOf(ui)).not.toContain('#2e8b57')
+  expect((await hat()).look.hat).toBe('crown')
+  expect((await hat()).calendar).toEqual({ season: 'winter', holiday: 'newYear' })
+
+  expect((await runParade($, 'debug 12/25')).text).toBe('12/25（クリスマス・冬）として描くよ（/parade debug today で今日にもどる）')
+  await clock.advance(200)
+  // クリスマス：ツリーが立ち、サンタぼうしを持っているのでかぶる（保存の hat は王冠のまま）
+  expect(await svgOf(ui)).toContain('#2e8b57')
+  expect((await hat()).look.hat).toBe('santa')
+  expect((held.get('game') as { hat: unknown } | undefined)?.hat ?? 'crown').toBe('crown')
+  // 日付を変えても、当たり判定の枠の切り替え（/parade debug）はそのまま
+  expect((await runParade($, 'debug')).text).toMatch(/ピンクの枠/)
+  expect((await runParade($, 'debug 4/5')).text).toBe('4/5（春）として描くよ（/parade debug today で今日にもどる）')
+  expect((await runParade($, 'debug 2/30')).text).toMatch(/^日付は 月\/日 で打ってね/)
+  // なでなでもそのまま
+  const touch = await mountTouchBand($)
+  await petLeader(touch, clock, 1)
+  expect(await textOf(touch, /なでなで 1 回目/)).toBeDefined()
+  await touch.unmount()
+
+  expect((await runParade($, 'debug today')).text).toBe('日付を今日にもどしたよ')
+  await clock.advance(200)
+  expect(await svgOf(ui)).not.toContain('#2e8b57')
+  expect(await svgOf(ui)).toContain('#6dbb6a')
+  expect((await hat()).look.hat).toBe('crown')
+})
+
+test('天気：/parade debug rain・雪 などでその天気で描き（保存しない）、/parade debug today で日付と天気を今日にもどす（#42）', async ($, on) => {
+  // テストの時計は 1970/1/1 の 0 時（UTC）。お正月なので、天気は晴れ
+  const { clock, held } = boot(on, { store: veteran() })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const ui = await mountBand($, 'desktop')
+  const terminal = await mountBand($, 'terminal')
+  const weather = async () => ((await terminal.find({ key: 'parade' }))?.props as { props: { weather: unknown } }).props.weather
+  expect(await weather()).toBe('clear')
+  // 雨の水たまり（地面の線）はまだ無い
+  expect(await svgOf(ui)).not.toContain('#4f6f99')
+
+  expect((await runParade($, 'debug rain')).text).toBe('雨の日として描くよ（ほんとうの天気ではないよ。/parade debug today でもどる）')
+  await clock.advance(200)
+  expect(await weather()).toBe('rain')
+  expect(await svgOf(ui)).toContain('#4f6f99')
+  // 日本語でも打てる。日付を選んでも、選んだ天気のまま
+  expect((await runParade($, 'debug 雪')).text).toBe('雪の日として描くよ（ほんとうの天気ではないよ。/parade debug today でもどる）')
+  expect((await runParade($, 'debug くもり')).text).toMatch(/^くもりの日として描くよ/)
+  expect((await runParade($, 'debug 晴れ')).text).toMatch(/^晴れの日として描くよ/)
+  expect((await runParade($, 'debug SNOW')).text).toMatch(/^雪の日として描くよ/)
+  expect((await runParade($, 'debug 7/1')).text).toMatch(/^7\/1（夏）として描くよ/)
+  await clock.advance(200)
+  expect(await weather()).toBe('snow')
+  expect((await runParade($, 'debug fog')).text).toMatch(/^日付は 月\/日 で打ってね.*rain/)
+  // 天気はセーブに入らない
+  await endSession($)
+  expect(JSON.stringify([...held])).not.toMatch(/snow|weather/)
+
+  expect((await runParade($, 'debug today')).text).toBe('日付と天気を今日にもどしたよ')
+  await clock.advance(200)
+  expect(await weather()).toBe('clear')
+  expect(await svgOf(ui)).not.toContain('#4f6f99')
+  // 天気を選んでいなければ、今までどおり
+  expect((await runParade($, 'debug today')).text).toBe('日付を今日にもどしたよ')
+})
+
 // ---- なでなでゲーム ----
 
 test('なでなでゲーム：コンボ・フィーバー・実績・お店', async ($, on) => {
@@ -371,7 +447,7 @@ test('ぼうしをかぶって・はずせる。強化は最大になると買�
   expect(await textOf(shop, /フィーバー延長 Lv5 MAX/)).toBeDefined()
 })
 
-test('贈り物：お礼を言ってごきげんになり、夢のプレゼントはずっと飾られる', async ($, on) => {
+test('贈り物：お礼を言ってごきげんになり、夢のプレゼントは飾られる（しまうこともできる）', async ($, on) => {
   const fresh = ['gift1', 'dream1']
   const { clock, toasts } = boot(on, {
     store: { pets: 10, game: { hearts: 100_000, achievements: ALL_ACHIEVEMENTS.filter(id => !fresh.includes(id)) } },
@@ -397,13 +473,138 @@ test('贈り物：お礼を言ってごきげんになり、夢のプレゼン�
   expect(toasts).toContain('🏆 実績「夢をひとつ」ゲット！')
   await clock.advance(10_000)
   expect(await svgOf(ui)).toContain('#3fbf5f')
-  expect(await textOf(shop, /全部グリーンのテスト ✓/)).toBeDefined()
+  expect(await textOf(shop, /全部グリーンのテスト ✓飾ってる/)).toBeDefined()
+  expect(await textOf(shop, /飾っている数 庭 1\/3・空 0\/2/)).toBeDefined()
+  // もう一度押すとしまい、また押すと飾る（贈り直しにはならない）
   await shop.press({ key: 'gift-greenTests' })
-  expect(toasts.at(-1)).toBe('全部グリーンのテスト はもう飾ってあるよ')
+  expect(toasts.at(-1)).toBe('全部グリーンのテスト をしまったよ')
+  await clock.advance(200)
+  expect(await svgOf(ui)).not.toContain('#3fbf5f')
+  expect(await textOf(shop, /全部グリーンのテスト を飾る/)).toBeDefined()
+  expect(await textOf(shop, /✓贈った（しまってある）/)).toBeDefined()
+  await shop.press({ key: 'gift-greenTests' })
+  expect(toasts.at(-1)).toBe('全部グリーンのテスト を飾ったよ！')
+  await clock.advance(200)
+  expect(await svgOf(ui)).toContain('#3fbf5f')
 
   // 高すぎる夢はまだ贈れない
   await shop.press({ key: 'gift-noBugs' })
   expect(toasts.at(-1)).toMatch(/足りないよ/)
+})
+
+test('飾る・しまう：夢のプレゼントは庭 3 つ・空 2 つまで。流れ星・オーロラも出し入れでき、別のセッションの帯にも届く（#44）', async ($, on) => {
+  const gifts = { greenTests: 1, telescope: 1, house: 1, library: 1, constellation: 1, moonTrip: 1, noBugs: 1 }
+  const { clock, held, toasts } = boot(on, { store: veteran({ gifts, owned: ['shootingStars', 'aurora'] }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const ui = await mountBand($, 'desktop')
+  const shop = await mountShop($, 120)
+  const saved = () => held.get('game') as { shown: unknown; off: unknown; gifts: unknown }
+
+  // まだ選んでいないセーブ：庭は高い 3 つ（月への旅・図書館・おうち）、空は 2 つ。旗と望遠鏡はしまってある
+  expect(await textOf(shop, /飾っている数 庭 3\/3・空 2\/2/)).toBeDefined()
+  expect(await textOf(shop, /小さなおうち ✓飾ってる/)).toBeDefined()
+  expect(await textOf(shop, /全部グリーンのテスト を飾る/)).toBeDefined()
+  let svg = await svgOf(ui)
+  expect(svg).toContain('#b5523b')
+  expect(svg).not.toContain('#3fbf5f')
+  expect(svg).not.toContain('#8a8fa8')
+  expect(svg).toContain('#1f6b55')
+
+  // 庭がいっぱいなら断る
+  await shop.press({ key: 'gift-greenTests' })
+  expect(toasts.at(-1)).toBe('庭はもういっぱい（3/3）だよ。先にどれかをしまってね')
+  // 断ったら何も変わらない（保存にもまだ選んだものは無い）
+  expect(saved().shown ?? null).toBeNull()
+
+  // おうちをしまって、旗を飾る。贈ったことと ♡ の稼ぎはそのまま
+  await shop.press({ key: 'gift-house' })
+  expect(toasts.at(-1)).toBe('小さなおうち をしまったよ')
+  await shop.press({ key: 'gift-greenTests' })
+  expect(toasts.at(-1)).toBe('全部グリーンのテスト を飾ったよ！')
+  expect(saved().shown).toEqual(['library', 'constellation', 'moonTrip', 'noBugs', 'greenTests'])
+  expect(saved().gifts).toEqual(gifts)
+  expect(await textOf(shop, /飾っている数 庭 3\/3・空 2\/2/)).toBeDefined()
+
+  // オーロラをしまう（夢の枠とは別）
+  await shop.press({ key: 'dress-aurora' })
+  expect(toasts.at(-1)).toBe('オーロラ をしまったよ')
+  expect(saved().off).toEqual(['aurora'])
+  expect(await textOf(shop, /オーロラ を出す/)).toBeDefined()
+  expect(await textOf(shop, /流れ星 ✓出てる/)).toBeDefined()
+  await clock.advance(200)
+  svg = await svgOf(ui)
+  expect(svg).toContain('#3fbf5f')
+  expect(svg).not.toContain('#b5523b')
+  expect(svg).not.toContain('#1f6b55')
+
+  // 別のセッションが、望遠鏡だけを飾ってオーロラを出し直して保存した。次の保存で、こちらの帯にも届く
+  held.set('game', { ...(held.get('game') as object), shown: ['telescope'], off: [] })
+  await clock.advance(6_000)
+  svg = await svgOf(ui)
+  expect(svg).toContain('#8a8fa8')
+  expect(svg).not.toContain('#3fbf5f')
+  expect(svg).toContain('#1f6b55')
+  expect(await textOf(shop, /飾っている数 庭 1\/3・空 0\/2/)).toBeDefined()
+  expect(saved().shown).toEqual(['telescope'])
+})
+
+test('星を贈る：何度でも贈れて値段が上がり、お礼を言って夜空に星が増える。強化には次の節目が出る', async ($, on) => {
+  const { clock, held, toasts } = boot(on, { store: veteran({ hearts: 300_000_000, levels: { glove: 22 } }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const ui = await mountBand($, 'desktop')
+  const shop = await mountShop($)
+  const before = await svgOf(ui)
+
+  // 強化の行に、次の節目（Lv25 で ×2）までの Lv が出る
+  expect(await textOf(shop, /おかいもの（Lv25 ごとに効き目 2 倍）/)).toBeDefined()
+  expect(await textOf(shop, /1 なでの ♡ \+1 · あと 3 Lv で ×2/)).toBeDefined()
+  expect(await textOf(shop, /星を贈る 1億♡/)).toBeDefined()
+  expect(await textOf(shop, /贈るたびに値段が上がる/)).toBeDefined()
+
+  await shop.press({ key: 'gift-star' })
+  expect(toasts).toContain('🌟 星を贈ったよ！夜空がまたひとつ明るくなる')
+  await clock.advance(200)
+  // お礼を言って星をかかえ、info には何個目か
+  expect(await textOf(ui, /お星さま…！/)).toBeDefined()
+  expect(await textOf(ui, /🎁 星 · 1 個目/)).toBeDefined()
+  expect(await textOf(shop, /1 個贈った · ♡ の稼ぎ ×1.2/)).toBeDefined()
+  expect(await textOf(shop, /星を贈る 1.6億♡/)).toBeDefined()
+  expect((held.get('game') as { gifts: Record<string, number>; given: number }).gifts.star).toBe(1)
+  expect((held.get('game') as { given: number }).given).toBe(100_000_000)
+
+  await shop.press({ key: 'gift-star' })
+  expect((held.get('game') as { gifts: Record<string, number> }).gifts.star).toBe(2)
+  // 3 個目（2.56 億）は足りない
+  await shop.press({ key: 'gift-star' })
+  expect(toasts.at(-1)).toMatch(/足りないよ/)
+  expect((held.get('game') as { gifts: Record<string, number> }).gifts.star).toBe(2)
+
+  // かかえ終わっても、夜空に贈った星（白い芯と桃色の光）が残る
+  await clock.advance(10_000)
+  const after = await svgOf(ui)
+  expect(after).not.toBe(before)
+  expect(after).toContain('#ffb3d9')
+})
+
+test('複数のセッション：同時に星を贈ったら、数は合わせたぶん、♡ は順に贈った値段にそろえる', async ($, on) => {
+  const { clock, held, toasts } = boot(on, { store: veteran({ hearts: 1_000_000_000 }) })
+  await startSession($, 'desktop')
+  await clock.advance(400)
+  const shop = await mountShop($)
+
+  // 別のセッションが同じ 10 億 ♡ から星を 1 個贈って保存した。こちらはまだそれを読んでいない
+  const other = held.get('game') as Record<string, unknown>
+  held.set('game', { ...other, hearts: 900_000_000, given: 100_000_000, gifts: { star: 1 }, lastGift: { id: 'star', at: 500 } })
+
+  await shop.press({ key: 'gift-star' })
+  expect(toasts).toContain('🌟 星を贈ったよ！夜空がまたひとつ明るくなる')
+  const saved = held.get('game') as { hearts: number; given: number; gifts: Record<string, number> }
+  expect(saved.gifts.star).toBe(2)
+  // 1 個目（1 億）と 2 個目（1.6 億）を払ったことになる（放置収入などの端数は無い）
+  expect(Math.round(saved.hearts)).toBe(740_000_000)
+  expect(saved.given).toBe(260_000_000)
 })
 
 test('帯に出した贈り物を、ワンぽちで贈れる', async ($, on) => {
@@ -657,4 +858,80 @@ test('複数のセッション：放置収入を書いた直後に別のセッ�
   await clock.advance(3_000)
   await endSession($)
   expect((held.get('game') as { hearts: number }).hearts).toBe(0)
+})
+
+// ---- きょうの日記（#43） ----
+
+const HOUR = 3_600_000
+
+test('きょうの日記：ターン・ツール・仲間・なでなでがショップに出て、別のセッションのぶんも届く。保存には数しか入らない（#43）', async ($, on) => {
+  const { clock, held } = boot(on, { store: veteran() })
+  on('tool.call', async () => ({ result: {} }))
+  await startSession($, 'desktop')
+  // 絵のために選んだ日（12/25）は、日記の日付には使わない。テストの時計は 1970/1/1（木）
+  await runParade($, 'debug 12/25')
+  await clock.advance(400)
+
+  await $.turn.start({ text: 'ひみつのプロンプト', turnId: 't1' })
+  await $.tool.call({ tool: 'Bash', command: 'cat ひみつのファイル.txt' })
+  await spawnFriend($, 'Explore', 'ひみつの仕事')
+  await $.tool.call({ tool: 'Read', file_path: '/ひみつ/ファイル.ts', agentId: 'agent-1' })
+  await completeTurn($, { turnId: 'x', agentId: 'agent-1' })
+  await completeTurn($, { turnId: 't1', answer: 'できました', durationMs: 2 * HOUR + 10 * 60_000 })
+  const band = await mountTouchBand($)
+  await petLeader(band, clock, 2)
+  await band.unmount()
+
+  const shop = await mountShop($, 200)
+  expect(await textOf(shop, /Clawd「きょうは 2 時間 10 分いっしょに働いたね。仲間も 1 匹来てくれた！」/)).toBeDefined()
+  expect(await textOf(shop, /はたらいた 2 時間 10 分 · ターン 1 回 · ツール 2 回 · 仲間 1 匹 · なでなで 2 回/)).toBeDefined()
+  expect(await textOf(shop, /1 日つづけていっしょ · いちばん長くて 1 日/)).toBeDefined()
+  expect(await textOf(shop, /これまで いっしょに働いた 2 時間 10 分 · ターン 1 回 · ツール 2 回 · 仲間 1 匹/)).toBeDefined()
+  // 7 日の棒：きょう（木）がいちばん高い
+  const week = await shop.find({ key: 'diary-week' })
+  expect(week).toBeDefined()
+  expect(await textOf(shop, /^██$/)).toBeDefined()
+  expect(await textOf(shop, /^木$/)).toBeDefined()
+
+  // 別のセッションが同じ日に 1 ターン（30 分）働き、ツールを 5 回使って保存した
+  const other = held.get('game') as { diary?: Record<string, number>; totals?: Record<string, number> }
+  const add = (rec: Record<string, number> | undefined, more: Record<string, number>) =>
+    Object.fromEntries([...new Set([...Object.keys(rec ?? {}), ...Object.keys(more)])].map(k => [k, (rec?.[k] ?? 0) + (more[k] ?? 0)]))
+  held.set('game', {
+    ...other,
+    diary: add(other.diary, { '1970-01-01.turns': 1, '1970-01-01.tools': 5, '1970-01-01.workMs': 30 * 60_000 }),
+    totals: add(other.totals, { turns: 1, tools: 5, workMs: 30 * 60_000 }),
+  })
+  await clock.advance(6_000)
+  expect(await textOf(shop, /はたらいた 2 時間 40 分 · ターン 2 回 · ツール 7 回 · 仲間 1 匹 · なでなで 2 回/)).toBeDefined()
+  expect(await textOf(shop, /これまで いっしょに働いた 2 時間 40 分 · ターン 2 回 · ツール 7 回/)).toBeDefined()
+
+  // 保存した日記には、日付.数えるもの の鍵と数しか無い。プロンプト・ファイル・ツール・仲間の名前はどこにも書かない
+  const saved = held.get('game') as { diary: Record<string, unknown>; totals: Record<string, unknown> }
+  expect(saved.diary).toEqual({
+    '1970-01-01.turns': 2,
+    '1970-01-01.tools': 7,
+    '1970-01-01.workMs': 2 * HOUR + 40 * 60_000,
+    '1970-01-01.agents': 1,
+    '1970-01-01.pets': 2,
+  })
+  for (const [k, v] of Object.entries(saved.diary)) {
+    expect(DIARY_KEY.test(k)).toBe(true)
+    expect(typeof v).toBe('number')
+  }
+  for (const v of Object.values(saved.totals)) expect(typeof v).toBe('number')
+  expect(JSON.stringify([...held])).not.toMatch(/ひみつ|Bash|Read|Explore|できました/)
+})
+
+test('きょうの日記：日をまたいだターンは、終わった日に数える（#43）', async ($, on) => {
+  // 1970/1/1 の 23:59:59（テストの時計は UTC）
+  const { clock, held } = boot(on, { now: 24 * HOUR - 1_000, store: veteran() })
+  await startSession($, 'desktop')
+  await $.turn.start({ text: 'よる', turnId: 't1' })
+  await clock.advance(2_000)
+  await completeTurn($, { turnId: 't1', durationMs: 2_000 })
+  const shop = await mountShop($, 200)
+  expect(await textOf(shop, /きょうは 1 回いっしょにお話ししたね/)).toBeDefined()
+  await endSession($)
+  expect((held.get('game') as { diary: Record<string, number> }).diary).toEqual({ '1970-01-02.turns': 1, '1970-01-02.workMs': 2_000 })
 })

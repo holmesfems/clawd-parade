@@ -4,9 +4,11 @@
 
 import type { ClientModule } from 'claude-code'
 
-import type { Character, ClientMessage, Friend, Look, MoodKind } from '../types'
-import { drawScene, hitTest, layout, putHeart, strokeMeter, toRuns } from './scene'
-import type { Palette } from './scene'
+import type { Character, ClientMessage, Friend, Look, MoodKind, Weather } from '../types'
+import { putHeart } from './decor'
+import { toRuns } from './encode'
+import { drawScene, hitTest, layout, strokeMeter } from './scene'
+import type { Calendar, Palette } from './palette'
 
 export type ViewProps = {
   columns: number
@@ -18,6 +20,10 @@ export type ViewProps = {
   look?: Look
   // 時間帯の空・地面・星の色（端末は空を塗らないので、星と地面だけが変わる）
   palette?: Palette
+  // 季節と行事（#41）。無ければ季節の飾りを描かない
+  calendar?: Calendar | null
+  // 天気（#42）。無ければ晴れ
+  weather?: Weather | null
 }
 
 type Heart = { x: number; y: number; age: number; isBig: boolean }
