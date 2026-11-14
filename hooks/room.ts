@@ -879,6 +879,26 @@ export function rulerSvg(): string {
     ...heights.map(hh => ({ cls: `h${hh}`, q: `min-height:${hh}px`, label: `高さ ≥ ${hh}px` })),
   ]
   const style = rows.map(r => `.${r.cls}{display:none}@media (${r.q}){.${r.cls}{display:inline}}`).join('')
+  // 動きのテスト（アプリの中でどの書き方が動くかを見る）。A〜E が動いて見えるか、F のバーが最後までのびるか
+  const motionTests =
+    `<style>` +
+    `.tA{animation:tA 1s steps(1,end) infinite}@keyframes tA{0%{opacity:1}50%{opacity:.15}100%{opacity:.15}}` +
+    `.tB{animation:tB 1.2s ease-in-out infinite alternate}@keyframes tB{from{transform:translateX(0)}to{transform:translateX(12px)}}` +
+    `.tC{transform-box:fill-box;transform-origin:50% 50%;animation:tC 2s linear infinite}@keyframes tC{to{transform:rotate(360deg)}}` +
+    `.tD{animation:tD 1.6s ease-in-out infinite alternate}@keyframes tD{from{opacity:1}to{opacity:.2}}` +
+    `.tE{animation:tE 1s steps(4,end) infinite}@keyframes tE{from{transform:translateY(0)}to{transform:translateY(40px)}}` +
+    `.tF{transform-box:fill-box;transform-origin:0 50%;animation:tF 30s linear forwards}@keyframes tF{from{transform:scaleX(0)}to{transform:scaleX(1)}}` +
+    `</style>` +
+    `<g font-size="18" fill="#fff">` +
+    `<text x="36%" y="16%">A 点めつ(steps)</text><rect class="tA" x="36%" y="18%" width="50" height="50" fill="#ff5c8a"/>` +
+    `<text x="44%" y="16%">B 入れ子の svg で横に動く</text>` +
+    `<svg x="44%" y="18%" width="200" height="50" viewBox="0 0 40 10" shape-rendering="crispEdges"><g class="tB"><rect width="10" height="10" fill="#7ee081"/></g></svg>` +
+    `<text x="36%" y="32%">C 回る</text><rect class="tC" x="36%" y="34%" width="50" height="50" fill="#6ec6ff"/>` +
+    `<text x="44%" y="32%">D ふわっと点めつ</text><rect class="tD" x="44%" y="34%" width="50" height="50" fill="#ffd166"/>` +
+    `<text x="52%" y="32%">E 下へ 4 段</text><rect class="tE" x="52%" y="34%" width="30" height="30" fill="#b99cff"/>` +
+    `<text x="36%" y="46%">F 30 秒でのびきる（とちゅうで 0 に戻るなら、描き直されている）</text>` +
+    `<rect x="36%" y="48%" width="400" height="20" fill="none" stroke="#fff"/><rect class="tF" x="36%" y="48%" width="400" height="20" fill="#ff8fab"/>` +
+    `</g>`
   // 左はし・右はしから 100px ごとの線（サイドバーやパネルの幅を読むため）。右は、右はしを原点にした入れ子の svg で描く
   const steps = Array.from({ length: 8 }, (_, i) => (i + 1) * 100)
   const fromLeft = steps.map(px => `<rect x="${px}" y="70%" width="2" height="12%" fill="#7ee081"/><text x="${px}" y="69%" dx="-24" fill="#7ee081">${px}</text>`).join('')
@@ -890,8 +910,33 @@ export function rulerSvg(): string {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family="sans-serif" font-size="22" font-weight="bold">` +
     `<style>${style}</style><rect width="100%" height="100%" fill="#1a1626"/>${v}${h}` +
-    `<rect width="100%" height="100%" fill="none" stroke="#ffd166" stroke-width="8"/>${list}${pxMarks}</svg>`
+    `<rect width="100%" height="100%" fill="none" stroke="#ffd166" stroke-width="8"/>${list}${pxMarks}${motionTests}</svg>`
   )
+}
+
+// 動きのテスト（/parade theme test1〜3）。アプリの背景で、どの作りなら CSS や SMIL が動くかを見る
+export const TEST_SCENES = ['test1', 'test2', 'test3', 'test4', 'test5'] as const
+
+export function testSvg(name: string): string {
+  const css =
+    '<style>.mv{animation:mv 1.5s ease-in-out infinite alternate}@keyframes mv{from{transform:translateX(0)}to{transform:translateX(400px)}}' +
+    '.bl{animation:bl 1s steps(1,end) infinite}@keyframes bl{0%{opacity:1}50%{opacity:.1}100%{opacity:.1}}</style>'
+  const label = (text: string) => `<text x="200" y="200" font-size="48" fill="#fff" font-family="sans-serif">${text}</text>`
+  if (name === 'test1') {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">${css}<rect width="1600" height="1000" fill="#1a1626"/>${label('test1: viewBox あり + CSS')}<rect class="mv" x="200" y="300" width="150" height="150" fill="#7ee081"/><rect class="bl" x="200" y="550" width="150" height="150" fill="#ff5c8a"/></svg>`
+  }
+  if (name === 'test4' || name === 'test5') {
+    // test2 に、動かない入れ子の svg を足す。test4 は右はしを原点にした overflow="visible" のもの、test5 はふつうの viewBox つきのもの
+    const nested =
+      name === 'test4'
+        ? '<svg x="100%" width="1" height="100%" overflow="visible"><rect x="-500" y="300" width="150" height="150" fill="#6ec6ff"/></svg>'
+        : '<svg x="60%" y="30%" width="300" height="150" viewBox="0 0 20 10"><rect width="10" height="10" fill="#6ec6ff"/></svg>'
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">${css}<rect width="100%" height="100%" fill="#1a1626"/>${label(`${name}: test2 + 入れ子の svg`)}<rect class="mv" x="200" y="300" width="150" height="150" fill="#7ee081"/><rect class="bl" x="200" y="550" width="150" height="150" fill="#ff5c8a"/>${nested}</svg>`
+  }
+  if (name === 'test2') {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">${css}<rect width="100%" height="100%" fill="#1a1626"/>${label('test2: viewBox なし + CSS')}<rect class="mv" x="200" y="300" width="150" height="150" fill="#7ee081"/><rect class="bl" x="200" y="550" width="150" height="150" fill="#ff5c8a"/></svg>`
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"><rect width="1600" height="1000" fill="#1a1626"/>${label('test3: viewBox あり + SMIL')}<rect x="200" y="300" width="150" height="150" fill="#7ee081"><animate attributeName="x" values="200;600;200" dur="3s" repeatCount="indefinite"/></rect><rect x="200" y="550" width="150" height="150" fill="#ff5c8a"><animate attributeName="opacity" values="1;0.1;1" dur="1s" repeatCount="indefinite"/></rect></svg>`
 }
 
 // ---- SVG にまとめる ----
