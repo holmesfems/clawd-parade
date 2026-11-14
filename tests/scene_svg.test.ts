@@ -6,6 +6,7 @@ import type { Friend, Look, MoodKind, Weather } from '../types'
 import { encodeCells, toSvg } from '../hooks/encode'
 import { NIGHT, PALETTES, calendarOf } from '../hooks/palette'
 import { drawScene } from '../hooks/scene'
+import { backdropSvg } from '../hooks/band'
 
 // FNV-1a（32 bit）
 const fingerprint = (text: string) => {
@@ -255,3 +256,32 @@ const WEATHERY_EXPECTED: Record<string, string> = {
   'rain-fever/desktop': '5edd0425',
   'rain-fever/terminal': '765d1119',
 }
+
+// テーマの背景（/parade theme）は 12 コマを 1 つの SVG に入れる。Svg の source は 131,072 文字までなので、
+// いちばん動くところが多い場面（行進・仲間 8 匹・雨・オーロラ・流れ星・星 99 個・夢のプレゼント全部）でも収まる
+test('テーマの背景の SVG は、いちばんにぎやかな場面でも 131,072 文字に収まる', () => {
+  const crowd: Friend[] = Array.from({ length: 8 }, (_, i) => ({ id: `a${i}`, type: ['Explore', 'Plan', 'general-purpose'][i % 3]!, label: '', tool: null, doneAt: null }))
+  for (const weather of ['clear', 'rain', 'snow'] as const) {
+    for (const hour of [7, 13, 22]) {
+      const source = backdropSvg({
+        hour,
+        date: { month: 12, day: 25 },
+        weather,
+        mood: 'working',
+        friends: crowd,
+        character: 'clawd',
+        look: {
+          hat: 'santa',
+          shootingStars: true,
+          aurora: true,
+          fever: false,
+          gift: null,
+          dreams: ['house', 'library', 'moonTrip', 'telescope', 'greenTests', 'constellation', 'noBugs'],
+          stars: 99,
+          waves: true,
+        },
+      })
+      expect(source.length).toBeLessThan(131_072)
+    }
+  }
+})

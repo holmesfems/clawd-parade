@@ -1,4 +1,6 @@
+import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 import { ACHIEVEMENTS, DIARY_KEY } from '../hooks/game'
 import {
@@ -109,6 +111,129 @@ test('画像を貼った下書きの間は、帯をほかのプラグインに�
   draft = 'ふつうの文'
   const plain = await mountBand($, 'terminal')
   expect(await textOf(plain, /よろしくね/)).toBeDefined()
+})
+
+test('帯の枠は、下のプラグイン（AK Studio の帯など）と分け合う。どちらも出る', async ($, on) => {
+  // テストの on は clawd-parade の下にいる。ほかのプラグインの帯の代わり（boot の空の帯より先に答えるよう、先に登録する）
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box key="other-band">
+        <Text>◆ AK STUDIO</Text>
+      </Box>
+    )
+  })
+  boot(on, { store: veteran() })
+  await startSession($, 'terminal')
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await mountBand($, surface)
+    expect(await ui.find({ key: 'other-band' })).toBeDefined()
+    expect(await textOf(ui, /よろしくね/)).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+// ---- テーマの背景（/parade theme） ----
+
+// テーマを決める・外すエンジンの答え。決めたもの（null は外した）を順に残す
+function themes(on: On) {
+  const calls: unknown[] = []
+  on('theme.set', async (_$, e) => {
+    calls.push(e)
+    return { value: { isDrawn: true as const, requestId: 'backdrop' } }
+  })
+  on('theme.clear', async () => {
+    calls.push(null)
+    return { value: { isDrawn: false as const, reason: 'cleared' } }
+  })
+  return calls
+}
+
+const mountBackdrop = ($: Engine, plugin = 'clawd-parade') =>
+  $.ui.mount({
+    plugin: 'clawd-parade',
+    surface: 'desktop',
+    component: 'Backdrop',
+    requestId: 'backdrop',
+    props: { scene: 'parade', plugin, glass: { blur: 6, opacity: 0.5 } },
+  })
+
+test('/parade theme で、アプリの背景にパレードを描く。帯はセリフとなでるボタンだけ。もう一度でもどす', async ($, on) => {
+  const calls = themes(on)
+  const { held } = boot(on, { store: veteran() })
+  await startSession($, 'desktop')
+  expect(calls).toEqual([])
+
+  const on1 = await runParade($, 'theme')
+  expect(on1.text).toContain('背景をパレードにしたよ')
+  expect(calls).toEqual([{ backdrop: { scene: 'parade', glass: { blur: 6, opacity: 0.5 } } }])
+  expect(held.get('theme')).toBe(true)
+
+  // 背景は、窓いっぱいに広げる SVG
+  const back = await mountBackdrop($)
+  const source = await svgOf(back)
+  expect(source).toContain('width="100%"')
+  // 絵は右下に寄せ（左のサイドバーの下にみんなが来ない）、コマは CSS でめくる
+  expect(source).toContain('preserveAspectRatio="xMaxYMax meet"')
+  expect(source).toContain('@keyframes')
+  // Svg の source は 131,072 文字まで
+  expect(source.length).toBeLessThan(131_072)
+  await back.unmount()
+
+  // デスクトップの帯は絵を出さず、なでるボタンで（押すとなでた回数が増える）
+  const band = await mountBand($, 'desktop')
+  expect(await band.find({ type: 'Svg' })).toBeUndefined()
+  await band.press({ key: 'pet' })
+  expect(await textOf(band, /なでなで 1 回目/)).toBeDefined()
+  await band.unmount()
+  // 端末の帯は今までどおり
+  const terminal = await mountBand($, 'terminal')
+  expect(await terminal.find({ key: 'parade' })).toBeDefined()
+  await terminal.unmount()
+
+  const off = await runParade($, 'theme')
+  expect(off.text).toContain('しまったよ')
+  expect(calls.at(-1)).toBeNull()
+  expect(held.get('theme')).toBe(false)
+  const back2 = await mountBand($, 'desktop')
+  expect(await back2.find({ type: 'Svg' })).toBeDefined()
+})
+
+test('テーマの背景は、入れてあれば次のセッションの始めにも描いてもらう。ほかのプラグインの背景には描かない', async ($, on) => {
+  const calls = themes(on)
+  boot(on, { store: veteran({}, { theme: true }) })
+  await startSession($, 'desktop')
+  expect(calls).toEqual([{ backdrop: { scene: 'parade', glass: { blur: 6, opacity: 0.5 } } }])
+
+  const mine = await mountBackdrop($)
+  expect(await mine.find({ type: 'Svg' })).toBeDefined()
+  await mine.unmount()
+  const theirs = await mountBackdrop($, 'someone-else')
+  expect(await theirs.find({ type: 'Svg' })).toBeUndefined()
+})
+
+test('テーマの背景は、コマや ♡ では描き直さず（チカチカしない）、場面が変わったときだけ描き直す', async ($, on) => {
+  themes(on)
+  const { clock } = boot(on, { store: veteran({}, { theme: true }) })
+  await startSession($, 'desktop')
+  const back = await mountBackdrop($)
+  const first = await svgOf(back)
+
+  // コマが進み、♡ が貯まっても、背景は同じ絵のまま
+  await clock.advance(3000)
+  expect(await svgOf(back)).toBe(first)
+
+  // 仕事を始めて仲間が来たら、1 秒のうちに描き直す
+  await $.turn.start({ text: 'しらべて', turnId: 't1' })
+  await spawnFriend($)
+  await clock.advance(1000)
+  const working = await svgOf(back)
+  expect(working).not.toBe(first)
+  // 仕事中に行進しても、ツールを使っても、同じ絵のまま
+  await $.tool.call({ tool: 'Bash', command: 'ls' }).catch(() => undefined)
+  await clock.advance(3000)
+  expect(await svgOf(back)).toBe(working)
 })
 
 test('時間帯で空とあいさつが変わる', async ($, on) => {

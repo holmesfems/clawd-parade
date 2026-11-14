@@ -202,6 +202,18 @@ export type Holding = { id: GiftId; from: number } | null
 export type Synced = { game: Game; pets: number }
 
 // 夜空と Clawd の飾り
+// テーマの背景（/parade theme）に描く場面。止まった 1 枚の絵なので、コマ・なでた・♡ の数は持たない
+export type BackdropScene = {
+  hour: number
+  date: { month: number; day: number }
+  weather: Weather
+  mood: MoodKind
+  // 仲間の、絵に出るところだけ（使っているツールの名前は持たない）
+  friends: Friend[]
+  character: Character
+  look: Look
+}
+
 export type Look = {
   hat: Hat | null
   shootingStars: boolean
@@ -238,6 +250,10 @@ declare module 'claude-code' {
       weatherOverride: Weather | null
       synced: Synced
       holding: Holding
+      // /parade theme：アプリの背景（テーマ）にパレードを描く。store にも残し、次のセッションでも描く
+      backdrop: boolean
+      // 背景に描く場面。変わったときだけ書くので、背景はそのときだけ描き直す（毎コマ描き直すとチカチカする）
+      backdropScene: BackdropScene | null
     }
   }
 }
