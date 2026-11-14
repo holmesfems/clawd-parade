@@ -174,7 +174,9 @@ test('/parade theme で、アプリの背景にパレードを描く。帯はセ
   const back = await mountBackdrop($)
   const source = await svgOf(back)
   expect(source).toContain('width="100%"')
-  expect(source).toContain('preserveAspectRatio="xMidYMax slice"')
+  // 絵は右下に寄せ（左のサイドバーの下にみんなが来ない）、コマは CSS でめくる
+  expect(source).toContain('preserveAspectRatio="xMaxYMax meet"')
+  expect(source).toContain('@keyframes')
   // Svg の source は 131,072 文字まで
   expect(source.length).toBeLessThan(131_072)
   await back.unmount()

@@ -7,7 +7,7 @@ import type { BackdropScene, Character, Friend, Game, Holding, Mood, MoodKind, P
 import { ACHIEVEMENTS, HOOK_FRAME_MS, affectionsOf, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf, treatOf } from './game'
 import type { ViewProps } from './parade-view'
 import { QUICK_GIFT_DOTS, putHeart, putQuickGift, quickGiftSpot } from './decor'
-import { encodeCells, toSvg } from './encode'
+import { encodeCells, toAnimatedSvg, toSvg } from './encode'
 import { NIGHT, PALETTES, calendarOf, coatOf, hex, timeOfDay } from './palette'
 import { SCENE_ROWS, drawScene, frameOf, layout } from './scene'
 import { clawdText, kaomoji } from './sprites'
@@ -267,7 +267,7 @@ function giftButtonOf(g: Game): BandText['gift'] {
 
 // デスクトップの SVG。さわったぶんのハート・傾き・仲間のジャンプと、帯に出した贈り物の札を足して描く。
 // 札を描くときは、frame.paradeColumns をもう QUICK_GIFT_DOTS 引いておく（札はそのすぐ右）
-export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null, fit: 'cover' | null = null, foot = 0) {
+export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null) {
   const petted = isPetted(p, now)
   const age = Math.floor((now - p.from) / HOOK_FRAME_MS)
   const isStroked = petted && p.kind === 'pet'
@@ -295,19 +295,20 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number,
     }
   }
   if (gift) putQuickGift(g, quickGiftSpot(frame.paradeColumns).x, gift.id, gift.canAfford)
-  // foot は地面の下に足す土の行。テーマの背景で、パレードを入力欄の後ろより上に持ち上げる
-  const width = g[0]?.length ?? 0
-  for (let k = 0; k < foot; k++) g.push(Array(width).fill(palette.ground))
-  return toSvg(g, DESKTOP_MARKUP_PIXEL, palette, fit)
+  return toSvg(g, DESKTOP_MARKUP_PIXEL, palette)
 }
 
 // テーマの背景（/parade theme）の絵の幅（ドット）と、地面の上の空の高さ。
-// 絵は 1.1:1 とほぼ正方形にし、下の端にそろえて窓いっぱいに広げる。たいていの窓は絵より横長なので、
-// 切れるのは上の空だけで、みんなは左右に切れない（もっと縦長の窓だけ、左右を少し切る）。
+// 絵は 1.1:1 とほぼ正方形にし、窓の高さに合わせて右下に置く（空と地面は窓の左はしまで伸ばす）。
+// たいていの窓は絵より横長なので、絵の左があき、左のサイドバーの下にみんなが来ない。
 // 窓の下の端には入力欄が重なるので、地面の下に土を足して、パレードを下から 1/4 くらいの高さに置く
 export const BACKDROP_COLUMNS = 110
 const BACKDROP_HEADROOM = 62
 const BACKDROP_FOOT = 24
+// 背景のコマ。2・3・4・6 コマでくり返す動き（歩く・はねる・またたく）がつながるよう 12 コマにし、
+// 帯の落ち着いているときと同じ 0.6 秒で 1 コマめくる（7.2 秒でひとまわり）
+const BACKDROP_FRAMES = 12
+const BACKDROP_FRAME_MS = HOOK_FRAME_MS * 3
 
 // 帯の値から、背景に描く場面を取り出す。コマ・なでた・♡ の数・ツールの名前は入れないので、
 // 同じ場面なら同じ値になる（register.tsx は、変わったときだけ背景を描き直してもらう）
@@ -324,24 +325,32 @@ export function backdropSceneOf(s: BandState & { character: Character; date: { m
   }
 }
 
-// テーマの背景：窓いっぱいの空と、パレード。止まった 1 枚の絵（毎コマ描き直すと、デスクトップではチカチカする）。
+// テーマの背景：窓いっぱいの空と、パレード。場面が変わったときだけ、12 コマを 1 つの SVG に描き、CSS でめくって動かす
+// （毎コマ SVG を差し替えると、デスクトップではチカチカする）。
 // さわれない（押した操作は上の会話に届く）ので、なでるのは帯で
-export function backdropSvg(s: BackdropScene) {
-  const calendar = calendarOf(s.date.month, s.date.day)
-  const scene: ViewProps = {
-    columns: BACKDROP_COLUMNS,
-    mood: s.mood,
-    tick: 0,
-    friends: s.friends,
-    character: s.character,
-    look: s.look,
-    palette: PALETTES[timeOfDay(s.hour)],
-    calendar,
-    weather: s.weather,
-  }
-  const frame: Frame = { isWide: false, columns: BACKDROP_COLUMNS, paradeColumns: BACKDROP_COLUMNS, headroom: BACKDROP_HEADROOM, wordsCells: 0 }
-  const still: Pets = { total: 0, at: 0, from: 0, kind: 'pet', hand: null, friend: null }
-  return desktopSvg(scene, frame, still, 0, null, 'cover', BACKDROP_FOOT)
+export function backdropSvg(s: BackdropScene): string {
+  const palette = PALETTES[timeOfDay(s.hour)]
+  const frames = Array.from({ length: BACKDROP_FRAMES }, (_, tick) => {
+    const g = drawScene({
+      columns: BACKDROP_COLUMNS,
+      paradeColumns: BACKDROP_COLUMNS,
+      headroom: BACKDROP_HEADROOM,
+      twinkleTicks: DESKTOP_TWINKLE_TICKS,
+      mood: s.mood,
+      tick,
+      friends: s.friends,
+      character: s.character,
+      look: s.look,
+      palette,
+      calendar: calendarOf(s.date.month, s.date.day),
+      weather: s.weather,
+    })
+    // 地面の下に土を足して、パレードを入力欄の後ろより上（下から 1/4 くらい）に持ち上げる
+    for (let k = 0; k < BACKDROP_FOOT; k++) g.push(Array(BACKDROP_COLUMNS).fill(palette.ground))
+    return g
+  })
+  // 地面の行（SCENE_ROWS * 2 行の絵の、いちばん下の行）から下を、窓の左はしまで伸ばす
+  return toAnimatedSvg(frames, BACKDROP_FRAME_MS, palette, SCENE_ROWS * 2 + BACKDROP_HEADROOM - 1)
 }
 
 // 帯を描くのに使うもの。onPet は、絵が出せないほど狭いデスクトップの「なでる」ボタン。

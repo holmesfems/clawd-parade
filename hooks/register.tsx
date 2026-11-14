@@ -576,9 +576,8 @@ export const register: Register = on => {
     // 場面だけを読む（コマや ♡ の数では描き直さない）
     const scene = await read($, backdropScene)
     if (scene === null) return next(e)
-    const svg = backdropSvg(scene)
-
-    return <ui.Svg source={svg.source} alt={`${scene.character === 'clawd' ? 'Clawd' : 'ねこ'}のパレードの背景`} />
+    // CSS のアニメーションで動かすので、isInteractive（スクリプトの無い枠）で描いてもらう
+    return <ui.Svg source={backdropSvg(scene)} alt={`${scene.character === 'clawd' ? 'Clawd' : 'ねこ'}のパレードの背景`} isInteractive />
   })
 
   // なでなでショップ（/parade shop で開くパネル）

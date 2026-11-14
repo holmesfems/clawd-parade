@@ -47,36 +47,77 @@ function base64(bytes: Uint8Array): string {
 // デスクトップはコードフォントの行の高さが半角ブロックと揃わず縞になるので、
 // ドット絵は 1 ピクセル = 1 マスの SVG にして、夜空の窓に入れて描く
 
-// palette は drawScene に渡したものと同じにする（背景の空の色）。
-// fit が 'cover' なら、窓いっぱいに広げる（下の端にそろえ、はみ出たぶんは上と左右を切る。テーマの背景）
-export function toSvg(g: Grid, pixel: number, palette: Palette, fit: 'cover' | null = null): { source: string; width: number; height: number } {
-  const w = g[0]?.length ?? 0
-  const h = g.length
-  // 色ごとに 1 本の path にまとめる（横に続く同じ色は 1 つの長方形）
+// 色ごとに 1 本の path にまとめる（横に続く同じ色は 1 つの長方形）。colorAt が null のマスは描かない
+function pathsOf(w: number, h: number, colorAt: (x: number, y: number) => number | null): string {
   const paths = new Map<number, string>()
-  g.forEach((row, y) => {
+  for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; ) {
-      const c = row[x] ?? null
+      const c = colorAt(x, y)
       if (c === null) {
         x += 1
         continue
       }
       let end = x + 1
-      while (end < w && row[end] === c) end += 1
+      while (end < w && colorAt(end, y) === c) end += 1
       paths.set(c, `${paths.get(c) ?? ''}M${x} ${y}h${end - x}v1h${x - end}z`)
       x = end
     }
-  })
-  const body = [...paths].map(([c, d]) => `<path fill="${hex(c)}" d="${d}"/>`).join('')
+  }
+  return [...paths].map(([c, d]) => `<path fill="${hex(c)}" d="${d}"/>`).join('')
+}
+
+// palette は drawScene に渡したものと同じにする（背景の空の色）
+export function toSvg(g: Grid, pixel: number, palette: Palette): { source: string; width: number; height: number } {
+  const w = g[0]?.length ?? 0
+  const h = g.length
+  const body = pathsOf(w, h, (x, y) => g[y]?.[x] ?? null)
   const width = w * pixel
   const height = h * pixel
-  const size =
-    fit === 'cover' ? 'width="100%" height="100%" preserveAspectRatio="xMidYMax slice"' : `width="${width}" height="${height}"`
-  const corner = fit === 'cover' ? '' : ' rx="1.5"'
   const source =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" ${size} shape-rendering="crispEdges">` +
-    `<rect width="${w}" height="${h}"${corner} fill="${hex(palette.sky)}"/>${body}</svg>`
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${width}" height="${height}" shape-rendering="crispEdges">` +
+    `<rect width="${w}" height="${h}" rx="1.5" fill="${hex(palette.sky)}"/>${body}</svg>`
   return { source, width, height }
+}
+
+// テーマの背景：コマを何枚か 1 つの SVG に入れ、CSS でめくって動かす（描き直さないので、チカチカしない）。
+// 1 枚目を下地に描き、2 枚目からは 1 枚目と違うマスだけを重ねて、自分の番のあいだだけ見せる。
+// 窓いっぱいに空と地面（groundFrom の行から下）を伸ばして塗り、絵は右下に寄せて、窓の高さに合わせて置く。
+// 横長の窓では絵の左があき、左のサイドバーの下にはみんなが来ない（縦長の窓では、絵は窓の幅に合わせて下に）
+export function toAnimatedSvg(frames: Grid[], frameMs: number, palette: Palette, groundFrom: number): string {
+  const first = frames[0] ?? []
+  const w = first[0]?.length ?? 0
+  const h = first.length
+  const n = frames.length
+  const at = (g: Grid, x: number, y: number) => g[y]?.[x] ?? null
+  const base = pathsOf(w, h, (x, y) => at(first, x, y))
+  // 何も無いマスは空の色で塗り、1 枚目のものを隠す
+  const layers = frames
+    .slice(1)
+    .map((g, i) => {
+      const d = pathsOf(w, h, (x, y) => {
+        const c = at(g, x, y)
+        return c === at(first, x, y) ? null : (c ?? palette.sky)
+      })
+      return `<g class="f" style="animation-delay:${(i + 1) * frameMs}ms">${d}</g>`
+    })
+    .join('')
+  const cycle = n * frameMs
+  const slot = (100 / n).toFixed(3)
+  const style =
+    `<style>.f{opacity:0;animation:f ${cycle}ms steps(1,end) infinite}` +
+    `@keyframes f{0%{opacity:1}${slot}%{opacity:0}100%{opacity:0}}</style>`
+  // 窓いっぱいの空と地面。縦は絵と同じ行数にして伸ばすので、横長の窓では地面の高さが絵とそろう
+  const ground =
+    `<svg width="100%" height="100%" viewBox="0 0 1 ${h}" preserveAspectRatio="none">` +
+    `<rect width="1" height="${h}" fill="${hex(palette.sky)}"/>` +
+    `<rect y="${groundFrom}" width="1" height="${h - groundFrom}" fill="${hex(palette.ground)}"/></svg>`
+  const picture =
+    `<svg width="100%" height="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMaxYMax meet">` +
+    `<rect width="${w}" height="${h}" fill="${hex(palette.sky)}"/>${base}${layers}</svg>`
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" shape-rendering="crispEdges">` +
+    `${style}${ground}${picture}</svg>`
+  )
 }
 
 export type Run = { text: string; fg?: string; bg?: string }
