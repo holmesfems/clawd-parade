@@ -485,68 +485,11 @@ function drawWindowView(back: Grid, s: RoomScene, add: (cls: string, g: Grid, ex
       dot(i % 2 ? twinkle : still, sx, sy, i % 3 === 0 ? 0xfff3c4 : 0xc9cdf5)
     }
   }
-  // 太陽・月
-  if (night) {
-    const full = s.holiday === 'tsukimi'
-    const mx = 21
-    const my = 7
-    if (full) rect(back, mx - 1, my - 1, 5, 5, 0xfff3c4)
-    else {
-      rect(back, mx, my, 3, 3, 0xfff3c4)
-      dot(back, mx, my, skyOf(s))
-      dot(back, mx + 2, my + 1, 0xe8dca8)
-    }
-    if (s.sky.moonTrip) {
-      // 月へむかうロケット
-      const rocket = blank()
-      rect(rocket, 17, 11, 1, 3, C.white)
-      dot(rocket, 17, 10, 0xff6b6b)
-      dot(rocket, 16, 13, 0xff6b6b)
-      dot(rocket, 18, 13, 0xff6b6b)
-      dot(rocket, 17, 14, 0xffd166)
-      add('float', rocket)
-    }
-  } else if (s.weather !== 'rain') {
-    const sun = t === 'day' ? { sx: 21, sy: 7, c: 0xfff1a8 } : t === 'morning' ? { sx: 8, sy: 17, c: 0xffd27a } : { sx: 8, sy: 16, c: 0xff9a6b }
-    rect(back, sun.sx, sun.sy, 3, 3, s.weather === 'clear' ? sun.c : mix(sun.c, skyOf(s), 0.5))
-  }
+  // 太陽・月は、窓の中には描かない（外の空に 1 つだけ。gardenLayers）
   add('', still)
   add('tw', twinkle)
 
-  // 虹（バグのない世界）。昼と朝の、晴れた空に
-  if (s.sky.noBugs && !night && s.weather === 'clear') {
-    const bow = blank()
-    const colors = [0xff6b6b, 0xffb347, 0xffe066, 0x7ee081, 0x6ec6ff, 0xb99cff]
-    colors.forEach((c, i) => {
-      const r = 9 - i
-      for (let a = 0; a <= 32; a++) {
-        const ang = Math.PI * (a / 32)
-        dot(bow, Math.round(16 - Math.cos(ang) * r), Math.round(22 - Math.sin(ang) * r), c)
-      }
-    })
-    add('', bow)
-  }
-
-  // オーロラ（夜）
-  if (s.sky.aurora && night) {
-    const au = blank()
-    for (let dx = 0; dx < w; dx++) {
-      const wave = Math.round(Math.sin(dx / 3) * 1.5)
-      dot(au, x + dx, y + 3 + wave, 0x7ef2c0)
-      dot(au, x + dx, y + 4 + wave, 0x4fd1a5)
-      if (dx % 3 === 0) dot(au, x + dx, y + 5 + wave, 0x6b8cff)
-    }
-    add('au', au, { clip })
-  }
-
-  // 流れ星（夜。ときどき）
-  if (s.sky.shootingStars && night && s.weather === 'clear') {
-    const st = blank()
-    dot(st, 24, 6, C.white)
-    dot(st, 25, 5, 0xfff3c4)
-    dot(st, 26, 5, 0xc9cdf5)
-    add('shoot', st, { clip })
-  }
+  // 虹・オーロラ・流れ星は、窓の中には描かない（外の大きな空に出す。skySvg）
 
   // 雲：窓の幅ずつずらして 2 つ描き、窓の幅だけ流してくり返す
   const clouds = s.weather === 'clear' ? 1 : 3
@@ -961,6 +904,8 @@ const STYLE = [
   '.tear{animation:tear 1.8s linear infinite}@keyframes tear{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(4px)}}',
   '.glow{animation:glow 3s ease-in-out infinite alternate}@keyframes glow{from{opacity:.35}to{opacity:.6}}',
   '.dim{opacity:.38}',
+  '.streak{opacity:0;animation:streak 9s linear infinite}',
+  '@keyframes streak{0%{opacity:0;transform:translate(0,0)}3%{opacity:1}12%{opacity:0;transform:translate(-260px,130px)}100%{opacity:0;transform:translate(-260px,130px)}}',
   // 来た仲間：窓の幅の枠ごと、窓の幅の 6 割だけ手前から入口まで歩き、入口で消える（vw は使わない。枠の幅の割合で動かす）
   '.come{transform-box:fill-box;animation:come 7s linear both}.come.rev{animation-name:comer}',
   '@keyframes come{0%{transform:translateX(-60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
@@ -1068,6 +1013,16 @@ function gardenLayers(s: RoomScene): Layer[] {
     if (s.holiday !== 'tsukimi') fill(sky, 40, -52, 3, 3, skyTop(s))
     fill(sky, 45, -47, 1, 1, 0xe8dca8)
     fill(sky, 43, -49, 1, 1, 0xe8dca8)
+    if (s.sky.moonTrip) {
+      // 月へむかうロケット
+      const rocket = grid()
+      fill(rocket, 31, -44, 1, 3, C.white)
+      fill(rocket, 31, -45, 1, 1, 0xff6b6b)
+      fill(rocket, 30, -42, 1, 1, 0xff6b6b)
+      fill(rocket, 32, -42, 1, 1, 0xff6b6b)
+      fill(rocket, 31, -41, 1, 1, 0xffd166)
+      out.push({ cls: 'float', g: rocket })
+    }
   } else if (s.weather !== 'rain') {
     const c = t === 'day' ? 0xfff1a8 : t === 'morning' ? 0xffd27a : 0xff9a6b
     fill(sky, 38, t === 'day' ? -52 : -16, 9, 9, s.weather === 'clear' ? c : mix(c, skyOf(s), 0.5))
@@ -1156,6 +1111,32 @@ function skySvg(s: RoomScene): string {
         `<rect x="-100%" width="200%" height="1" fill="none"/>${set}<svg x="-100%" overflow="visible">${set}</svg></g>`,
     )
   })
+  // 夢のプレゼント：オーロラ（夜）・流れ星（晴れた夜）・虹（晴れた昼と朝。バグのない世界）
+  const isDark = isNight(s.time)
+  if (s.sky.aurora && isDark) {
+    // 空の上のほうを横切る、ゆらゆらした光の帯
+    let bands = ''
+    for (let i = 0; i < 40; i++) {
+      const y = 9 + Math.sin(i / 3) * 2.2 + Math.sin(i / 7) * 1.5
+      const x = (i * 2.5).toFixed(1)
+      bands += `<rect x="${x}%" y="${y.toFixed(1)}%" width="2.6%" height="10" fill="#7ef2c0"/><rect x="${x}%" y="${(y + 1).toFixed(1)}%" width="2.6%" height="16" fill="#4fd1a5" opacity=".7"/>`
+      if (i % 3 === 0) bands += `<rect x="${x}%" y="${(y + 2.6).toFixed(1)}%" width="2.6%" height="12" fill="#6b8cff" opacity=".6"/>`
+    }
+    parts.push(`<g class="au">${bands}</g>`)
+  }
+  if (s.sky.shootingStars && isDark && isClear) {
+    const streak = '<rect x="0" y="0" width="6" height="6" fill="#fff"/><rect x="6" y="-4" width="8" height="4" fill="#fff3c4"/><rect x="14" y="-8" width="10" height="4" fill="#c9cdf5" opacity=".7"/>'
+    parts.push(
+      `<svg x="24%" y="9%" overflow="visible"><g class="streak">${streak}</g></svg>` +
+        `<svg x="78%" y="16%" overflow="visible"><g class="streak" style="animation-delay:4.2s">${streak}</g></svg>`,
+    )
+  }
+  if (s.sky.noBugs && !isDark && isClear) {
+    // 庭の側の地平線にかかる虹。下半分は、あとから描く地面にかくれる
+    const colors = ['#ff6b6b', '#ffb347', '#ffe066', '#7ee081', '#6ec6ff', '#b99cff']
+    const rings = colors.map((c, i) => `<circle r="${300 - i * 12}" fill="none" stroke="${c}" stroke-width="12" opacity=".8"/>`).join('')
+    parts.push(`<svg x="${s.side === 'left' ? 72 : 28}%" y="${FLOOR_AT}%" overflow="visible">${rings}</svg>`)
+  }
   // 雨・雪：小さなもようを空にしいて、もようの高さ（96px）だけ落としてくり返す
   if (s.weather === 'rain' || s.weather === 'snow') {
     const isRain = s.weather === 'rain'
