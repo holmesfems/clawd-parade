@@ -330,13 +330,13 @@ function poseOf(a: Activity): Pose {
 }
 
 // Clawd（ねこ）のスプライト。座っているときは足を描かない
-function hero(s: RoomScene, pose: Pose, eyes: Pose['eyes'], wave: 0 | 1 | null = null): Sprite {
+function hero(s: RoomScene, pose: Pose, eyes: Pose['eyes']): Sprite {
   if (s.character === 'clawd') {
-    const sp = clawd(pose.mood, eyes, 0, 0, 0, wave)
+    const sp = clawd(pose.mood, eyes, 0, 0)
     return pose.isSitting ? cropped(sp, 8) : sp
   }
   const mouth = pose.mood === 'done' ? 'smile' : pose.mood === 'error' || pose.mood === 'aborted' ? 'frown' : pose.mood === 'question' ? 'open' : 'smile'
-  const sp = leader(eyes, mouth, 0, null, wave)
+  const sp = leader(eyes, mouth, 0, null)
   return pose.isSitting ? cropped(sp, sp.h - 2) : sp
 }
 
@@ -404,6 +404,8 @@ export function roomSvg(s: RoomScene): string {
   const hx = pose.x
   const hy = pose.y
   const heroLayer = blank()
+  // おわった！も、手は下ろしたふつうの立ち姿（うれしそうな目で、はやくはねる）。手を上げる・ふるのは試したがやめた：
+  // 体がはねるのと別に手をふると動きがちぐはぐに見え、上げたままだと手の形が不自然に見える
   const body = hero(s, pose, pose.eyes)
   blit(heroLayer, body, hx, hy)
   if (s.hat) drawHat(heroLayer, s.hat, s.character === 'clawd', hx, hy)
@@ -412,14 +414,6 @@ export function roomSvg(s: RoomScene): string {
     const blinkLayer = blank()
     blit(blinkLayer, diff(body, hero(s, pose, 'blink')), hx, hy)
     heroLayers.push({ cls: 'blink', g: blinkLayer })
-  }
-  if (s.activity === 'done') {
-    // ばんざい：手を上げた 2 コマをかわりばんこに
-    const up0 = blank()
-    const up1 = blank()
-    blit(up0, diff(body, hero(s, pose, pose.eyes, 0)), hx, hy)
-    blit(up1, diff(body, hero(s, pose, pose.eyes, 1)), hx, hy)
-    heroLayers.push({ cls: 'fa', g: up0 }, { cls: 'fb', g: up1 })
   }
   if (s.activity === 'wait') heroLayers.push({ cls: '', g: sign(hx, hy) })
   if (s.activity === 'research') heroLayers.push(...book(hx, hy))
