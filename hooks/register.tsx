@@ -490,7 +490,10 @@ export const register: Register = on => {
     const date = pinned ?? { month: clock.getMonth() + 1, day: clock.getDate() }
     // 天気（#42）も同じ日付と時刻から決める（ほんとうの天気ではない）。見たい日を選んでいれば、その日の天気（年は今年）
     const weather = forced ?? weatherAt(clock.getFullYear(), date.month, date.day, hour)
-    return bandView($.ui.resolve(e), {
+    // 帯は 1 つの枠をプラグインで分け合う。下のプラグイン（AK Studio の帯など）が描いたものは消さず、上に並べる
+    const ui = $.ui.resolve(e)
+    const below = await next(e)
+    const mine = bandView(ui, {
       hour,
       date,
       weather,
@@ -509,6 +512,14 @@ export const register: Register = on => {
       onPet: () => void pet($, 'pet'),
       onGift: id => void giveTreat($, id),
     })
+    if (below == null) return mine
+    const { Box } = ui
+    return (
+      <Box flexDirection="column">
+        {below}
+        {mine}
+      </Box>
+    )
   })
 
   // なでなでショップ（/parade shop で開くパネル）

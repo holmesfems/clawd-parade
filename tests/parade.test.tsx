@@ -111,6 +111,27 @@ test('画像を貼った下書きの間は、帯をほかのプラグインに�
   expect(await textOf(plain, /よろしくね/)).toBeDefined()
 })
 
+test('帯の枠は、下のプラグイン（AK Studio の帯など）と分け合う。どちらも出る', async ($, on) => {
+  // テストの on は clawd-parade の下にいる。ほかのプラグインの帯の代わり（boot の空の帯より先に答えるよう、先に登録する）
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box key="other-band">
+        <Text>◆ AK STUDIO</Text>
+      </Box>
+    )
+  })
+  boot(on, { store: veteran() })
+  await startSession($, 'terminal')
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await mountBand($, surface)
+    expect(await ui.find({ key: 'other-band' })).toBeDefined()
+    expect(await textOf(ui, /よろしくね/)).toBeDefined()
+    await ui.unmount()
+  }
+})
+
 test('時間帯で空とあいさつが変わる', async ($, on) => {
   // テストの時計は UTC なので、朝 7 時から始める
   const { clock } = boot(on, { now: 7 * 3_600_000, store: veteran() })
