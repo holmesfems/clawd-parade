@@ -96,7 +96,7 @@ export const veteran = (game: Record<string, unknown> = {}, rest: Record<string,
 const band = (bodyColumns: number, maxRows: number) => ({
   plugin: 'clawd-parade',
   component: 'AbovePrompt' as const,
-  props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns, scroll: { offset: 0, bodyRows: maxRows }, view: {} },
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows, bodyColumns, scroll: { offset: 0, bodyRows: maxRows }, view: {} },
 })
 
 // 入力欄の上の帯
