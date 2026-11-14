@@ -302,7 +302,10 @@ type Pose = {
 }
 
 const DESK_X = 51
-const DESK_TOP = 27
+// 机を、はじめの絵より何ドット低くしたか。机・モニター・キーボード・机の上のもの・座る Clawd が、この分だけ下がる
+// （高い机だと、考えごとの「…」やぼうしが、かべの本棚に重なる）
+const DESK_DROP = 6
+const DESK_TOP = 27 + DESK_DROP
 
 function poseOf(a: Activity): Pose {
   switch (a) {
@@ -394,9 +397,9 @@ export function roomSvg(s: RoomScene): string {
 
   // 机の上のモニター
   const monitor = blank()
-  rect(monitor, 36, 23, 15, 12, METAL)
-  rect(monitor, 37, 24, 13, 10, SCREEN)
-  rect(monitor, 42, 35, 3, 1, METAL)
+  rect(monitor, 36, 23 + DESK_DROP, 15, 12, METAL)
+  rect(monitor, 37, 24 + DESK_DROP, 13, 10, SCREEN)
+  rect(monitor, 42, 35 + DESK_DROP, 3, 1, METAL)
   add('', monitor)
   screen(s.activity, add)
 
@@ -423,15 +426,15 @@ export function roomSvg(s: RoomScene): string {
 
   // 机（座っている Clawd の前）
   const desk = blank()
-  rect(desk, 34, 36, 38, 2, WOOD_L)
-  rect(desk, 34, 37, 38, 1, WOOD)
-  rect(desk, 35, 38, 2, FLOOR - 38, WOOD_D)
-  rect(desk, 69, 38, 2, FLOOR - 38, WOOD_D)
-  rect(desk, 58, 38, 11, 8, WOOD)
-  rect(desk, 62, 41, 3, 1, WOOD_L)
+  rect(desk, 34, 36 + DESK_DROP, 38, 2, WOOD_L)
+  rect(desk, 34, 37 + DESK_DROP, 38, 1, WOOD)
+  rect(desk, 35, 38 + DESK_DROP, 2, FLOOR - 38 - DESK_DROP, WOOD_D)
+  rect(desk, 69, 38 + DESK_DROP, 2, FLOOR - 38 - DESK_DROP, WOOD_D)
+  rect(desk, 58, 38 + DESK_DROP, 11, 8, WOOD)
+  rect(desk, 62, 41 + DESK_DROP, 3, 1, WOOD_L)
   // キーボード
-  rect(desk, 52, 35, 15, 1, 0xcfd0db)
-  for (let x = 53; x < 66; x += 2) dot(desk, x, 35, 0x9a9cad)
+  rect(desk, 52, 35 + DESK_DROP, 15, 1, 0xcfd0db)
+  for (let x = 53; x < 66; x += 2) dot(desk, x, 35 + DESK_DROP, 0x9a9cad)
   add('', desk)
   if (s.activity === 'write') keys(add)
 
@@ -622,11 +625,11 @@ function holidayProps(s: RoomScene, add: (cls: string, g: Grid) => void) {
   switch (s.holiday) {
     case 'christmas': {
       // 机の右はしに小さなツリー
-      for (let r = 0; r < 6; r++) rect(g, 69 - Math.floor(r / 2), 29 + r, 1 + Math.floor(r / 2) * 2, 1, 0x3f9b5a)
-      dot(g, 69, 28, 0xffd166)
-      dot(g, 68, 32, 0xff6b6b)
-      dot(g, 70, 33, 0x6ec6ff)
-      rect(g, 69, 35, 1, 1, WOOD_D)
+      for (let r = 0; r < 6; r++) rect(g, 69 - Math.floor(r / 2), 29 + DESK_DROP + r, 1 + Math.floor(r / 2) * 2, 1, 0x3f9b5a)
+      dot(g, 69, 28 + DESK_DROP, 0xffd166)
+      dot(g, 68, 32 + DESK_DROP, 0xff6b6b)
+      dot(g, 70, 33 + DESK_DROP, 0x6ec6ff)
+      rect(g, 69, 35 + DESK_DROP, 1, 1, WOOD_D)
       break
     }
     case 'halloween':
@@ -636,9 +639,9 @@ function holidayProps(s: RoomScene, add: (cls: string, g: Grid) => void) {
       dot(g, 20, 22, 0x3a2010)
       break
     case 'newYear':
-      rect(g, 66, 33, 5, 2, 0xf5f0e6)
-      rect(g, 67, 31, 3, 2, 0xf5f0e6)
-      dot(g, 68, 30, 0xff8a3d)
+      rect(g, 66, 33 + DESK_DROP, 5, 2, 0xf5f0e6)
+      rect(g, 67, 31 + DESK_DROP, 3, 2, 0xf5f0e6)
+      dot(g, 68, 30 + DESK_DROP, 0xff8a3d)
       break
     case 'tanabata':
       rect(g, 1, 4, 1, 21, 0x6fae6a)
@@ -666,24 +669,24 @@ function screen(a: Activity, add: (cls: string, g: Grid, extra?: Partial<Layer>)
     for (let i = 0; i < 6; i++) {
       const line = blank()
       const indent = [0, 2, 2, 4, 2, 0][i]!
-      rect(line, 38 + indent, 25 + i, 3 + Math.floor(hash(i + 4) * 7), 1, CODE[i % CODE.length]!)
+      rect(line, 38 + indent, 25 + DESK_DROP + i, 3 + Math.floor(hash(i + 4) * 7), 1, CODE[i % CODE.length]!)
       add('ln', line, { style: `animation-delay:${i * 0.45}s` })
     }
   } else if (a === 'run') {
     // 進むバーと、回る歯車
     const bar = blank()
-    rect(bar, 39, 30, 9, 1, 0x7ee0a1)
+    rect(bar, 39, 30 + DESK_DROP, 9, 1, 0x7ee0a1)
     add('prog', bar)
     const frameG = blank()
-    rect(frameG, 38, 29, 11, 1, 0x3c5560)
-    rect(frameG, 38, 31, 11, 1, 0x3c5560)
-    put(frameG, 'tiny', 39, 26, 0x8ab4ff)
-    rect(frameG, 39, 26, 6, 1, 0x8ab4ff)
+    rect(frameG, 38, 29 + DESK_DROP, 11, 1, 0x3c5560)
+    rect(frameG, 38, 31 + DESK_DROP, 11, 1, 0x3c5560)
+    put(frameG, 'tiny', 39, 26 + DESK_DROP, 0x8ab4ff)
+    rect(frameG, 39, 26 + DESK_DROP, 6, 1, 0x8ab4ff)
     add('', frameG)
   } else {
     // ふだんは、ゆっくり光るカーソルだけ
     const cur = blank()
-    rect(cur, 39, 26, 1, 2, 0x7ee0a1)
+    rect(cur, 39, 26 + DESK_DROP, 1, 2, 0x7ee0a1)
     add('tw', cur)
   }
 }
@@ -691,8 +694,8 @@ function screen(a: Activity, add: (cls: string, g: Grid, extra?: Partial<Layer>)
 function keys(add: (cls: string, g: Grid) => void) {
   const a = blank()
   const b = blank()
-  for (let x = 53; x < 66; x += 4) dot(a, x, 35, C.white)
-  for (let x = 55; x < 66; x += 4) dot(b, x, 35, C.white)
+  for (let x = 53; x < 66; x += 4) dot(a, x, 35 + DESK_DROP, C.white)
+  for (let x = 55; x < 66; x += 4) dot(b, x, 35 + DESK_DROP, C.white)
   add('fa quick', a)
   add('fb quick', b)
 }
@@ -746,7 +749,7 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
       // 考えごとの「…」が、ひとつずつ光る
       ;[0, 1, 2].forEach(i => {
         const d = blank()
-        rect(d, cx - 2 + i * 3, top - 4, 2, 2, C.white)
+        rect(d, cx - 2 + i * 3, top - (s.hat ? 9 : 4), 2, 2, C.white)
         add('ln', d, { style: `animation-delay:${i * 0.5}s;animation-duration:2s` })
       })
       break
@@ -754,8 +757,8 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
     case 'run': {
       // 机のよこで歯車が回る
       const gear = blank()
-      for (const [dx, dy] of [[0, -2], [2, 0], [0, 2], [-2, 0], [-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [1, 0], [0, 1], [-1, 0]] as const) dot(gear, 46 + dx, 20 + dy, 0xb0b6c8)
-      dot(gear, 46, 20, METAL)
+      for (const [dx, dy] of [[0, -2], [2, 0], [0, 2], [-2, 0], [-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [1, 0], [0, 1], [-1, 0]] as const) dot(gear, 46 + dx, 20 + DESK_DROP + dy, 0xb0b6c8)
+      dot(gear, 46, 20 + DESK_DROP, METAL)
       add('spin', gear)
       break
     }
