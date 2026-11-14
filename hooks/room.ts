@@ -6,7 +6,7 @@
 // なので、絵を決めるものは全部「場面の名前」（sceneName）に入れ、背景を描くフックは名前だけから SVG を作る（roomSvg）。
 // 動きは SVG の中の CSS でずっと動かし、名前が変わったときだけ描き直してもらう。
 
-import type { Character, Hat, MoodKind, RoomActivity, RoomHeld, RoomItemId, Weather } from '../types'
+import type { Character, Hat, MoodKind, RoomActivity, RoomCrew, RoomHeld, RoomItemId, Weather } from '../types'
 import { drawHat } from './decor'
 import { pathsOf } from './encode'
 import { blit, dot, hash, put } from './grid'
@@ -100,6 +100,23 @@ export function holdActivity(prev: Held | null, next: Activity, now: number): He
   return prev
 }
 
+// 来た仲間は、庭の道を歩いておうちに入る。歩いているあいだ（WALK_MS）は「歩いている場面」、入ったら「中ではねる場面」に変える
+export const WALK_MS = 9_000
+// 来た仲間は、すぐ用事が終わっても、おうちに入ってひと息つくまではいる（歩いている途中で消えない）
+export const STAY_MS = WALK_MS + 6_000
+
+export function crewOf(prev: RoomCrew, count: number, now: number): RoomCrew {
+  const n = Math.max(0, Math.min(3, count))
+  // 歩きおわった仲間は、中に入る
+  const walking = now - prev.since >= WALK_MS ? 0 : prev.arriving
+  if (n > prev.count) return { count: n, arriving: Math.min(n, walking + n - prev.count), since: now }
+  // 帰るのは、最後に仲間が来てから STAY_MS たってから
+  const staying = now - prev.since < STAY_MS ? prev.count : n
+  const arriving = Math.min(walking, staying)
+  if (staying !== n) return arriving === prev.arriving ? prev : { count: staying, arriving, since: prev.since }
+  return n === prev.count && arriving === prev.arriving ? prev : { count: n, arriving, since: prev.since }
+}
+
 // ---- 場面の名前 --------------------------------------------------------
 
 // ショップで買える、おへやのもの（きせかえの品として売る。出す・しまうができる）
@@ -122,6 +139,8 @@ export type RoomScene = {
   activity: Activity
   // 来ている仲間（3 匹まで描く）
   friends: number
+  // そのうち、庭の道を歩いて来ているところの数（残りは、おへやの床ではねる）
+  arriving: number
   time: TimeOfDay
   weather: Weather
   season: Season
@@ -167,7 +186,7 @@ export function sceneName(s: RoomScene): string {
   const sky = SKY_FLAGS.reduce<number>((n, key, i) => (s.sky[key] ? n | (1 << (i + 2)) : n), s.sky.stars)
   return [
     'r1',
-    `${ACT_CODES[s.activity]}${Math.max(0, Math.min(3, s.friends))}`,
+    `${ACT_CODES[s.activity]}${Math.max(0, Math.min(3, s.friends))}${s.arriving > 0 ? Math.min(3, s.arriving) : ''}`,
     `${TIME_CODES[s.time]}${WEATHER_CODES[s.weather]}${SEASON_CODES[s.season]}${HOLIDAY_CODES[s.holiday ?? 'none']}`,
     `${s.character === 'clawd' ? 'c' : 'n'}${HAT_CODES[s.hat ?? 'none']}`,
     items.toString(36),
@@ -178,9 +197,9 @@ export function sceneName(s: RoomScene): string {
 
 // 名前から場面にもどす。読めない名前は null
 export function parseScene(name: string): RoomScene | null {
-  const m = /^r1-([a-z]{2})([0-3])-([a-z])([a-z])([a-z])([a-z])-([cn])([a-z])-([0-9a-z]+)-([0-9a-z]+)-([RL])$/.exec(name)
+  const m = /^r1-([a-z]{2})([0-3])([1-3])?-([a-z])([a-z])([a-z])([a-z])-([cn])([a-z])-([0-9a-z]+)-([0-9a-z]+)-([RL])$/.exec(name)
   if (!m) return null
-  const [, act, friends, time, weather, season, holiday, char, hat, items, sky, side] = m
+  const [, act, friends, arriving, time, weather, season, holiday, char, hat, items, sky, side] = m
   const activity = ACT_OF[act!]
   const t = TIME_OF[time!]
   const w = WEATHER_OF[weather!]
@@ -193,6 +212,7 @@ export function parseScene(name: string): RoomScene | null {
   return {
     activity,
     friends: Number(friends),
+    arriving: Math.min(Number(friends), Number(arriving ?? 0)),
     time: t,
     weather: w,
     season: se,
@@ -850,8 +870,9 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
 }
 
 function friends(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, extra?: Partial<Layer>) => void) {
-  const n = Math.min(3, s.friends)
-  if (n === 0) return
+  // 歩いて来ているところの仲間は、まだ中にいない
+  const n = Math.min(3, s.friends) - s.arriving
+  if (n <= 0) return
   // 床で、Clawd とバグにかさならない場所
   const taken = [...(!pose.isSitting ? [{ from: pose.x - 2, to: pose.x + 20 }] : []), ...(s.activity === 'fight' ? [{ from: 22, to: 39 }] : [])]
   const slots = [37, 49, 61, 12, 24].filter(x => taken.every(t => x + 11 < t.from || x > t.to))
@@ -940,6 +961,10 @@ const STYLE = [
   '.tear{animation:tear 1.8s linear infinite}@keyframes tear{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(4px)}}',
   '.glow{animation:glow 3s ease-in-out infinite alternate}@keyframes glow{from{opacity:.35}to{opacity:.6}}',
   '.dim{opacity:.38}',
+  // 来た仲間：窓の幅の枠ごと、窓の幅の 6 割だけ手前から入口まで歩き、入口で消える（vw は使わない。枠の幅の割合で動かす）
+  '.come{transform-box:fill-box;animation:come 7s linear both}.come.rev{animation-name:comer}',
+  '@keyframes come{0%{transform:translateX(-60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
+  '@keyframes comer{0%{transform:translateX(60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
   '.sway.slow{animation-duration:7s}',
   // 雲の動きに vw の単位は使わない：@keyframes に vw があると、アプリの背景では CSS のアニメーションが全部止まる（docs/backdrop-investigation.md）。
   // かわりに、窓 2 つぶんの幅の枠（.cloud）を、自分の幅の半分（＝窓の幅）だけ動かす
@@ -1139,6 +1164,35 @@ function skySvg(s: RoomScene): string {
   return parts.join('')
 }
 
+// 庭の道を歩いて来る仲間。道の上（px）を、窓の外から入口まで歩く。絵は 1 ドット 5px
+const WALK_DOT = 5
+function walkersSvg(s: RoomScene): string {
+  const settled = Math.min(3, s.friends) - s.arriving
+  const isRight = s.side === 'right'
+  // 入口のドアの外側（おへやの枠のはしから、たたきと外かべのぶん外）
+  const doorGap = (ENTRY + WALL_T) * WALK_DOT
+  let out = ''
+  for (let i = 0; i < s.arriving; i++) {
+    const coat = FRIEND_COATS[(settled + i) % FRIEND_COATS.length]!
+    const frames = [0, 1].map(step => {
+      const sp = s.character === 'clawd' ? miniClawd(coat, step, false) : kitten(coat, step, false)
+      const g: Grid = Array.from({ length: sp.h }, () => Array<Px>(sp.w).fill(null))
+      blit(g, sp, 0, 0)
+      return { w: sp.w, h: sp.h, paths: pathsOf(g) }
+    })
+    const { w, h } = frames[0]!
+    const width = w * WALK_DOT
+    // 右に置くときは右はしから、左に置くときは左はしから測る
+    const x = isRight ? -(ROOM_INSET.right + ROOM_BOX + doorGap + width + 4) : ROOM_INSET.left + ROOM_BOX + doorGap + 4
+    const sprite =
+      `<svg x="${x}" y="${62 - h * WALK_DOT}" width="${width}" height="${h * WALK_DOT}" viewBox="0 0 ${w} ${h}" overflow="visible">` +
+      `<g class="fa quick">${frames[0]!.paths}</g><g class="fb quick">${frames[1]!.paths}</g></svg>`
+    const anchored = isRight ? `<svg x="100%" width="1" overflow="visible">${sprite}</svg>` : sprite
+    out += `<g class="come${isRight ? '' : ' rev'}" style="animation-delay:${(i * 0.9).toFixed(1)}s"><rect width="100%" height="1" fill="none"/>${anchored}</g>`
+  }
+  return out === '' ? '' : `<svg y="${FLOOR_AT}%" overflow="visible">${out}</svg>`
+}
+
 // 床は窓の高さの 84%。おへやの枠は高さが窓の 40%、幅が 360px（絵はこの枠に収まる大きさ）。
 // 左右は、サイドバー（およそ 215px）・右のパネル（およそ 315px）の外になるよう、端から何 px 内側に置くか
 const FLOOR_AT = 84
@@ -1193,6 +1247,7 @@ function frameSvg(s: RoomScene, layers: Layer[]): string {
     // 道：おうちの土台の下を、横にのびる
     `<svg y="${FLOOR_AT}%" overflow="visible"><rect y="40" width="100%" height="30" fill="${hex(path)}"/><rect y="40" width="100%" height="3" fill="${hex(mix(path, 0xffffff, 0.2))}"/><rect y="67" width="100%" height="3" fill="${hex(darken(path, 0.8))}"/></svg>` +
     (s.side === 'left' ? atRight(garden) + atLeft(room) : atLeft(garden) + atRight(room)) +
+    walkersSvg(s) +
     sleepy +
     `</svg>`
   )

@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, DiaryKind, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
+import type { Character, DiaryKind, RoomCrew, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
 import { bandView } from './band'
 import { dayOf, record, tidyDiary } from './diary'
 import type { Deal, Situation } from './game'
@@ -34,7 +34,7 @@ import {
 } from './game'
 import { messageOf } from './message'
 import { HOLIDAY_NAMES, SEASON_NAMES, calendarOf, parseMonthDay, timeOfDay } from './palette'
-import { ACTIVITY_NAMES, ROOM_ITEMS, RULER_SCENE, activityOf, holdActivity, parseScene, roomSvg, rulerSvg, sceneName } from './room'
+import { ACTIVITY_NAMES, ROOM_ITEMS, RULER_SCENE, activityOf, crewOf, holdActivity, parseScene, roomSvg, rulerSvg, sceneName } from './room'
 import type { RoomScene, Side } from './room'
 import { isMarching } from './scene'
 import { WEATHER_NAMES, WEATHER_WORDS, weatherAt } from './weather'
@@ -92,6 +92,7 @@ const holding = atom({ plugin: 'clawd-parade', key: 'holding' } as const, null a
 const backdrop = atom({ plugin: 'clawd-parade', key: 'backdrop' } as const, false)
 const backdropSide = atom({ plugin: 'clawd-parade', key: 'backdropSide' } as const, 'right' as Side)
 const roomHeld = atom({ plugin: 'clawd-parade', key: 'roomHeld' } as const, null as RoomHeld | null)
+const roomCrew = atom({ plugin: 'clawd-parade', key: 'roomCrew' } as const, { count: 0, arriving: 0, since: 0 } as RoomCrew)
 const roomScene = atom({ plugin: 'clawd-parade', key: 'roomScene' } as const, null as string | null)
 
 const PETS_KEY = 'pets'
@@ -257,7 +258,7 @@ const giveTreat = ($: EngineInterface, id: TreatId) => buy($, `🎁 ${giftOf(id)
 
 // いまの state から、背景に描く場面を作る。絵を決めるものは全部ここに入れる（背景のフックは名前しか見ない）
 async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
-  const [m, list, w, who, g, held, pinned, forced, side, prev] = await Promise.all([
+  const [m, list, w, who, g, held, pinned, forced, side, prev, prevCrew] = await Promise.all([
     read($, mood),
     read($, friends),
     read($, work),
@@ -268,6 +269,7 @@ async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
     read($, weatherOverride),
     read($, backdropSide),
     read($, roomHeld),
+    read($, roomCrew),
   ])
   const clock = new Date(now)
   const hour = clock.getHours()
@@ -277,9 +279,13 @@ async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
   const look = lookOf(g, now, held, holiday)
   const kept = holdActivity(prev, activityOf(m, w.isRunning ? w.tool : null, now), now)
   if (kept !== prev) await update($, roomHeld, () => kept)
+  // 来た仲間は、しばらく庭の道を歩いてから中に入る
+  const crew = crewOf(prevCrew, list.filter(f => f.doneAt === null).length, now)
+  if (crew !== prevCrew) await update($, roomCrew, () => crew)
   return {
     activity: kept.kind,
-    friends: list.filter(f => f.doneAt === null).length,
+    friends: crew.count,
+    arriving: crew.arriving,
     time: timeOfDay(hour),
     weather,
     season,

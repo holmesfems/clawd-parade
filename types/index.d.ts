@@ -77,6 +77,8 @@ export type CosmeticId = Hat | 'shootingStars' | 'aurora' | RoomItemId
 export type RoomActivity = 'rest' | 'sleep' | 'think' | 'research' | 'write' | 'run' | 'fight' | 'wait' | 'done' | 'sad'
 // いまのしごとと、いつからか（しごとは少なくとも 10 秒続ける）
 export type RoomHeld = { kind: RoomActivity; since: number }
+// 背景のおへやに来ている仲間の数と、そのうち庭の道を歩いて来ているところの数（since は歩きはじめた時刻）
+export type RoomCrew = { count: number; arriving: number; since: number }
 
 // 小さな贈り物（何度でも）と、夢のプレゼント（1 回きりで、ずっと飾られる）
 export type TreatId = 'cookie' | 'cocoa' | 'cake' | 'letter' | 'cushion' | 'keyboard'
@@ -252,6 +254,7 @@ declare module 'claude-code' {
       backdropSide: 'right' | 'left'
       // 背景のおへやの、いまのしごと
       roomHeld: RoomHeld | null
+      roomCrew: RoomCrew
       // いま背景に出している場面の名前（同じなら $.theme.set を呼ばない）
       roomScene: string | null
     }
