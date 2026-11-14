@@ -1,13 +1,48 @@
 # 背景のおへやが、デスクトップのアプリで動かない件・調査メモ
 
-状態：調査中（2026-11-14 時点）。別のセッションで続けるための引き継ぎ。
+状態：原因が分かり、直した（2026-11-14）。下の「いまの状態」より後ろは、調査の途中のメモ（そのまま残してある）。
+
+## 結論
+
+- **原因**：おへやを入れる入れ子の `<svg>` に付けていた `shape-rendering="crispEdges"`。これがあると、アプリの背景では、その SVG の CSS アニメーションがひとつも当たらなくなる（root に置いた別の要素のものも含めて）
+- **直し方**：`hooks/room.ts` の `frameSvg` の入れ子の svg から、この属性を外した。アプリでおへやが動くことを確かめた
+- **なぜ止まるかは分かっていない**。同じ SVG は、ブラウザではアプリと同じ形の iframe（DOMPurify 通過後・sandbox・CSP・srcdoc）に入れても動く。アプリの中の描画の問題だと見ているが、推測
+
+### 二分探索の結果（`/parade theme test6`〜`test21`。どれも 1 回だけ出す・glass なし）
+
+| テスト | 中身 | 動いた？ |
+| --- | --- | --- |
+| test6 | おへやそのまま | 止まる |
+| test7 | test2 + glass あり | 動く |
+| test8 | おへやの絵で、おへやの `<style>` だけ外す | 止まる |
+| test11 | test2 + 見えない rect を 300 個（大きさだけ） | 動く |
+| test12 | root の `<defs>`（pattern）と、かべ・床だけ | 動く |
+| test13 | 入れ子のおへやの絵だけ | 止まる |
+| test14 | test13 から clipPath・ランプのあかりを外す | 止まる |
+| test15 | 入れ子の枠だけ（中は四角 1 つ） | 止まる |
+| test16 | 絵の path を半分に | 止まる |
+| test17 | test15 から `shape-rendering` を外す | **動く** |
+| test18 | test15 から内側の `overflow` を外す | 止まる |
+| test19 | test15 から `preserveAspectRatio` を外す | 止まる |
+| test20 | 外側の枠なし（左に置くときの形） | 止まる |
+| test21 | 外側の枠だけ（中は viewBox なしの四角） | **動く** |
+
+止まっているときは、黄色の札「animation が止められている」が出た（CSS は効いているが、アニメーションだけ当たっていない）。オレンジの札「アプリが『止める style』を差しこんでいる」は、どれにも出なかった。
+
+### 原因ではなかったもの
+
+- `shouldAnimate`：アプリの設定 `appearance:backgroundAnimation`（enabled・disabled・system）と `prefers-reduced-motion` だけで決まり、場面は見ない（asar の 54445708 あたり）。この PC は「動きを減らす」になっていない
+- アプリの「止める」処理（`Qn`）：通ればテストの背景も同じように止まる。オレンジの札が出なかったので、通っていない
+- DOMPurify：おへや・目盛りを同じ設定で通しても、`<style>` も属性も消えない
+- 描き直し：中身が同じ iframe は残す作り（`gm`・`hm`、`isEqualNode`）
+- glass、`refreshRoom`、SVG の大きさ・要素の数、pattern・clipPath・gradient、`@media (prefers-reduced-motion)`
 
 ## いまの状態
 
 - ブランチ `claude/room-backdrop`、PR [holmesfems/clawd-parade#48](https://github.com/holmesfems/clawd-parade/pull/48)（1.12.0。まだマージしていない）
   - `hooks/room.ts`：おへやの場面（しごと・場面の名前・SVG）。仕様は `docs/backdrop-spec.md`
   - `hooks/register.tsx`：`/parade theme`（left・right）、`refreshRoom`、Backdrop のフック
-  - 調査用のコマンドも入っている：`/parade theme ruler`（目盛り・動きのテスト A〜F）、`/parade theme test1`〜`test5`（動きのテスト）。直ったら外すか、残すか決める
+  - 調査用のコマンドは、`/parade theme ruler`（目盛り）だけ残した。`/parade theme test1`〜`test23` と、目盛りの中の動きのテスト A〜F は外した（コードは、このブランチの履歴にある）
 - PR #46（行進の背景の試作）は下書きのまま。#48 で置きかわるので閉じてよい
 - PR #47（帯をほかのプラグインと分け合う、1.11.0）はマージ済み
 - 試すときの仕組み（元にもどすのを忘れない）

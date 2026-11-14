@@ -34,7 +34,7 @@ import {
 } from './game'
 import { messageOf } from './message'
 import { HOLIDAY_NAMES, SEASON_NAMES, calendarOf, parseMonthDay, timeOfDay } from './palette'
-import { ACTIVITY_NAMES, ROOM_ITEMS, RULER_SCENE, TEST_SCENES, activityOf, holdActivity, parseScene, roomSvg, rulerSvg, sceneName, testSvg } from './room'
+import { ACTIVITY_NAMES, ROOM_ITEMS, RULER_SCENE, activityOf, holdActivity, parseScene, roomSvg, rulerSvg, sceneName } from './room'
 import type { RoomScene, Side } from './room'
 import { isMarching } from './scene'
 import { WEATHER_NAMES, WEATHER_WORDS, weatherAt } from './weather'
@@ -413,14 +413,12 @@ export const register: Register = on => {
     // /parade theme で背景のおへやを出す・しまう。/parade theme left・right で置く側を決めて出す
     const [word, sideWord] = arg.split(/\s+/)
     // /parade theme ruler：背景の枠の目盛りを出す（置き場所を確かめるため。/parade theme でおへやにもどる）
-    // /parade theme test1〜3：背景で動きが出るかのテスト（目盛りと同じく、おへやで上書きしない）
-    const special = sideWord === 'ruler' ? RULER_SCENE : TEST_SCENES.find(t => t === sideWord)
-    if (word !== undefined && THEME_WORDS.includes(word) && special !== undefined) {
+    if (word !== undefined && THEME_WORDS.includes(word) && sideWord === 'ruler') {
       await update($, backdrop, () => true)
       await update($, roomScene, () => RULER_SCENE)
-      await $.theme.set({ backdrop: { scene: special, glass: false }, overrideColorScheme: 'dark' })
+      await $.theme.set({ backdrop: { scene: RULER_SCENE, glass: false }, overrideColorScheme: 'dark' })
 
-      return { text: `背景に ${special} を出したよ（/parade theme でおへやにもどる）` }
+      return { text: '背景に目盛りを出したよ（/parade theme でおへやにもどる）' }
     }
     if (word !== undefined && THEME_WORDS.includes(word)) {
       const side = sideWord === 'left' || sideWord === '左' ? 'left' : sideWord === 'right' || sideWord === '右' ? 'right' : null
@@ -654,7 +652,6 @@ export const register: Register = on => {
     if (e.props.plugin !== 'clawd-parade') return next(e)
     const ui = $.ui.resolve(e)
     if (e.props.scene === RULER_SCENE && 'Svg' in ui) return <ui.Svg source={rulerSvg()} alt="背景の目盛り" isInteractive />
-    if (TEST_SCENES.some(t => t === e.props.scene) && 'Svg' in ui) return <ui.Svg source={testSvg(e.props.scene)} alt="動きのテスト" isInteractive />
     const scene = parseScene(e.props.scene)
     if (scene === null || !('Svg' in ui)) return next(e)
     const who = scene.character === 'clawd' ? 'Clawd' : 'ねこ'
