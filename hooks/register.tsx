@@ -4,7 +4,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Character, DiaryKind, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
-import { bandView } from './band'
+import { backdropSvg, bandView } from './band'
 import { dayOf, record, tidyDiary } from './diary'
 import type { Deal, Situation } from './game'
 import {
@@ -84,6 +84,8 @@ const weatherOverride = atom({ plugin: 'clawd-parade', key: 'weatherOverride' } 
 // 前回 store から読んだ（store に書いた）ゲームとなでた回数。次に保存するときは、ここからの差分を足し込む
 const synced = atom({ plugin: 'clawd-parade', key: 'synced' } as const, { game: newGame(0, 0), pets: 0 } as Synced)
 const holding = atom({ plugin: 'clawd-parade', key: 'holding' } as const, null as Holding)
+// /parade theme：アプリの背景（テーマ）にパレードを描く
+const backdrop = atom({ plugin: 'clawd-parade', key: 'backdrop' } as const, false)
 
 const PETS_KEY = 'pets'
 const GAME_KEY = 'game'
@@ -91,6 +93,13 @@ const GAME_KEY = 'game'
 const IDLE_KEY = 'idlePaidAt'
 // 保存は 5 秒に 1 回まで
 const SAVE_EVERY_MS = 5000
+// /parade theme を入れているか（次のセッションでも背景に描く）
+const THEME_KEY = 'theme'
+const THEME_WORDS = ['theme', 'テーマ', '背景', 'はいけい']
+const BACKDROP_ID = 'parade'
+
+// テーマの背景に、パレードを描いてもらう。会話のパネルは少しだけすりガラスにして、後ろのパレードが透けて見えるようにする
+const setTheme = ($: EngineInterface) => $.theme.set({ backdrop: { id: BACKDROP_ID, glass: { blur: 6, opacity: 0.5 } } })
 
 async function setMood($: EngineInterface, kind: MoodKind) {
   const at = await $.clock.now()
@@ -238,6 +247,31 @@ async function buy($: EngineInterface, label: string, deal: Deal) {
 // 帯に出した贈り物を贈る（帯のボタンと、広いデスクトップの札から）
 const giveTreat = ($: EngineInterface, id: TreatId) => buy($, `🎁 ${giftOf(id).name} をあげたよ！`, (one, when) => giveGift(one, id, when))
 
+// 帯と背景が描くのに読む値（読むと、変わったときに描き直してもらえる）
+async function sceneState($: EngineInterface) {
+  const [m, list, w, t, who, p, g, held, pinned, forced] = await Promise.all([
+    read($, mood),
+    read($, friends),
+    read($, work),
+    read($, tick),
+    read($, character),
+    read($, pets),
+    read($, game),
+    read($, holding),
+    read($, dateOverride),
+    read($, weatherOverride),
+  ])
+  // フックの中の Date は使う人のタイムゾーンで動く（claude plugin test の中は UTC）。
+  // tick.at は始めのコマまで 0 なので、時計から読む。季節と行事（#41）も、同じ時計の月と日から決める
+  const clock = new Date(await $.clock.now())
+  const hour = clock.getHours()
+  const date = pinned ?? { month: clock.getMonth() + 1, day: clock.getDate() }
+  // 天気（#42）も同じ日付と時刻から決める（ほんとうの天気ではない）。見たい日を選んでいれば、その日の天気（年は今年）
+  const weather = forced ?? weatherAt(clock.getFullYear(), date.month, date.day, hour)
+
+  return { hour, date, weather, mood: m, work: w, friends: list, pets: p, game: g, holding: held, tick: t, character: who }
+}
+
 let timer: { cancel: () => void } | undefined
 let beat = 0
 let isStepping = false
@@ -306,6 +340,11 @@ export const register: Register = on => {
       await update($, synced, s => ({ ...s, game: fill(s.game) }))
     }
     savedAt = now
+    // テーマは --resume で戻らず、読み込み直しでも消えるので、入れていればセッションの始めに毎回描いてもらう
+    if ((await $.store.get(THEME_KEY)) === true) {
+      await update($, backdrop, () => true)
+      await setTheme($)
+    }
     timer?.cancel()
     timer = $.clock.every(HOOK_FRAME_MS, () => void step($))
 
@@ -324,6 +363,24 @@ export const register: Register = on => {
       const opened = await $.ui.open({ id: SHOP, title: 'なでなでショップ' })
 
       return { text: opened.isPlaced ? 'なでなでショップを開いたよ！' : `ショップはまだ開けないみたい（${opened.reason}）` }
+    }
+    if (THEME_WORDS.includes(arg)) {
+      const isOn = !(await read($, backdrop))
+      await update($, backdrop, () => isOn)
+      await $.store.set(THEME_KEY, isOn)
+      if (!isOn) {
+        // テーマは 1 つだけ。外すときは、ほかのプラグインのテーマも外れる（頼まれたときだけ外す）
+        await $.theme.clear()
+
+        return { text: '背景のパレードをしまったよ（/parade theme でまた出せる）' }
+      }
+      const set = await setTheme($)
+
+      return {
+        text: set.isDrawn
+          ? 'アプリの背景をパレードにしたよ！なでるのは入力欄の上の帯でね（/parade theme でもどる）'
+          : `背景のパレードは、デスクトップのアプリで出るよ（いまは描けないみたい：${set.reason}）`,
+      }
     }
     if (arg === 'debug') {
       const isOn = await update($, touchDebug, v => !v)
@@ -363,7 +420,7 @@ export const register: Register = on => {
 
       return { text: picked === 'clawd' ? 'Clawd がやってきた！' : 'ねこたちがやってきた！' }
     }
-    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade clawd / /parade cat / /parade debug / /parade debug 12/25 / /parade debug rain' }
+    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade theme / /parade clawd / /parade cat / /parade debug / /parade debug 12/25 / /parade debug rain' }
 
     const hidden = await update($, isHidden, v => !v)
 
@@ -470,45 +527,41 @@ export const register: Register = on => {
     const draft = await $.prompt.read().catch(() => ({ text: '' }))
     if (/\[Image #\d+\]/.test(draft.text)) return next(e)
 
-    const [m, list, w, t, who, p, g, isDebug, held, pinned, forced] = await Promise.all([
-      read($, mood),
-      read($, friends),
-      read($, work),
-      read($, tick),
-      read($, character),
-      read($, pets),
-      read($, game),
-      read($, touchDebug),
-      read($, holding),
-      read($, dateOverride),
-      read($, weatherOverride),
-    ])
-    // フックの中の Date は使う人のタイムゾーンで動く（claude plugin test の中は UTC）。
-    // tick.at は始めのコマまで 0 なので、時計から読む。季節と行事（#41）も、同じ時計の月と日から決める
-    const clock = new Date(await $.clock.now())
-    const hour = clock.getHours()
-    const date = pinned ?? { month: clock.getMonth() + 1, day: clock.getDate() }
-    // 天気（#42）も同じ日付と時刻から決める（ほんとうの天気ではない）。見たい日を選んでいれば、その日の天気（年は今年）
-    const weather = forced ?? weatherAt(clock.getFullYear(), date.month, date.day, hour)
-    return bandView($.ui.resolve(e), {
-      hour,
-      date,
-      weather,
-      mood: m,
-      work: w,
-      friends: list,
-      pets: p,
-      game: g,
-      holding: held,
-      tick: t,
+    const [state, isDebug, isThemed] = await Promise.all([sceneState($), read($, touchDebug), read($, backdrop)])
+    // 帯は 1 つの枠をプラグインで分け合う。下のプラグイン（AK Studio の帯など）が描いたものは消さず、上に並べる
+    const ui = $.ui.resolve(e)
+    const below = await next(e)
+    const mine = bandView(ui, {
+      ...state,
       surface: e.surface,
       cols: e.props.bodyColumns,
       maxRows: e.props.maxRows,
-      character: who,
       isDebug,
+      // 背景にパレードを描いている間は、デスクトップの帯はセリフと「なでる」ボタンだけ
+      isCompact: isThemed,
       onPet: () => void pet($, 'pet'),
       onGift: id => void giveTreat($, id),
     })
+    if (below == null) return mine
+    const { Box } = ui
+    return (
+      <Box flexDirection="column">
+        {below}
+        {mine}
+      </Box>
+    )
+  })
+
+  // テーマの背景（/parade theme）。デスクトップとモバイルのアプリが、会話の後ろの窓いっぱいに描く。
+  // ほかのプラグインの背景は、そのプラグインにまかせる
+  on('ui.render', { component: 'Backdrop' }, async ($, e, next) => {
+    if (e.props.plugin !== 'clawd-parade' || e.props.id !== BACKDROP_ID || (await read($, isHidden))) return next(e)
+    const ui = $.ui.resolve(e)
+    if (!('Svg' in ui)) return next(e)
+    const state = await sceneState($)
+    const svg = backdropSvg(state)
+
+    return <ui.Svg source={svg.source} alt={`${state.character === 'clawd' ? 'Clawd' : 'ねこ'}のパレードの背景`} />
   })
 
   // なでなでショップ（/parade shop で開くパネル）

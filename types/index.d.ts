@@ -238,6 +238,8 @@ declare module 'claude-code' {
       weatherOverride: Weather | null
       synced: Synced
       holding: Holding
+      // /parade theme：アプリの背景（テーマ）にパレードを描く。store にも残し、次のセッションでも描く
+      backdrop: boolean
     }
   }
 }

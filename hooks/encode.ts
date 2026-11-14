@@ -47,8 +47,9 @@ function base64(bytes: Uint8Array): string {
 // デスクトップはコードフォントの行の高さが半角ブロックと揃わず縞になるので、
 // ドット絵は 1 ピクセル = 1 マスの SVG にして、夜空の窓に入れて描く
 
-// palette は drawScene に渡したものと同じにする（背景の空の色）
-export function toSvg(g: Grid, pixel: number, palette: Palette): { source: string; width: number; height: number } {
+// palette は drawScene に渡したものと同じにする（背景の空の色）。
+// fit が 'cover' なら、窓いっぱいに広げ（はみ出たぶんは左右を切る）、地面を窓の下の端にそろえる（テーマの背景）
+export function toSvg(g: Grid, pixel: number, palette: Palette, fit: 'cover' | null = null): { source: string; width: number; height: number } {
   const w = g[0]?.length ?? 0
   const h = g.length
   // 色ごとに 1 本の path にまとめる（横に続く同じ色は 1 つの長方形）
@@ -69,9 +70,12 @@ export function toSvg(g: Grid, pixel: number, palette: Palette): { source: strin
   const body = [...paths].map(([c, d]) => `<path fill="${hex(c)}" d="${d}"/>`).join('')
   const width = w * pixel
   const height = h * pixel
+  const size =
+    fit === 'cover' ? 'width="100%" height="100%" preserveAspectRatio="xMidYMax slice"' : `width="${width}" height="${height}"`
+  const corner = fit === 'cover' ? '' : ' rx="1.5"'
   const source =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${width}" height="${height}" shape-rendering="crispEdges">` +
-    `<rect width="${w}" height="${h}" rx="1.5" fill="${hex(palette.sky)}"/>${body}</svg>`
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" ${size} shape-rendering="crispEdges">` +
+    `<rect width="${w}" height="${h}"${corner} fill="${hex(palette.sky)}"/>${body}</svg>`
   return { source, width, height }
 }
 

@@ -267,7 +267,7 @@ function giftButtonOf(g: Game): BandText['gift'] {
 
 // デスクトップの SVG。さわったぶんのハート・傾き・仲間のジャンプと、帯に出した贈り物の札を足して描く。
 // 札を描くときは、frame.paradeColumns をもう QUICK_GIFT_DOTS 引いておく（札はそのすぐ右）
-export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null) {
+export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null, fit: 'cover' | null = null) {
   const petted = isPetted(p, now)
   const age = Math.floor((now - p.from) / HOOK_FRAME_MS)
   const isStroked = petted && p.kind === 'pet'
@@ -295,7 +295,30 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number,
     }
   }
   if (gift) putQuickGift(g, quickGiftSpot(frame.paradeColumns).x, gift.id, gift.canAfford)
-  return toSvg(g, DESKTOP_MARKUP_PIXEL, palette)
+  return toSvg(g, DESKTOP_MARKUP_PIXEL, palette, fit)
+}
+
+// テーマの背景（/parade theme）の絵の幅（ドット）と、地面の上の空の高さ。
+// 16:10 くらいの窓に合わせ、それより横長の窓では上を、縦長の窓では左右を切る
+export const BACKDROP_COLUMNS = 160
+const BACKDROP_HEADROOM = 86
+
+// テーマの背景：窓いっぱいの空と、下の端を歩くパレード。さわれない（押した操作は上の会話に届く）ので、なでるのは帯で
+export function backdropSvg(s: BandState & { character: Character }) {
+  const calendar = calendarOfState(s)
+  const scene: ViewProps = {
+    columns: BACKDROP_COLUMNS,
+    mood: s.mood.kind,
+    tick: s.tick.n,
+    friends: s.friends,
+    character: s.character,
+    look: lookOf(s.game, s.tick.at, s.holding, calendar?.holiday ?? null),
+    palette: PALETTES[timeOfDay(s.hour)],
+    calendar,
+    weather: s.weather ?? null,
+  }
+  const frame: Frame = { isWide: false, columns: BACKDROP_COLUMNS, paradeColumns: BACKDROP_COLUMNS, headroom: BACKDROP_HEADROOM, wordsCells: 0 }
+  return desktopSvg(scene, frame, s.pets, s.tick.at, null, 'cover')
 }
 
 // 帯を描くのに使うもの。onPet は、絵が出せないほど狭いデスクトップの「なでる」ボタン。
@@ -307,6 +330,8 @@ export type BandInput = BandState & {
   maxRows: number
   character: Character
   isDebug: boolean
+  // テーマの背景にパレードを描いている間（/parade theme）。デスクトップの帯は絵を出さず、セリフと「なでる」ボタンだけにする
+  isCompact?: boolean
   onPet: () => void
   onGift: (id: TreatId) => void
 }
@@ -404,7 +429,8 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
     weather: input.weather ?? null,
   }
   // デスクトップの絵は px で描くので、行数の余裕は見ない
-  const canDraw = cols >= MIN_SCENE_CELLS && (isDesktop || (input.surface === 'terminal' && input.maxRows >= room))
+  const canDraw =
+    cols >= MIN_SCENE_CELLS && ((isDesktop && !input.isCompact) || (input.surface === 'terminal' && input.maxRows >= room))
 
   // 端末はなでなでできる Client を優先し、無い面では絵だけの Raster にする。
   // デスクトップは SVG の上に、同じ大きさの見えない手ざわり層（Client）を重ねる
