@@ -174,7 +174,7 @@ test('/parade theme で、アプリの背景にパレードを描く。帯はセ
   const back = await mountBackdrop($)
   const source = await svgOf(back)
   expect(source).toContain('width="100%"')
-  expect(source).toContain('preserveAspectRatio="xMidYMid slice"')
+  expect(source).toContain('preserveAspectRatio="xMidYMax slice"')
   // Svg の source は 131,072 文字まで
   expect(source.length).toBeLessThan(131_072)
   await back.unmount()
@@ -209,6 +209,29 @@ test('テーマの背景は、入れてあれば次のセッションの始め�
   await mine.unmount()
   const theirs = await mountBackdrop($, 'someone-else')
   expect(await theirs.find({ type: 'Svg' })).toBeUndefined()
+})
+
+test('テーマの背景は、コマや ♡ では描き直さず（チカチカしない）、場面が変わったときだけ描き直す', async ($, on) => {
+  themes(on)
+  const { clock } = boot(on, { store: veteran({}, { theme: true }) })
+  await startSession($, 'desktop')
+  const back = await mountBackdrop($)
+  const first = await svgOf(back)
+
+  // コマが進み、♡ が貯まっても、背景は同じ絵のまま
+  await clock.advance(3000)
+  expect(await svgOf(back)).toBe(first)
+
+  // 仕事を始めて仲間が来たら、1 秒のうちに描き直す
+  await $.turn.start({ text: 'しらべて', turnId: 't1' })
+  await spawnFriend($)
+  await clock.advance(1000)
+  const working = await svgOf(back)
+  expect(working).not.toBe(first)
+  // 仕事中に行進しても、ツールを使っても、同じ絵のまま
+  await $.tool.call({ tool: 'Bash', command: 'ls' }).catch(() => undefined)
+  await clock.advance(3000)
+  expect(await svgOf(back)).toBe(working)
 })
 
 test('時間帯で空とあいさつが変わる', async ($, on) => {

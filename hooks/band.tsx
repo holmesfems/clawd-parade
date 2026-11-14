@@ -3,7 +3,7 @@
 
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, TreatId, Weather, Work } from '../types'
+import type { BackdropScene, Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, TreatId, Weather, Work } from '../types'
 import { ACHIEVEMENTS, HOOK_FRAME_MS, affectionsOf, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf, treatOf } from './game'
 import type { ViewProps } from './parade-view'
 import { QUICK_GIFT_DOTS, putHeart, putQuickGift, quickGiftSpot } from './decor'
@@ -302,28 +302,46 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number,
 }
 
 // テーマの背景（/parade theme）の絵の幅（ドット）と、地面の上の空の高さ。
-// 16:10 くらいの窓に合わせ、それより横長の窓では上下を、縦長の窓では左右を切る。
+// 絵は 1.1:1 とほぼ正方形にし、下の端にそろえて窓いっぱいに広げる。たいていの窓は絵より横長なので、
+// 切れるのは上の空だけで、みんなは左右に切れない（もっと縦長の窓だけ、左右を少し切る）。
 // 窓の下の端には入力欄が重なるので、地面の下に土を足して、パレードを下から 1/4 くらいの高さに置く
-export const BACKDROP_COLUMNS = 160
+export const BACKDROP_COLUMNS = 110
 const BACKDROP_HEADROOM = 62
 const BACKDROP_FOOT = 24
 
-// テーマの背景：窓いっぱいの空と、下の端を歩くパレード。さわれない（押した操作は上の会話に届く）ので、なでるのは帯で
-export function backdropSvg(s: BandState & { character: Character }) {
+// 帯の値から、背景に描く場面を取り出す。コマ・なでた・♡ の数・ツールの名前は入れないので、
+// 同じ場面なら同じ値になる（register.tsx は、変わったときだけ背景を描き直してもらう）
+export function backdropSceneOf(s: BandState & { character: Character; date: { month: number; day: number }; weather: Weather }, now: number): BackdropScene {
   const calendar = calendarOfState(s)
+  return {
+    hour: s.hour,
+    date: s.date,
+    weather: s.weather,
+    mood: s.mood.kind,
+    friends: s.friends.map(f => ({ id: f.id, type: f.type, label: '', tool: null, doneAt: f.doneAt === null ? null : 0 })),
+    character: s.character,
+    look: { ...lookOf(s.game, now, s.holding, calendar?.holiday ?? null), fever: false },
+  }
+}
+
+// テーマの背景：窓いっぱいの空と、パレード。止まった 1 枚の絵（毎コマ描き直すと、デスクトップではチカチカする）。
+// さわれない（押した操作は上の会話に届く）ので、なでるのは帯で
+export function backdropSvg(s: BackdropScene) {
+  const calendar = calendarOf(s.date.month, s.date.day)
   const scene: ViewProps = {
     columns: BACKDROP_COLUMNS,
-    mood: s.mood.kind,
-    tick: s.tick.n,
+    mood: s.mood,
+    tick: 0,
     friends: s.friends,
     character: s.character,
-    look: lookOf(s.game, s.tick.at, s.holding, calendar?.holiday ?? null),
+    look: s.look,
     palette: PALETTES[timeOfDay(s.hour)],
     calendar,
-    weather: s.weather ?? null,
+    weather: s.weather,
   }
   const frame: Frame = { isWide: false, columns: BACKDROP_COLUMNS, paradeColumns: BACKDROP_COLUMNS, headroom: BACKDROP_HEADROOM, wordsCells: 0 }
-  return desktopSvg(scene, frame, s.pets, s.tick.at, null, 'cover', BACKDROP_FOOT)
+  const still: Pets = { total: 0, at: 0, from: 0, kind: 'pet', hand: null, friend: null }
+  return desktopSvg(scene, frame, still, 0, null, 'cover', BACKDROP_FOOT)
 }
 
 // 帯を描くのに使うもの。onPet は、絵が出せないほど狭いデスクトップの「なでる」ボタン。

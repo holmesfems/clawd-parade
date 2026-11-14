@@ -3,8 +3,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, DiaryKind, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
-import { backdropSvg, bandView } from './band'
+import type { BackdropScene, Character, DiaryKind, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
+import { backdropSceneOf, backdropSvg, bandView } from './band'
 import { dayOf, record, tidyDiary } from './diary'
 import type { Deal, Situation } from './game'
 import {
@@ -86,6 +86,8 @@ const synced = atom({ plugin: 'clawd-parade', key: 'synced' } as const, { game: 
 const holding = atom({ plugin: 'clawd-parade', key: 'holding' } as const, null as Holding)
 // /parade theme：アプリの背景（テーマ）にパレードを描く
 const backdrop = atom({ plugin: 'clawd-parade', key: 'backdrop' } as const, false)
+// 背景に描く場面。変わったときだけ書く（背景はこれだけを読むので、毎コマは描き直さない）
+const backdropScene = atom({ plugin: 'clawd-parade', key: 'backdropScene' } as const, null as BackdropScene | null)
 
 const PETS_KEY = 'pets'
 const GAME_KEY = 'game'
@@ -272,6 +274,14 @@ async function sceneState($: EngineInterface) {
   return { hour, date, weather, mood: m, work: w, friends: list, pets: p, game: g, holding: held, tick: t, character: who }
 }
 
+// 背景を出していれば、場面が変わったときだけ書く（毎コマ描き直すと、デスクトップではチカチカする）
+async function refreshBackdrop($: EngineInterface) {
+  if (!(await read($, backdrop))) return
+  const fresh = backdropSceneOf(await sceneState($), await $.clock.now())
+  const old = await read($, backdropScene)
+  if (old === null || JSON.stringify(old) !== JSON.stringify(fresh)) await update($, backdropScene, () => fresh)
+}
+
 let timer: { cancel: () => void } | undefined
 let beat = 0
 let isStepping = false
@@ -290,6 +300,9 @@ async function step($: EngineInterface) {
       read($, holding),
     ])
     const now = await $.clock.now()
+
+    // 背景の場面は 1 秒ごとに見る
+    if (beat % ACCRUE_EVERY === 0) await refreshBackdrop($)
 
     if (beat % ACCRUE_EVERY === 0 && g.passiveAt > 0) {
       const at = situationOf(w, list)
@@ -343,6 +356,7 @@ export const register: Register = on => {
     // テーマは --resume で戻らず、読み込み直しでも消えるので、入れていればセッションの始めに毎回描いてもらう
     if ((await $.store.get(THEME_KEY)) === true) {
       await update($, backdrop, () => true)
+      await refreshBackdrop($)
       await setTheme($)
     }
     timer?.cancel()
@@ -374,6 +388,7 @@ export const register: Register = on => {
 
         return { text: '背景のパレードをしまったよ（/parade theme でまた出せる）' }
       }
+      await refreshBackdrop($)
       const set = await setTheme($)
 
       return {
@@ -558,10 +573,12 @@ export const register: Register = on => {
     if (e.props.plugin !== 'clawd-parade' || e.props.scene !== BACKDROP_ID || (await read($, isHidden))) return next(e)
     const ui = $.ui.resolve(e)
     if (!('Svg' in ui)) return next(e)
-    const state = await sceneState($)
-    const svg = backdropSvg(state)
+    // 場面だけを読む（コマや ♡ の数では描き直さない）
+    const scene = await read($, backdropScene)
+    if (scene === null) return next(e)
+    const svg = backdropSvg(scene)
 
-    return <ui.Svg source={svg.source} alt={`${state.character === 'clawd' ? 'Clawd' : 'ねこ'}のパレードの背景`} />
+    return <ui.Svg source={svg.source} alt={`${scene.character === 'clawd' ? 'Clawd' : 'ねこ'}のパレードの背景`} />
   })
 
   // なでなでショップ（/parade shop で開くパネル）

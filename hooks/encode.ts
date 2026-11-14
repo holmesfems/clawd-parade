@@ -48,7 +48,7 @@ function base64(bytes: Uint8Array): string {
 // ドット絵は 1 ピクセル = 1 マスの SVG にして、夜空の窓に入れて描く
 
 // palette は drawScene に渡したものと同じにする（背景の空の色）。
-// fit が 'cover' なら、窓いっぱいに広げる（はみ出たぶんは真ん中を残して切る。テーマの背景）
+// fit が 'cover' なら、窓いっぱいに広げる（下の端にそろえ、はみ出たぶんは上と左右を切る。テーマの背景）
 export function toSvg(g: Grid, pixel: number, palette: Palette, fit: 'cover' | null = null): { source: string; width: number; height: number } {
   const w = g[0]?.length ?? 0
   const h = g.length
@@ -71,7 +71,7 @@ export function toSvg(g: Grid, pixel: number, palette: Palette, fit: 'cover' | n
   const width = w * pixel
   const height = h * pixel
   const size =
-    fit === 'cover' ? 'width="100%" height="100%" preserveAspectRatio="xMidYMid slice"' : `width="${width}" height="${height}"`
+    fit === 'cover' ? 'width="100%" height="100%" preserveAspectRatio="xMidYMax slice"' : `width="${width}" height="${height}"`
   const corner = fit === 'cover' ? '' : ' rx="1.5"'
   const source =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" ${size} shape-rendering="crispEdges">` +
