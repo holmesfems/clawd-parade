@@ -6,7 +6,7 @@
 // なので、絵を決めるものは全部「場面の名前」（sceneName）に入れ、背景を描くフックは名前だけから SVG を作る（roomSvg）。
 // 動きは SVG の中の CSS でずっと動かし、名前が変わったときだけ描き直してもらう。
 
-import type { Character, Hat, MoodKind, RoomActivity, RoomHeld, RoomItemId, Weather } from '../types'
+import type { Character, Hat, MoodKind, RoomActivity, RoomCrew, RoomHeld, RoomItemId, Weather } from '../types'
 import { drawHat } from './decor'
 import { pathsOf } from './encode'
 import { blit, dot, hash, put } from './grid'
@@ -100,6 +100,23 @@ export function holdActivity(prev: Held | null, next: Activity, now: number): He
   return prev
 }
 
+// 来た仲間は、庭の道を歩いておうちに入る。歩いているあいだ（WALK_MS）は「歩いている場面」、入ったら「中ではねる場面」に変える
+export const WALK_MS = 9_000
+// 来た仲間は、すぐ用事が終わっても、おうちに入ってひと息つくまではいる（歩いている途中で消えない）
+export const STAY_MS = WALK_MS + 6_000
+
+export function crewOf(prev: RoomCrew, count: number, now: number): RoomCrew {
+  const n = Math.max(0, Math.min(3, count))
+  // 歩きおわった仲間は、中に入る
+  const walking = now - prev.since >= WALK_MS ? 0 : prev.arriving
+  if (n > prev.count) return { count: n, arriving: Math.min(n, walking + n - prev.count), since: now }
+  // 帰るのは、最後に仲間が来てから STAY_MS たってから
+  const staying = now - prev.since < STAY_MS ? prev.count : n
+  const arriving = Math.min(walking, staying)
+  if (staying !== n) return arriving === prev.arriving ? prev : { count: staying, arriving, since: prev.since }
+  return n === prev.count && arriving === prev.arriving ? prev : { count: n, arriving, since: prev.since }
+}
+
 // ---- 場面の名前 --------------------------------------------------------
 
 // ショップで買える、おへやのもの（きせかえの品として売る。出す・しまうができる）
@@ -122,6 +139,8 @@ export type RoomScene = {
   activity: Activity
   // 来ている仲間（3 匹まで描く）
   friends: number
+  // そのうち、庭の道を歩いて来ているところの数（残りは、おへやの床ではねる）
+  arriving: number
   time: TimeOfDay
   weather: Weather
   season: Season
@@ -167,7 +186,7 @@ export function sceneName(s: RoomScene): string {
   const sky = SKY_FLAGS.reduce<number>((n, key, i) => (s.sky[key] ? n | (1 << (i + 2)) : n), s.sky.stars)
   return [
     'r1',
-    `${ACT_CODES[s.activity]}${Math.max(0, Math.min(3, s.friends))}`,
+    `${ACT_CODES[s.activity]}${Math.max(0, Math.min(3, s.friends))}${s.arriving > 0 ? Math.min(3, s.arriving) : ''}`,
     `${TIME_CODES[s.time]}${WEATHER_CODES[s.weather]}${SEASON_CODES[s.season]}${HOLIDAY_CODES[s.holiday ?? 'none']}`,
     `${s.character === 'clawd' ? 'c' : 'n'}${HAT_CODES[s.hat ?? 'none']}`,
     items.toString(36),
@@ -178,9 +197,9 @@ export function sceneName(s: RoomScene): string {
 
 // 名前から場面にもどす。読めない名前は null
 export function parseScene(name: string): RoomScene | null {
-  const m = /^r1-([a-z]{2})([0-3])-([a-z])([a-z])([a-z])([a-z])-([cn])([a-z])-([0-9a-z]+)-([0-9a-z]+)-([RL])$/.exec(name)
+  const m = /^r1-([a-z]{2})([0-3])([1-3])?-([a-z])([a-z])([a-z])([a-z])-([cn])([a-z])-([0-9a-z]+)-([0-9a-z]+)-([RL])$/.exec(name)
   if (!m) return null
-  const [, act, friends, time, weather, season, holiday, char, hat, items, sky, side] = m
+  const [, act, friends, arriving, time, weather, season, holiday, char, hat, items, sky, side] = m
   const activity = ACT_OF[act!]
   const t = TIME_OF[time!]
   const w = WEATHER_OF[weather!]
@@ -193,6 +212,7 @@ export function parseScene(name: string): RoomScene | null {
   return {
     activity,
     friends: Number(friends),
+    arriving: Math.min(Number(friends), Number(arriving ?? 0)),
     time: t,
     weather: w,
     season: se,
@@ -282,7 +302,10 @@ type Pose = {
 }
 
 const DESK_X = 51
-const DESK_TOP = 27
+// 机を、はじめの絵より何ドット低くしたか。机・モニター・キーボード・机の上のもの・座る Clawd が、この分だけ下がる
+// （高い机だと、考えごとの「…」やぼうしが、かべの本棚に重なる）
+const DESK_DROP = 6
+const DESK_TOP = 27 + DESK_DROP
 
 function poseOf(a: Activity): Pose {
   switch (a) {
@@ -310,13 +333,13 @@ function poseOf(a: Activity): Pose {
 }
 
 // Clawd（ねこ）のスプライト。座っているときは足を描かない
-function hero(s: RoomScene, pose: Pose, eyes: Pose['eyes'], wave: 0 | 1 | null = null): Sprite {
+function hero(s: RoomScene, pose: Pose, eyes: Pose['eyes']): Sprite {
   if (s.character === 'clawd') {
-    const sp = clawd(pose.mood, eyes, 0, 0, 0, wave)
+    const sp = clawd(pose.mood, eyes, 0, 0)
     return pose.isSitting ? cropped(sp, 8) : sp
   }
   const mouth = pose.mood === 'done' ? 'smile' : pose.mood === 'error' || pose.mood === 'aborted' ? 'frown' : pose.mood === 'question' ? 'open' : 'smile'
-  const sp = leader(eyes, mouth, 0, null, wave)
+  const sp = leader(eyes, mouth, 0, null)
   return pose.isSitting ? cropped(sp, sp.h - 2) : sp
 }
 
@@ -374,9 +397,9 @@ export function roomSvg(s: RoomScene): string {
 
   // 机の上のモニター
   const monitor = blank()
-  rect(monitor, 36, 23, 15, 12, METAL)
-  rect(monitor, 37, 24, 13, 10, SCREEN)
-  rect(monitor, 42, 35, 3, 1, METAL)
+  rect(monitor, 36, 23 + DESK_DROP, 15, 12, METAL)
+  rect(monitor, 37, 24 + DESK_DROP, 13, 10, SCREEN)
+  rect(monitor, 42, 35 + DESK_DROP, 3, 1, METAL)
   add('', monitor)
   screen(s.activity, add)
 
@@ -384,6 +407,8 @@ export function roomSvg(s: RoomScene): string {
   const hx = pose.x
   const hy = pose.y
   const heroLayer = blank()
+  // おわった！も、手は下ろしたふつうの立ち姿（うれしそうな目で、はやくはねる）。手を上げる・ふるのは試したがやめた：
+  // 体がはねるのと別に手をふると動きがちぐはぐに見え、上げたままだと手の形が不自然に見える
   const body = hero(s, pose, pose.eyes)
   blit(heroLayer, body, hx, hy)
   if (s.hat) drawHat(heroLayer, s.hat, s.character === 'clawd', hx, hy)
@@ -393,29 +418,23 @@ export function roomSvg(s: RoomScene): string {
     blit(blinkLayer, diff(body, hero(s, pose, 'blink')), hx, hy)
     heroLayers.push({ cls: 'blink', g: blinkLayer })
   }
-  if (s.activity === 'done') {
-    // ばんざい：手を上げた 2 コマをかわりばんこに
-    const up0 = blank()
-    const up1 = blank()
-    blit(up0, diff(body, hero(s, pose, pose.eyes, 0)), hx, hy)
-    blit(up1, diff(body, hero(s, pose, pose.eyes, 1)), hx, hy)
-    heroLayers.push({ cls: 'fa', g: up0 }, { cls: 'fb', g: up1 })
-  }
   if (s.activity === 'wait') heroLayers.push({ cls: '', g: sign(hx, hy) })
   if (s.activity === 'research') heroLayers.push(...book(hx, hy))
-  layers.push({ cls: `hero ${pose.motion}`, g: blank(), nested: heroLayers })
+  // 座っているときは机・ソファのうしろ、立っているときは家具の前（床の上）に描く
+  const heroGroup: Layer = { cls: `hero ${pose.motion}`, g: blank(), nested: heroLayers }
+  if (pose.isSitting) layers.push(heroGroup)
 
-  // 机（Clawd の前）
+  // 机（座っている Clawd の前）
   const desk = blank()
-  rect(desk, 34, 36, 38, 2, WOOD_L)
-  rect(desk, 34, 37, 38, 1, WOOD)
-  rect(desk, 35, 38, 2, FLOOR - 38, WOOD_D)
-  rect(desk, 69, 38, 2, FLOOR - 38, WOOD_D)
-  rect(desk, 58, 38, 11, 8, WOOD)
-  rect(desk, 62, 41, 3, 1, WOOD_L)
+  rect(desk, 34, 36 + DESK_DROP, 38, 2, WOOD_L)
+  rect(desk, 34, 37 + DESK_DROP, 38, 1, WOOD)
+  rect(desk, 35, 38 + DESK_DROP, 2, FLOOR - 38 - DESK_DROP, WOOD_D)
+  rect(desk, 69, 38 + DESK_DROP, 2, FLOOR - 38 - DESK_DROP, WOOD_D)
+  rect(desk, 58, 38 + DESK_DROP, 11, 8, WOOD)
+  rect(desk, 62, 41 + DESK_DROP, 3, 1, WOOD_L)
   // キーボード
-  rect(desk, 52, 35, 15, 1, 0xcfd0db)
-  for (let x = 53; x < 66; x += 2) dot(desk, x, 35, 0x9a9cad)
+  rect(desk, 52, 35 + DESK_DROP, 15, 1, 0xcfd0db)
+  for (let x = 53; x < 66; x += 2) dot(desk, x, 35 + DESK_DROP, 0x9a9cad)
   add('', desk)
   if (s.activity === 'write') keys(add)
 
@@ -431,6 +450,9 @@ export function roomSvg(s: RoomScene): string {
 
   // しきもの
   if (s.items.includes('rug')) add('', rug())
+
+  // 立っている Clawd（机・ソファ・しきものの前）
+  if (!pose.isSitting) layers.push(heroGroup)
 
   // しごとの小物と動き
   activityProps(s, pose, add)
@@ -460,68 +482,11 @@ function drawWindowView(back: Grid, s: RoomScene, add: (cls: string, g: Grid, ex
       dot(i % 2 ? twinkle : still, sx, sy, i % 3 === 0 ? 0xfff3c4 : 0xc9cdf5)
     }
   }
-  // 太陽・月
-  if (night) {
-    const full = s.holiday === 'tsukimi'
-    const mx = 21
-    const my = 7
-    if (full) rect(back, mx - 1, my - 1, 5, 5, 0xfff3c4)
-    else {
-      rect(back, mx, my, 3, 3, 0xfff3c4)
-      dot(back, mx, my, skyOf(s))
-      dot(back, mx + 2, my + 1, 0xe8dca8)
-    }
-    if (s.sky.moonTrip) {
-      // 月へむかうロケット
-      const rocket = blank()
-      rect(rocket, 17, 11, 1, 3, C.white)
-      dot(rocket, 17, 10, 0xff6b6b)
-      dot(rocket, 16, 13, 0xff6b6b)
-      dot(rocket, 18, 13, 0xff6b6b)
-      dot(rocket, 17, 14, 0xffd166)
-      add('float', rocket)
-    }
-  } else if (s.weather !== 'rain') {
-    const sun = t === 'day' ? { sx: 21, sy: 7, c: 0xfff1a8 } : t === 'morning' ? { sx: 8, sy: 17, c: 0xffd27a } : { sx: 8, sy: 16, c: 0xff9a6b }
-    rect(back, sun.sx, sun.sy, 3, 3, s.weather === 'clear' ? sun.c : mix(sun.c, skyOf(s), 0.5))
-  }
+  // 太陽・月は、窓の中には描かない（外の空に 1 つだけ。gardenLayers）
   add('', still)
   add('tw', twinkle)
 
-  // 虹（バグのない世界）。昼と朝の、晴れた空に
-  if (s.sky.noBugs && !night && s.weather === 'clear') {
-    const bow = blank()
-    const colors = [0xff6b6b, 0xffb347, 0xffe066, 0x7ee081, 0x6ec6ff, 0xb99cff]
-    colors.forEach((c, i) => {
-      const r = 9 - i
-      for (let a = 0; a <= 32; a++) {
-        const ang = Math.PI * (a / 32)
-        dot(bow, Math.round(16 - Math.cos(ang) * r), Math.round(22 - Math.sin(ang) * r), c)
-      }
-    })
-    add('', bow)
-  }
-
-  // オーロラ（夜）
-  if (s.sky.aurora && night) {
-    const au = blank()
-    for (let dx = 0; dx < w; dx++) {
-      const wave = Math.round(Math.sin(dx / 3) * 1.5)
-      dot(au, x + dx, y + 3 + wave, 0x7ef2c0)
-      dot(au, x + dx, y + 4 + wave, 0x4fd1a5)
-      if (dx % 3 === 0) dot(au, x + dx, y + 5 + wave, 0x6b8cff)
-    }
-    add('au', au, { clip })
-  }
-
-  // 流れ星（夜。ときどき）
-  if (s.sky.shootingStars && night && s.weather === 'clear') {
-    const st = blank()
-    dot(st, 24, 6, C.white)
-    dot(st, 25, 5, 0xfff3c4)
-    dot(st, 26, 5, 0xc9cdf5)
-    add('shoot', st, { clip })
-  }
+  // 虹・オーロラ・流れ星は、窓の中には描かない（外の大きな空に出す。skySvg）
 
   // 雲：窓の幅ずつずらして 2 つ描き、窓の幅だけ流してくり返す
   const clouds = s.weather === 'clear' ? 1 : 3
@@ -660,11 +625,11 @@ function holidayProps(s: RoomScene, add: (cls: string, g: Grid) => void) {
   switch (s.holiday) {
     case 'christmas': {
       // 机の右はしに小さなツリー
-      for (let r = 0; r < 6; r++) rect(g, 69 - Math.floor(r / 2), 29 + r, 1 + Math.floor(r / 2) * 2, 1, 0x3f9b5a)
-      dot(g, 69, 28, 0xffd166)
-      dot(g, 68, 32, 0xff6b6b)
-      dot(g, 70, 33, 0x6ec6ff)
-      rect(g, 69, 35, 1, 1, WOOD_D)
+      for (let r = 0; r < 6; r++) rect(g, 69 - Math.floor(r / 2), 29 + DESK_DROP + r, 1 + Math.floor(r / 2) * 2, 1, 0x3f9b5a)
+      dot(g, 69, 28 + DESK_DROP, 0xffd166)
+      dot(g, 68, 32 + DESK_DROP, 0xff6b6b)
+      dot(g, 70, 33 + DESK_DROP, 0x6ec6ff)
+      rect(g, 69, 35 + DESK_DROP, 1, 1, WOOD_D)
       break
     }
     case 'halloween':
@@ -674,9 +639,9 @@ function holidayProps(s: RoomScene, add: (cls: string, g: Grid) => void) {
       dot(g, 20, 22, 0x3a2010)
       break
     case 'newYear':
-      rect(g, 66, 33, 5, 2, 0xf5f0e6)
-      rect(g, 67, 31, 3, 2, 0xf5f0e6)
-      dot(g, 68, 30, 0xff8a3d)
+      rect(g, 66, 33 + DESK_DROP, 5, 2, 0xf5f0e6)
+      rect(g, 67, 31 + DESK_DROP, 3, 2, 0xf5f0e6)
+      dot(g, 68, 30 + DESK_DROP, 0xff8a3d)
       break
     case 'tanabata':
       rect(g, 1, 4, 1, 21, 0x6fae6a)
@@ -704,24 +669,24 @@ function screen(a: Activity, add: (cls: string, g: Grid, extra?: Partial<Layer>)
     for (let i = 0; i < 6; i++) {
       const line = blank()
       const indent = [0, 2, 2, 4, 2, 0][i]!
-      rect(line, 38 + indent, 25 + i, 3 + Math.floor(hash(i + 4) * 7), 1, CODE[i % CODE.length]!)
+      rect(line, 38 + indent, 25 + DESK_DROP + i, 3 + Math.floor(hash(i + 4) * 7), 1, CODE[i % CODE.length]!)
       add('ln', line, { style: `animation-delay:${i * 0.45}s` })
     }
   } else if (a === 'run') {
     // 進むバーと、回る歯車
     const bar = blank()
-    rect(bar, 39, 30, 9, 1, 0x7ee0a1)
+    rect(bar, 39, 30 + DESK_DROP, 9, 1, 0x7ee0a1)
     add('prog', bar)
     const frameG = blank()
-    rect(frameG, 38, 29, 11, 1, 0x3c5560)
-    rect(frameG, 38, 31, 11, 1, 0x3c5560)
-    put(frameG, 'tiny', 39, 26, 0x8ab4ff)
-    rect(frameG, 39, 26, 6, 1, 0x8ab4ff)
+    rect(frameG, 38, 29 + DESK_DROP, 11, 1, 0x3c5560)
+    rect(frameG, 38, 31 + DESK_DROP, 11, 1, 0x3c5560)
+    put(frameG, 'tiny', 39, 26 + DESK_DROP, 0x8ab4ff)
+    rect(frameG, 39, 26 + DESK_DROP, 6, 1, 0x8ab4ff)
     add('', frameG)
   } else {
     // ふだんは、ゆっくり光るカーソルだけ
     const cur = blank()
-    rect(cur, 39, 26, 1, 2, 0x7ee0a1)
+    rect(cur, 39, 26 + DESK_DROP, 1, 2, 0x7ee0a1)
     add('tw', cur)
   }
 }
@@ -729,8 +694,8 @@ function screen(a: Activity, add: (cls: string, g: Grid, extra?: Partial<Layer>)
 function keys(add: (cls: string, g: Grid) => void) {
   const a = blank()
   const b = blank()
-  for (let x = 53; x < 66; x += 4) dot(a, x, 35, C.white)
-  for (let x = 55; x < 66; x += 4) dot(b, x, 35, C.white)
+  for (let x = 53; x < 66; x += 4) dot(a, x, 35 + DESK_DROP, C.white)
+  for (let x = 55; x < 66; x += 4) dot(b, x, 35 + DESK_DROP, C.white)
   add('fa quick', a)
   add('fb quick', b)
 }
@@ -784,7 +749,7 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
       // 考えごとの「…」が、ひとつずつ光る
       ;[0, 1, 2].forEach(i => {
         const d = blank()
-        rect(d, cx - 2 + i * 3, top - 4, 2, 2, C.white)
+        rect(d, cx - 2 + i * 3, top - (s.hat ? 9 : 4), 2, 2, C.white)
         add('ln', d, { style: `animation-delay:${i * 0.5}s;animation-duration:2s` })
       })
       break
@@ -792,8 +757,8 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
     case 'run': {
       // 机のよこで歯車が回る
       const gear = blank()
-      for (const [dx, dy] of [[0, -2], [2, 0], [0, 2], [-2, 0], [-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [1, 0], [0, 1], [-1, 0]] as const) dot(gear, 46 + dx, 20 + dy, 0xb0b6c8)
-      dot(gear, 46, 20, METAL)
+      for (const [dx, dy] of [[0, -2], [2, 0], [0, 2], [-2, 0], [-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [1, 0], [0, 1], [-1, 0]] as const) dot(gear, 46 + dx, 20 + DESK_DROP + dy, 0xb0b6c8)
+      dot(gear, 46, 20 + DESK_DROP, METAL)
       add('spin', gear)
       break
     }
@@ -845,8 +810,9 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
 }
 
 function friends(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, extra?: Partial<Layer>) => void) {
-  const n = Math.min(3, s.friends)
-  if (n === 0) return
+  // 歩いて来ているところの仲間は、まだ中にいない
+  const n = Math.min(3, s.friends) - s.arriving
+  if (n <= 0) return
   // 床で、Clawd とバグにかさならない場所
   const taken = [...(!pose.isSitting ? [{ from: pose.x - 2, to: pose.x + 20 }] : []), ...(s.activity === 'fight' ? [{ from: 22, to: 39 }] : [])]
   const slots = [37, 49, 61, 12, 24].filter(x => taken.every(t => x + 11 < t.from || x > t.to))
@@ -935,6 +901,18 @@ const STYLE = [
   '.tear{animation:tear 1.8s linear infinite}@keyframes tear{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(4px)}}',
   '.glow{animation:glow 3s ease-in-out infinite alternate}@keyframes glow{from{opacity:.35}to{opacity:.6}}',
   '.dim{opacity:.38}',
+  '.streak{opacity:0;animation:streak 9s linear infinite}',
+  '@keyframes streak{0%{opacity:0;transform:translate(0,0)}3%{opacity:1}12%{opacity:0;transform:translate(-260px,130px)}100%{opacity:0;transform:translate(-260px,130px)}}',
+  // 来た仲間：窓の幅の枠ごと、窓の幅の 6 割だけ手前から入口まで歩き、入口で消える（vw は使わない。枠の幅の割合で動かす）
+  '.come{transform-box:fill-box;animation:come 7s linear both}.come.rev{animation-name:comer}',
+  '@keyframes come{0%{transform:translateX(-60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
+  '@keyframes comer{0%{transform:translateX(60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
+  '.sway.slow{animation-duration:7s}',
+  // 雲の動きに vw の単位は使わない：@keyframes に vw があると、アプリの背景では CSS のアニメーションが全部止まる（docs/backdrop-investigation.md）。
+  // かわりに、窓 2 つぶんの幅の枠（.cloud）を、自分の幅の半分（＝窓の幅）だけ動かす
+  '.cloud{transform-box:fill-box;animation:cloud 240s linear infinite}@keyframes cloud{to{transform:translateX(50%)}}',
+  '.pour{animation:pour .6s linear infinite}.flurry{animation:pour 7s linear infinite}@keyframes pour{to{transform:translateY(96px)}}',
+  '.smoke{animation:smoke 4s linear infinite}@keyframes smoke{0%{opacity:0;transform:translate(0,2px)}30%{opacity:1}100%{opacity:0;transform:translate(2px,-6px)}}',
   // 動きを減らす設定では、止まった絵にする（どのしごとも、止まった絵で分かる）
   '@media (prefers-reduced-motion: reduce){*{animation:none!important}}',
 ].join('')
@@ -948,6 +926,251 @@ function layerSvg(l: Layer): string {
   return l.clip ? `<g clip-path="url(#${l.clip})">${g}</g>` : g
 }
 
+// ---- おうちの外（空・地面・おうちの外形・庭） ----
+// 背景の全体は「外」。おへやは、かべを切って中が見えるおうちの中で、おうちは窓の端（パネルのうしろ）まで続く。
+// 空は窓いっぱい、地面は床の高さから下。庭（木・ポスト）は、おへやと反対側の、会話の列の外に置く
+
+// おうちの中の幅（ドット）。おへやの絵（72）から、窓の端まで届く長さ
+const HOUSE_W = 220
+const WALL_T = 3
+// 入口のたたき（ドット）。おへやの家具と入口のドアのあいだをあける
+const ENTRY = 14
+const ROOF = 0x8a4f48
+const ROOF_D = 0x6b3a36
+const STONE = 0x4a4652
+const DOOR = 0xb5524b
+
+const GRASS: Record<Season, number> = { spring: 0x5f9b57, summer: 0x4f8f4a, autumn: 0x8a7a45, winter: 0x6f7f6a }
+const SNOW_GROUND = 0xdfe7ee
+// 夜は、地面も木もおうちの外側も暗くする
+const SHADE: Record<TimeOfDay, number> = { morning: 0.1, day: 0, evening: 0.25, night: 0.5, lateNight: 0.6 }
+const shade = (c: number, t: TimeOfDay) => mix(c, 0x0d0b1a, SHADE[t])
+
+// 空の上のほうの色（下のほうは skyOf。上にいくほど少し暗い）
+const skyTop = (s: RoomScene) => mix(skyOf(s), 0x0d0b1a, 0.35)
+
+const box = (x: number, y: number, w: number, h: number, fill: number, extra = '') =>
+  `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${hex(fill)}"${extra}/>`
+
+// おうちの外形。おへやの絵と同じ座標（ドット）で、絵のうしろに描く。右に置くときは右へ、左に置くときは左へ続く
+function houseSvg(s: RoomScene): string {
+  const t = s.time
+  const isRight = s.side === 'right'
+  // 中の左はし・中の幅と、外かべ（切り口）の左はし。入口のたたきのぶん、おへやの絵より外かべの側へ広い
+  const inX = isRight ? -ENTRY : W - HOUSE_W
+  const inW = HOUSE_W + ENTRY
+  const wallX = isRight ? inX - WALL_T : W + ENTRY
+  // 屋根：外かべの側が低く、おうちの奥へ上がっていく
+  const roof = Array.from({ length: 9 }, (_, i) =>
+    box(isRight ? wallX - 4 + i : inX - 2, -10 - i, inW + 9 - i, 1, shade(i % 3 === 2 ? ROOF_D : ROOF, t)),
+  ).join('')
+  const chimneyX = isRight ? 96 : -30
+  return (
+    // えんとつと、けむり
+    box(chimneyX, -27, 6, 12, shade(0x9a6a5c, t)) +
+    box(chimneyX - 1, -28, 8, 2, shade(0x6b4a3a, t)) +
+    `<g class="smoke">${box(chimneyX + 2, -32, 2, 2, 0xd8d4e0, ' opacity=".7"')}${box(chimneyX + 3, -36, 3, 2, 0xd8d4e0, ' opacity=".5"')}</g>` +
+    roof +
+    // 中のかべ・かべ紙・はり
+    box(inX, -9, inW, H + 9, WALL[t]) +
+    `<rect x="${inX}" y="-9" width="${inW}" height="${H + 9}" fill="url(#wp)"/>` +
+    box(inX, -10, inW, 2, WOOD_D) +
+    // 床の板と、土台
+    box(inX, H, inW, 2, FLOOR_COLOR) +
+    box(inX, H + 2, inW, 1, darken(FLOOR_COLOR, 0.7)) +
+    // 土台は石を 3 段だけ。その下は、外と同じ地面と道が見える
+    box(isRight ? wallX : inX, H + 3, inW + WALL_T, 3, shade(STONE, t)) +
+    box(isRight ? wallX : inX, H + 3, inW + WALL_T, 1, shade(mix(STONE, 0xffffff, 0.15), t)) +
+    // 入口のたたきの、くつぬぎマット
+    box(isRight ? inX + 2 : W + ENTRY - 10, H - 1, 8, 1, 0x7a8f6a) +
+    // 外かべ（切り口）と、入口のドア・ふみ石・げんかんのあかり
+    box(wallX, -10, WALL_T, 46, shade(0xd8cfbf, t)) +
+    box(wallX, 36, WALL_T, H - 36, shade(DOOR, t)) +
+    box(isRight ? wallX : wallX + WALL_T - 1, 45, 1, 1, 0xffd166) +
+    box(isRight ? wallX - 7 : wallX + WALL_T, H - 1, 7, 1, shade(0x9a96a6, t)) +
+    `<g class="tw">${box(isRight ? wallX - 2 : wallX + WALL_T, 30, 2, 2, 0xffd98a)}</g>`
+  )
+}
+
+// 庭の絵は空にもはみ出す（太陽・月）ので、上に GARDEN_UP 行ぶん広いマス目に描いて、その分だけ上へずらして置く
+const GARDEN_UP = 60
+
+// 庭：太陽や月・木・ポスト・季節の草花。おへやと同じ大きさのドットで、おへやと反対側に置く
+function gardenLayers(s: RoomScene): Layer[] {
+  const t = s.time
+  const isSnowy = s.weather === 'snow'
+  const out: Layer[] = []
+  const grid = (): Grid => Array.from({ length: H + GARDEN_UP }, () => Array<Px>(W).fill(null))
+  const fill = (g: Grid, x: number, y: number, w: number, h: number, c: number) => rect(g, x, y + GARDEN_UP, w, h, c)
+
+  // 太陽・月
+  const sky = grid()
+  if (isNight(t)) {
+    fill(sky, 40, -52, 8, 8, 0xfff3c4)
+    if (s.holiday !== 'tsukimi') fill(sky, 40, -52, 3, 3, skyTop(s))
+    fill(sky, 45, -47, 1, 1, 0xe8dca8)
+    fill(sky, 43, -49, 1, 1, 0xe8dca8)
+    if (s.sky.moonTrip) {
+      // 月へむかうロケット
+      const rocket = grid()
+      fill(rocket, 31, -44, 1, 3, C.white)
+      fill(rocket, 31, -45, 1, 1, 0xff6b6b)
+      fill(rocket, 30, -42, 1, 1, 0xff6b6b)
+      fill(rocket, 32, -42, 1, 1, 0xff6b6b)
+      fill(rocket, 31, -41, 1, 1, 0xffd166)
+      out.push({ cls: 'float', g: rocket })
+    }
+  } else if (s.weather !== 'rain') {
+    const c = t === 'day' ? 0xfff1a8 : t === 'morning' ? 0xffd27a : 0xff9a6b
+    fill(sky, 38, t === 'day' ? -52 : -16, 9, 9, s.weather === 'clear' ? c : mix(c, skyOf(s), 0.5))
+  }
+  out.push({ cls: '', g: sky })
+
+  // 木（季節で葉の色が変わる。冬は枝だけ、雪の日は枝に雪がつもる）
+  const trunk = grid()
+  fill(trunk, 15, 30, 4, 24, shade(WOOD_D, t))
+  fill(trunk, 16, 30, 1, 24, shade(WOOD, t))
+  fill(trunk, 11, 26, 2, 6, shade(WOOD_D, t))
+  fill(trunk, 13, 30, 3, 2, shade(WOOD_D, t))
+  fill(trunk, 20, 24, 2, 8, shade(WOOD_D, t))
+  out.push({ cls: '', g: trunk })
+  const leafColors: Record<Season, number[]> = {
+    spring: [0xffb3d1, 0xff9ec7, 0xffc9de],
+    summer: [0x5fae5f, 0x4f9b57, 0x7ccf7c],
+    autumn: [0xe8894f, 0xd9a441, 0xc65a4f],
+    winter: [],
+  }
+  const leafPalette = isSnowy ? [0xf2f6fa, 0xdfe7ee] : leafColors[s.season]
+  const leaves = grid()
+  if (leafPalette.length > 0)
+    for (let dy = -13; dy <= 9; dy++)
+      for (let dx = -15; dx <= 15; dx++) {
+        if ((dx * dx) / 225 + (dy * dy) / 130 > 1) continue
+        const k = hash(dx * 31 + dy * 17 + 5)
+        if (k < (isSnowy ? 0.55 : 0.12)) continue
+        fill(leaves, 17 + dx, 18 + dy, 1, 1, shade(leafPalette[Math.floor(k * 97) % leafPalette.length]!, t))
+      }
+  out.push({ cls: 'sway slow', g: leaves })
+
+  // ポスト（赤い箱と、黄色い旗）
+  const post = grid()
+  fill(post, 53, 42, 2, 12, shade(WOOD_L, t))
+  fill(post, 49, 36, 10, 6, shade(0xc65a4f, t))
+  fill(post, 49, 35, 10, 1, shade(0xe07a6f, t))
+  fill(post, 51, 38, 5, 1, shade(0x3a2020, t))
+  fill(post, 59, 35, 1, 5, shade(0xcfd0db, t))
+  fill(post, 60, 35, 2, 2, 0xffd166)
+  if (isSnowy) fill(post, 49, 34, 10, 1, 0xf2f6fa)
+  out.push({ cls: '', g: post })
+
+  // 足もとの草花（春・夏）と落ち葉（秋）
+  const bits: Record<Season, number[]> = { spring: [0xff9ec7, 0xffe066, 0xffffff], summer: [0xffe066, 0x6ec6ff, 0xff8fab], autumn: [0xe8894f, 0xd9a441], winter: [] }
+  const low = grid()
+  const colors = isSnowy ? [] : bits[s.season]
+  for (let i = 0; i < 9 && colors.length > 0; i++) {
+    const fx = 2 + Math.floor(hash(i * 13 + 3) * 66)
+    // 木の根もとには置かない
+    if (fx >= 13 && fx <= 21) continue
+    fill(low, fx, 53, 1, 1, shade(colors[i % colors.length]!, t))
+    if (s.season !== 'autumn') fill(low, fx, 52, 1, 1, shade(0x4f9b57, t))
+  }
+  out.push({ cls: '', g: low })
+  return out
+}
+
+// 空いっぱいの星・雲・雨や雪。位置は、窓の大きさの割合で決める
+function skySvg(s: RoomScene): string {
+  const isClear = s.weather === 'clear'
+  const parts: string[] = []
+  const starCount = !isClear ? 0 : isNight(s.time) ? 46 + s.sky.stars * 20 : s.time === 'evening' || s.time === 'morning' ? 8 : 0
+  for (let i = 0; i < starCount; i++) {
+    const x = (hash(i * 7 + 11) * 100).toFixed(1)
+    const y = (hash(i * 13 + 29) * 66).toFixed(1)
+    const size = hash(i * 3 + 1) < 0.25 ? 4 : 3
+    const star = `<rect x="${x}%" y="${y}%" width="${size}" height="${size}" fill="${i % 3 === 0 ? '#fff3c4' : '#c9cdf5'}"/>`
+    parts.push(i % 2 ? `<g class="tw" style="animation-delay:${(-hash(i) * 5).toFixed(1)}s">${star}</g>` : star)
+  }
+  // 雲：同じ並びを、窓の幅だけ左にずらしてもう 1 つ描き、窓の幅だけ右へ流してくり返す。2 組を、ちがう速さで流す
+  const cloudColor = hex(isClear ? CLOUD[s.time] : mix(CLOUD[s.time], 0x6a6f80, 0.4))
+  const cloudCount = isClear ? 3 : 7
+  const cloudSets = ['', '']
+  for (let i = 0; i < cloudCount; i++) {
+    const x = (hash(i * 41 + 7) * 92).toFixed(1)
+    const y = (5 + hash(i * 17 + 9) * 34).toFixed(1)
+    const k = 6 + Math.floor(hash(i * 5 + 2) * 5)
+    const shape = `<rect x="0" y="${k}" width="${k * 9}" height="${k * 2}"/><rect x="${k * 2}" y="0" width="${k * 4}" height="${k}"/><rect x="${k * 5}" y="${k * 3}" width="${k * 3}" height="${k}"/>`
+    cloudSets[i % 2] += `<svg x="${x}%" y="${y}%" overflow="visible">${shape}</svg>`
+  }
+  cloudSets.forEach((set, i) => {
+    if (set === '') return
+    parts.push(
+      `<g class="cloud" fill="${cloudColor}" opacity="${isClear ? 0.75 : 0.9}" style="animation-duration:${i === 0 ? 260 : 380}s">` +
+        `<rect x="-100%" width="200%" height="1" fill="none"/>${set}<svg x="-100%" overflow="visible">${set}</svg></g>`,
+    )
+  })
+  // 夢のプレゼント：オーロラ（夜）・流れ星（晴れた夜）・虹（晴れた昼と朝。バグのない世界）
+  const isDark = isNight(s.time)
+  if (s.sky.aurora && isDark) {
+    // 空の上のほうを横切る、ゆらゆらした光の帯
+    let bands = ''
+    for (let i = 0; i < 40; i++) {
+      const y = 9 + Math.sin(i / 3) * 2.2 + Math.sin(i / 7) * 1.5
+      const x = (i * 2.5).toFixed(1)
+      bands += `<rect x="${x}%" y="${y.toFixed(1)}%" width="2.6%" height="10" fill="#7ef2c0"/><rect x="${x}%" y="${(y + 1).toFixed(1)}%" width="2.6%" height="16" fill="#4fd1a5" opacity=".7"/>`
+      if (i % 3 === 0) bands += `<rect x="${x}%" y="${(y + 2.6).toFixed(1)}%" width="2.6%" height="12" fill="#6b8cff" opacity=".6"/>`
+    }
+    parts.push(`<g class="au">${bands}</g>`)
+  }
+  if (s.sky.shootingStars && isDark && isClear) {
+    const streak = '<rect x="0" y="0" width="6" height="6" fill="#fff"/><rect x="6" y="-4" width="8" height="4" fill="#fff3c4"/><rect x="14" y="-8" width="10" height="4" fill="#c9cdf5" opacity=".7"/>'
+    parts.push(
+      `<svg x="24%" y="9%" overflow="visible"><g class="streak">${streak}</g></svg>` +
+        `<svg x="78%" y="16%" overflow="visible"><g class="streak" style="animation-delay:4.2s">${streak}</g></svg>`,
+    )
+  }
+  if (s.sky.noBugs && !isDark && isClear) {
+    // 庭の側の地平線にかかる虹。下半分は、あとから描く地面にかくれる
+    const colors = ['#ff6b6b', '#ffb347', '#ffe066', '#7ee081', '#6ec6ff', '#b99cff']
+    const rings = colors.map((c, i) => `<circle r="${300 - i * 12}" fill="none" stroke="${c}" stroke-width="12" opacity=".8"/>`).join('')
+    parts.push(`<svg x="${s.side === 'left' ? 72 : 28}%" y="${FLOOR_AT}%" overflow="visible">${rings}</svg>`)
+  }
+  // 雨・雪：小さなもようを空にしいて、もようの高さ（96px）だけ落としてくり返す
+  if (s.weather === 'rain' || s.weather === 'snow') {
+    const isRain = s.weather === 'rain'
+    parts.push(`<rect class="${isRain ? 'pour' : 'flurry'}" y="-96" width="100%" fill="url(#${isRain ? 'rn' : 'sn'})" style="height:calc(${FLOOR_AT}% + 96px)"/>`)
+  }
+  return parts.join('')
+}
+
+// 庭の道を歩いて来る仲間。道の上（px）を、窓の外から入口まで歩く。絵は 1 ドット 5px
+const WALK_DOT = 5
+function walkersSvg(s: RoomScene): string {
+  const settled = Math.min(3, s.friends) - s.arriving
+  const isRight = s.side === 'right'
+  // 入口のドアの外側（おへやの枠のはしから、たたきと外かべのぶん外）
+  const doorGap = (ENTRY + WALL_T) * WALK_DOT
+  let out = ''
+  for (let i = 0; i < s.arriving; i++) {
+    const coat = FRIEND_COATS[(settled + i) % FRIEND_COATS.length]!
+    const frames = [0, 1].map(step => {
+      const sp = s.character === 'clawd' ? miniClawd(coat, step, false) : kitten(coat, step, false)
+      const g: Grid = Array.from({ length: sp.h }, () => Array<Px>(sp.w).fill(null))
+      blit(g, sp, 0, 0)
+      return { w: sp.w, h: sp.h, paths: pathsOf(g) }
+    })
+    const { w, h } = frames[0]!
+    const width = w * WALK_DOT
+    // 右に置くときは右はしから、左に置くときは左はしから測る
+    const x = isRight ? -(ROOM_INSET.right + ROOM_BOX + doorGap + width + 4) : ROOM_INSET.left + ROOM_BOX + doorGap + 4
+    const sprite =
+      `<svg x="${x}" y="${62 - h * WALK_DOT}" width="${width}" height="${h * WALK_DOT}" viewBox="0 0 ${w} ${h}" overflow="visible">` +
+      `<g class="fa quick">${frames[0]!.paths}</g><g class="fb quick">${frames[1]!.paths}</g></svg>`
+    const anchored = isRight ? `<svg x="100%" width="1" overflow="visible">${sprite}</svg>` : sprite
+    out += `<g class="come${isRight ? '' : ' rev'}" style="animation-delay:${(i * 0.9).toFixed(1)}s"><rect width="100%" height="1" fill="none"/>${anchored}</g>`
+  }
+  return out === '' ? '' : `<svg y="${FLOOR_AT}%" overflow="visible">${out}</svg>`
+}
+
 // 床は窓の高さの 84%。おへやの枠は高さが窓の 40%、幅が 360px（絵はこの枠に収まる大きさ）。
 // 左右は、サイドバー（およそ 215px）・右のパネル（およそ 315px）の外になるよう、端から何 px 内側に置くか
 const FLOOR_AT = 84
@@ -956,42 +1179,53 @@ const ROOM_BOX = 360
 export const ROOM_INSET = { left: 230, right: 330 }
 
 function frameSvg(s: RoomScene, layers: Layer[]): string {
-  const wall = WALL[s.time]
+  const t = s.time
   const art = layers.map(layerSvg).join('')
   // 背景の枠は、左のサイドバーと右のパネルの下まで入った、アプリの窓まるごと（/parade theme ruler で測った）。
   // パネルの幅は窓の大きさによらず決まった px なので、おへやは端から決まった px だけ内側の、決まった幅の枠に置く。
-  // 右に置くときは、右はしを原点にした入れ子の svg の中に、左向きに置く。
+  // 右はしから測るときは、右はしを原点にした入れ子の svg の中に、左向きに置く。
   // 入れ子の svg に shape-rendering="crispEdges" は付けない：付けると、アプリの背景では CSS のアニメーションが全部止まる（docs/backdrop-investigation.md）
-  const roomBox = (x: number, align: string) =>
+  const dotBox = (x: number, align: string) =>
     `<svg x="${x}" y="${FLOOR_AT - ROOM_HEIGHT}%" width="${ROOM_BOX}" height="${ROOM_HEIGHT}%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="${align} meet" overflow="visible">`
-  const open =
-    s.side === 'left'
-      ? roomBox(ROOM_INSET.left, 'xMinYMax')
-      : `<svg x="100%" width="1" height="100%" overflow="visible">${roomBox(-(ROOM_INSET.right + ROOM_BOX), 'xMaxYMax')}`
-  const close = s.side === 'left' ? '</svg>' : '</svg></svg>'
+  const atLeft = (inner: string) => `${dotBox(ROOM_INSET.left, 'xMinYMax')}${inner}</svg>`
+  const atRight = (inner: string) =>
+    `<svg x="100%" width="1" height="100%" overflow="visible">${dotBox(-(ROOM_INSET.right + ROOM_BOX), 'xMaxYMax')}${inner}</svg></svg>`
   const lampGlow = s.items.includes('lamp')
     ? `<circle class="glow" cx="32" cy="29" r="15" fill="url(#lg)"/>`
     : ''
+  const room =
+    houseSvg(s) +
+    `<defs><clipPath id="win"><rect x="${SKY_BOX.x}" y="${SKY_BOX.y}" width="${SKY_BOX.w}" height="${SKY_BOX.h}"/></clipPath>` +
+    `<clipPath id="art"><rect width="${W}" height="${H}"/></clipPath></defs>` +
+    lampGlow +
+    art
+  // 庭は、おへやと反対側に置く
+  const garden = `<g transform="translate(0 ${-GARDEN_UP})">${gardenLayers(s).map(layerSvg).join('')}</g>`
+  const ground = shade(s.weather === 'snow' ? SNOW_GROUND : GRASS[s.season], t)
+  const path = shade(s.weather === 'snow' ? 0xc4ccd6 : 0xcdb98f, t)
+  const drop = (x: number, y: number, w: number, h: number, fill: string) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`
   const sleepy = s.activity === 'sleep' ? `<rect class="dim" width="100%" height="100%" fill="#05040a"/>` : ''
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">` +
     `<style>${STYLE}</style>` +
     `<defs>` +
-    `<pattern id="wp" width="28" height="28" patternUnits="userSpaceOnUse"><rect x="13" y="13" width="2" height="2" fill="${hex(mix(wall, 0xffffff, 0.06))}"/></pattern>` +
-    `<pattern id="fl" width="160" height="22" patternUnits="userSpaceOnUse"><rect width="160" height="1" fill="${hex(darken(FLOOR_COLOR, 0.8))}"/><rect x="90" width="1" height="22" fill="${hex(darken(FLOOR_COLOR, 0.85))}"/></pattern>` +
+    `<linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${hex(skyTop(s))}"/><stop offset=".84" stop-color="${hex(skyOf(s))}"/></linearGradient>` +
+    // かべ紙は、おへやのドットの大きさで数える（おうちの中だけに使う）
+    `<pattern id="wp" width="6" height="6" patternUnits="userSpaceOnUse"><rect x="3" y="3" width=".4" height=".4" fill="${hex(mix(WALL[t], 0xffffff, 0.06))}"/></pattern>` +
+    `<pattern id="rn" width="96" height="96" patternUnits="userSpaceOnUse">${drop(10, 6, 2, 10, '#9fc4ff')}${drop(58, 30, 2, 10, '#9fc4ff')}${drop(34, 62, 2, 10, '#9fc4ff')}${drop(82, 78, 2, 10, '#9fc4ff')}</pattern>` +
+    `<pattern id="sn" width="96" height="96" patternUnits="userSpaceOnUse">${drop(12, 10, 4, 4, '#fff')}${drop(60, 40, 3, 3, '#fff')}${drop(36, 70, 4, 4, '#fff')}${drop(84, 86, 3, 3, '#fff')}</pattern>` +
     `<radialGradient id="lg"><stop offset="0" stop-color="#ffd98a" stop-opacity=".9"/><stop offset="1" stop-color="#ffd98a" stop-opacity="0"/></radialGradient>` +
     `</defs>` +
-    `<rect width="100%" height="100%" fill="${hex(wall)}"/>` +
-    `<rect width="100%" height="100%" fill="url(#wp)"/>` +
-    `<rect y="${FLOOR_AT}%" width="100%" height="${100 - FLOOR_AT}%" fill="${hex(FLOOR_COLOR)}"/>` +
-    `<rect y="${FLOOR_AT}%" width="100%" height="${100 - FLOOR_AT}%" fill="url(#fl)"/>` +
-    `<rect y="${FLOOR_AT}%" width="100%" height="4" fill="${hex(darken(FLOOR_COLOR, 0.7))}"/>` +
-    open +
-    `<defs><clipPath id="win"><rect x="${SKY_BOX.x}" y="${SKY_BOX.y}" width="${SKY_BOX.w}" height="${SKY_BOX.h}"/></clipPath>` +
-    `<clipPath id="art"><rect width="${W}" height="${H}"/></clipPath></defs>` +
-    lampGlow +
-    art +
-    close +
+    // 空
+    `<rect width="100%" height="100%" fill="url(#sk)"/>` +
+    skySvg(s) +
+    // 地面（床の高さから下）
+    `<rect y="${FLOOR_AT}%" width="100%" height="${100 - FLOOR_AT}%" fill="${hex(ground)}"/>` +
+    `<rect y="${FLOOR_AT}%" width="100%" height="5" fill="${hex(mix(ground, 0xffffff, 0.18))}"/>` +
+    // 道：おうちの土台の下を、横にのびる
+    `<svg y="${FLOOR_AT}%" overflow="visible"><rect y="40" width="100%" height="30" fill="${hex(path)}"/><rect y="40" width="100%" height="3" fill="${hex(mix(path, 0xffffff, 0.2))}"/><rect y="67" width="100%" height="3" fill="${hex(darken(path, 0.8))}"/></svg>` +
+    (s.side === 'left' ? atRight(garden) + atLeft(room) : atLeft(garden) + atRight(room)) +
+    walkersSvg(s) +
     sleepy +
     `</svg>`
   )

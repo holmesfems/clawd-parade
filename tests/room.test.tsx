@@ -4,13 +4,14 @@ import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { HOLD_MS, ROOM_ITEMS, activityOf, holdActivity, parseScene, roomSvg, sceneName, toolActivity } from '../hooks/room'
+import { HOLD_MS, ROOM_ITEMS, STAY_MS, WALK_MS, activityOf, crewOf, holdActivity, parseScene, roomSvg, sceneName, toolActivity } from '../hooks/room'
 import type { Activity, RoomScene } from '../hooks/room'
 import { boot, mountBand, mountShop, runParade, startSession, veteran } from './helpers'
 
 const BASE: RoomScene = {
   activity: 'rest',
   friends: 0,
+  arriving: 0,
   time: 'night',
   weather: 'clear',
   season: 'autumn',
@@ -24,6 +25,7 @@ const BASE: RoomScene = {
 const FULL: RoomScene = {
   ...BASE,
   friends: 3,
+  arriving: 2,
   weather: 'snow',
   season: 'winter',
   holiday: 'christmas',
@@ -91,6 +93,27 @@ test('しごとは 10 秒は続ける。おへんじ待ち・おわった・エ�
   expect(holdActivity({ kind: 'sleep', since: 0 }, 'rest', 1_000)).toEqual({ kind: 'rest', since: 1_000 })
 })
 
+test('来た仲間は、しばらく庭の道を歩いてから中に入る。すぐ用事が終わっても、中でひと息つくまではいる', () => {
+  const none = { count: 0, arriving: 0, since: 0 }
+  expect(crewOf(none, 0, 5_000)).toBe(none)
+  const one = crewOf(none, 1, 1_000)
+  expect(one).toEqual({ count: 1, arriving: 1, since: 1_000 })
+  // 歩いているあいだは、そのまま
+  expect(crewOf(one, 1, 1_000 + WALK_MS - 1)).toBe(one)
+  // もう 1 匹来たら、2 匹とも歩いている（歩きなおし）
+  expect(crewOf(one, 2, 3_000)).toEqual({ count: 2, arriving: 2, since: 3_000 })
+  // 歩きおわったら中に入る
+  const inside = crewOf(one, 1, 1_000 + WALK_MS)
+  expect(inside).toEqual({ count: 1, arriving: 0, since: 1_000 })
+  // 中にいる仲間がいるところへ来たら、来たぶんだけ歩く。3 匹まで
+  expect(crewOf(inside, 5, 60_000)).toEqual({ count: 3, arriving: 2, since: 60_000 })
+  // 歩いているうちに用事が終わっても、歩きおえて中に入り、ひと息つくまではいる
+  expect(crewOf(one, 0, 2_000)).toBe(one)
+  expect(crewOf(one, 0, 1_000 + WALK_MS)).toEqual({ count: 1, arriving: 0, since: 1_000 })
+  expect(crewOf(inside, 0, 1_000 + STAY_MS - 1)).toBe(inside)
+  expect(crewOf(inside, 0, 1_000 + STAY_MS)).toEqual({ count: 0, arriving: 0, since: 1_000 })
+})
+
 // ---- 絵 ----
 
 test('おへやの絵：同じ場面なら同じ SVG。しごとごとに違う絵。CSS で動き、動きを減らす設定では止まる。にぎやかでも上限に収まる', () => {
@@ -107,6 +130,29 @@ test('おへやの絵：同じ場面なら同じ SVG。しごとごとに違う�
     for (const time of ['morning', 'day', 'evening', 'night', 'lateNight'] as const) {
       expect(roomSvg({ ...FULL, activity, time }).length).toBeLessThan(60_000)
     }
+  }
+})
+
+test('おうちの外：空・地面・道・おうち・庭を描く。歩いて来る仲間は道の上、残りはおへやの中。アプリで止まる書き方は使わない', () => {
+  const svg = roomSvg({ ...BASE, friends: 3, arriving: 2 })
+  expect(svg).toContain('url(#sk)')
+  expect(svg).toContain('class="cloud"')
+  expect(svg).toContain('class="smoke"')
+  expect(svg.match(/class="come"/g)).toHaveLength(2)
+  expect(roomSvg({ ...BASE, friends: 3, arriving: 2, side: 'left' }).match(/class="come rev"/g)).toHaveLength(2)
+  expect(roomSvg({ ...BASE, friends: 3 })).not.toContain('class="come')
+  // 歩いている仲間のぶん、中ではねる仲間は少ない
+  const hops = (source: string) => source.match(/class="hop"/g)?.length ?? 0
+  expect(hops(roomSvg({ ...BASE, friends: 3 })) - hops(svg)).toBe(2)
+  // 雪の日は外にも降る。季節で庭が変わる
+  expect(roomSvg({ ...BASE, weather: 'snow' })).toContain('class="flurry"')
+  expect(roomSvg({ ...BASE, weather: 'rain' })).toContain('class="pour"')
+  expect(new Set((['spring', 'summer', 'autumn', 'winter'] as const).map(season => roomSvg({ ...BASE, season }))).size).toBe(4)
+  // アプリの背景で、CSS のアニメーションが全部止まる書き方（docs/backdrop-investigation.md）
+  for (const scene of [BASE, FULL, { ...FULL, weather: 'rain' as const }]) {
+    const source = roomSvg(scene)
+    expect(source).not.toContain('crispEdges')
+    expect(source).not.toMatch(/dvw/)
   }
 })
 
