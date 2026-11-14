@@ -1,4 +1,6 @@
+import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 import { ACHIEVEMENTS, DIARY_KEY } from '../hooks/game'
 import {
@@ -135,7 +137,7 @@ test('帯の枠は、下のプラグイン（AK Studio の帯など）と分け�
 // ---- テーマの背景（/parade theme） ----
 
 // テーマを決める・外すエンジンの答え。決めたもの（null は外した）を順に残す
-function themes(on: Parameters<Parameters<typeof test>[1]>[1]) {
+function themes(on: On) {
   const calls: unknown[] = []
   on('theme.set', async (_$, e) => {
     calls.push(e)
@@ -148,13 +150,13 @@ function themes(on: Parameters<Parameters<typeof test>[1]>[1]) {
   return calls
 }
 
-const mountBackdrop = ($: Parameters<Parameters<typeof test>[1]>[0], plugin = 'clawd-parade') =>
+const mountBackdrop = ($: Engine, plugin = 'clawd-parade') =>
   $.ui.mount({
     plugin: 'clawd-parade',
     surface: 'desktop',
     component: 'Backdrop',
     requestId: 'backdrop',
-    props: { id: 'parade', plugin, glass: { blur: 6, opacity: 0.5 } },
+    props: { scene: 'parade', plugin, glass: { blur: 6, opacity: 0.5 } },
   })
 
 test('/parade theme で、アプリの背景にパレードを描く。帯はセリフとなでるボタンだけ。もう一度でもどす', async ($, on) => {
@@ -165,14 +167,16 @@ test('/parade theme で、アプリの背景にパレードを描く。帯はセ
 
   const on1 = await runParade($, 'theme')
   expect(on1.text).toContain('背景をパレードにしたよ')
-  expect(calls).toEqual([{ backdrop: { id: 'parade', glass: { blur: 6, opacity: 0.5 } } }])
+  expect(calls).toEqual([{ backdrop: { scene: 'parade', glass: { blur: 6, opacity: 0.5 } } }])
   expect(held.get('theme')).toBe(true)
 
   // 背景は、窓いっぱいに広げる SVG
   const back = await mountBackdrop($)
   const source = await svgOf(back)
   expect(source).toContain('width="100%"')
-  expect(source).toContain('preserveAspectRatio="xMidYMax slice"')
+  expect(source).toContain('preserveAspectRatio="xMidYMid slice"')
+  // Svg の source は 131,072 文字まで
+  expect(source.length).toBeLessThan(131_072)
   await back.unmount()
 
   // デスクトップの帯は絵を出さず、なでるボタンで（押すとなでた回数が増える）
@@ -198,7 +202,7 @@ test('テーマの背景は、入れてあれば次のセッションの始め�
   const calls = themes(on)
   boot(on, { store: veteran({}, { theme: true }) })
   await startSession($, 'desktop')
-  expect(calls).toEqual([{ backdrop: { id: 'parade', glass: { blur: 6, opacity: 0.5 } } }])
+  expect(calls).toEqual([{ backdrop: { scene: 'parade', glass: { blur: 6, opacity: 0.5 } } }])
 
   const mine = await mountBackdrop($)
   expect(await mine.find({ type: 'Svg' })).toBeDefined()

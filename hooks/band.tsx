@@ -267,7 +267,7 @@ function giftButtonOf(g: Game): BandText['gift'] {
 
 // デスクトップの SVG。さわったぶんのハート・傾き・仲間のジャンプと、帯に出した贈り物の札を足して描く。
 // 札を描くときは、frame.paradeColumns をもう QUICK_GIFT_DOTS 引いておく（札はそのすぐ右）
-export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null, fit: 'cover' | null = null) {
+export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null, fit: 'cover' | null = null, foot = 0) {
   const petted = isPetted(p, now)
   const age = Math.floor((now - p.from) / HOOK_FRAME_MS)
   const isStroked = petted && p.kind === 'pet'
@@ -295,13 +295,18 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number,
     }
   }
   if (gift) putQuickGift(g, quickGiftSpot(frame.paradeColumns).x, gift.id, gift.canAfford)
+  // foot は地面の下に足す土の行。テーマの背景で、パレードを入力欄の後ろより上に持ち上げる
+  const width = g[0]?.length ?? 0
+  for (let k = 0; k < foot; k++) g.push(Array(width).fill(palette.ground))
   return toSvg(g, DESKTOP_MARKUP_PIXEL, palette, fit)
 }
 
 // テーマの背景（/parade theme）の絵の幅（ドット）と、地面の上の空の高さ。
-// 16:10 くらいの窓に合わせ、それより横長の窓では上を、縦長の窓では左右を切る
+// 16:10 くらいの窓に合わせ、それより横長の窓では上下を、縦長の窓では左右を切る。
+// 窓の下の端には入力欄が重なるので、地面の下に土を足して、パレードを下から 1/4 くらいの高さに置く
 export const BACKDROP_COLUMNS = 160
-const BACKDROP_HEADROOM = 86
+const BACKDROP_HEADROOM = 62
+const BACKDROP_FOOT = 24
 
 // テーマの背景：窓いっぱいの空と、下の端を歩くパレード。さわれない（押した操作は上の会話に届く）ので、なでるのは帯で
 export function backdropSvg(s: BandState & { character: Character }) {
@@ -318,7 +323,7 @@ export function backdropSvg(s: BandState & { character: Character }) {
     weather: s.weather ?? null,
   }
   const frame: Frame = { isWide: false, columns: BACKDROP_COLUMNS, paradeColumns: BACKDROP_COLUMNS, headroom: BACKDROP_HEADROOM, wordsCells: 0 }
-  return desktopSvg(scene, frame, s.pets, s.tick.at, null, 'cover')
+  return desktopSvg(scene, frame, s.pets, s.tick.at, null, 'cover', BACKDROP_FOOT)
 }
 
 // 帯を描くのに使うもの。onPet は、絵が出せないほど狭いデスクトップの「なでる」ボタン。

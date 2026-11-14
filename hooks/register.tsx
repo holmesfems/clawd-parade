@@ -99,7 +99,7 @@ const THEME_WORDS = ['theme', 'テーマ', '背景', 'はいけい']
 const BACKDROP_ID = 'parade'
 
 // テーマの背景に、パレードを描いてもらう。会話のパネルは少しだけすりガラスにして、後ろのパレードが透けて見えるようにする
-const setTheme = ($: EngineInterface) => $.theme.set({ backdrop: { id: BACKDROP_ID, glass: { blur: 6, opacity: 0.5 } } })
+const setTheme = ($: EngineInterface) => $.theme.set({ backdrop: { scene: BACKDROP_ID, glass: { blur: 6, opacity: 0.5 } } })
 
 async function setMood($: EngineInterface, kind: MoodKind) {
   const at = await $.clock.now()
@@ -555,7 +555,7 @@ export const register: Register = on => {
   // テーマの背景（/parade theme）。デスクトップとモバイルのアプリが、会話の後ろの窓いっぱいに描く。
   // ほかのプラグインの背景は、そのプラグインにまかせる
   on('ui.render', { component: 'Backdrop' }, async ($, e, next) => {
-    if (e.props.plugin !== 'clawd-parade' || e.props.id !== BACKDROP_ID || (await read($, isHidden))) return next(e)
+    if (e.props.plugin !== 'clawd-parade' || e.props.scene !== BACKDROP_ID || (await read($, isHidden))) return next(e)
     const ui = $.ui.resolve(e)
     if (!('Svg' in ui)) return next(e)
     const state = await sceneState($)
