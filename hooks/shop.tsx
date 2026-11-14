@@ -66,6 +66,34 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
   // 放置収入は 1 秒ごとに足されるので、その時刻を「いま」とみなす
   const now = g.passiveAt
 
+  // きせかえ・おへやのものの 1 行。持っていなければ買う、ぼうしはかぶる・はずす、ほかは出す・しまう
+  const dress = (c: (typeof COSMETICS)[number]) => {
+    const isOwned = g.owned.includes(c.id)
+    const isWorn = c.hat !== undefined && g.hat === c.hat
+    // 空の飾り（流れ星・オーロラ）は、ぼうしと同じように押すたびに出す・しまう（夢のプレゼントの枠は使わない）
+    const isOn = isLit(g, c.id)
+    const label =
+      !isOwned ? `${c.name} ${formatHearts(c.price)}♡` :
+      c.hat ? (isWorn ? `${c.name} ✓かぶってる` : `${c.name} をかぶる`) :
+      isOn ? `${c.name} ✓出てる` : `${c.name} を出す`
+    const press = !isOwned
+      ? buy(`${c.name} を買ったよ！`, one => buyCosmetic(one, c.id))
+      : c.hat
+        ? buy(isWorn ? `${c.name} をはずしたよ` : `${c.name} をかぶったよ！`, one => wear(one, isWorn ? null : c.hat ?? null))
+        : buy(isOn ? `${c.name} をしまったよ` : `${c.name} を出したよ！`, one => switchCosmetic(one, c.id))
+    const about = c.id === 'catEars' && who === 'neko' ? 'ねこはもとからねこみみ（Clawd だけ）' : c.about
+    return (
+      <Box key={`c-${c.id}`} columnGap={1}>
+        <Button key={`dress-${c.id}`} variant={!isOwned && g.hearts >= c.price ? 'primary' : 'secondary'} onPress={press}>
+          {label}
+        </Button>
+        <Text dimColor wrap="truncate-end">
+          {about}
+        </Text>
+      </Box>
+    )
+  }
+
   const header = (title: string) => (
     <Box key={`h-${title}`} paddingTop={1}>
       <Text bold color="#ff9ec7">
@@ -124,32 +152,10 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
       })}
 
       {header('きせかえ')}
-      {COSMETICS.map(c => {
-        const isOwned = g.owned.includes(c.id)
-        const isWorn = c.hat !== undefined && g.hat === c.hat
-        // 空の飾り（流れ星・オーロラ）は、ぼうしと同じように押すたびに出す・しまう（夢のプレゼントの枠は使わない）
-        const isOn = isLit(g, c.id)
-        const label =
-          !isOwned ? `${c.name} ${formatHearts(c.price)}♡` :
-          c.hat ? (isWorn ? `${c.name} ✓かぶってる` : `${c.name} をかぶる`) :
-          isOn ? `${c.name} ✓出てる` : `${c.name} を出す`
-        const press = !isOwned
-          ? buy(`${c.name} を買ったよ！`, one => buyCosmetic(one, c.id))
-          : c.hat
-            ? buy(isWorn ? `${c.name} をはずしたよ` : `${c.name} をかぶったよ！`, one => wear(one, isWorn ? null : c.hat ?? null))
-            : buy(isOn ? `${c.name} をしまったよ` : `${c.name} を出したよ！`, one => switchCosmetic(one, c.id))
-        const about = c.id === 'catEars' && who === 'neko' ? 'ねこはもとからねこみみ（Clawd だけ）' : c.about
-        return (
-          <Box key={`c-${c.id}`} columnGap={1}>
-            <Button key={`dress-${c.id}`} variant={!isOwned && g.hearts >= c.price ? 'primary' : 'secondary'} onPress={press}>
-              {label}
-            </Button>
-            <Text dimColor wrap="truncate-end">
-              {about}
-            </Text>
-          </Box>
-        )
-      })}
+      {COSMETICS.filter(c => !c.room).map(dress)}
+
+      {header('おへやのもの · デスクトップの背景（/parade theme）に出る')}
+      {COSMETICS.filter(c => c.room).map(dress)}
 
       {header(`プレゼント · なかよし度「${affection.name}」`)}
       <Text dimColor>
