@@ -101,7 +101,7 @@ test('おへやの絵：同じ場面なら同じ SVG。しごとごとに違う�
   expect(svg).toContain('@keyframes')
   expect(svg).toContain('prefers-reduced-motion: reduce')
   // 窓の高さの 84% の床に、右下（左下）にそろえて置く
-  expect(svg).toContain('preserveAspectRatio="xMaxYMax meet"')
+  expect(svg).toContain(`preserveAspectRatio="xMaxYMax meet"`)
   expect(roomSvg({ ...BASE, side: 'left' })).toContain('preserveAspectRatio="xMinYMax meet"')
   for (const activity of ACTIVITIES) {
     for (const time of ['morning', 'day', 'evening', 'night', 'lateNight'] as const) {

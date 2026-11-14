@@ -859,6 +859,41 @@ function friends(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, extra?: P
   })
 }
 
+// ---- 目盛り（/parade theme ruler） ----
+// 背景の枠が、見えている窓のどこからどこまでかを確かめるための絵。10% ごとの線と、窓の大きさ（CSS の px）を出す
+export const RULER_SCENE = 'ruler'
+
+export function rulerSvg(): string {
+  const marks = Array.from({ length: 11 }, (_, i) => i * 10)
+  const v = marks
+    .map(p => `<rect x="${p}%" y="0" width="2" height="100%" fill="#ff5c8a"/><text x="${p}%" y="50%" dx="4" fill="#fff">${p}%</text>`)
+    .join('')
+  const h = marks
+    .map(p => `<rect x="0" y="${p}%" width="100%" height="2" fill="#5cc8ff"/><text x="30%" y="${p}%" dy="-4" fill="#fff">${p}%</text>`)
+    .join('')
+  // 枠の幅・高さ（CSS の px）：満たしている行だけが見える。いちばん下に見えている行が、枠の大きさ
+  const widths = [600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2400, 2800, 3200, 3840]
+  const heights = [400, 600, 800, 1000, 1200, 1400, 1600, 2000]
+  const rows = [
+    ...widths.map(w => ({ cls: `w${w}`, q: `min-width:${w}px`, label: `幅 ≥ ${w}px` })),
+    ...heights.map(hh => ({ cls: `h${hh}`, q: `min-height:${hh}px`, label: `高さ ≥ ${hh}px` })),
+  ]
+  const style = rows.map(r => `.${r.cls}{display:none}@media (${r.q}){.${r.cls}{display:inline}}`).join('')
+  // 左はし・右はしから 100px ごとの線（サイドバーやパネルの幅を読むため）。右は、右はしを原点にした入れ子の svg で描く
+  const steps = Array.from({ length: 8 }, (_, i) => (i + 1) * 100)
+  const fromLeft = steps.map(px => `<rect x="${px}" y="70%" width="2" height="12%" fill="#7ee081"/><text x="${px}" y="69%" dx="-24" fill="#7ee081">${px}</text>`).join('')
+  const fromRight = steps
+    .map(px => `<rect x="${-px}" y="0" width="2" height="100%" fill="#ffb347" transform="translate(0 0)"/><text x="${-px}" y="0" dx="-24" fill="#ffb347">${px}</text>`)
+    .join('')
+  const pxMarks = `${fromLeft}<svg x="100%" y="78%" width="1" height="1" overflow="visible">${fromRight.replaceAll('height="100%"', 'height="160"').replaceAll('y="0" dx', 'y="-6" dx')}</svg>`
+  const list = rows.map((r, i) => `<text class="${r.cls}" x="62%" y="${12 + i * 3}%" fill="#ffd166">${r.label}</text>`).join('')
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family="sans-serif" font-size="22" font-weight="bold">` +
+    `<style>${style}</style><rect width="100%" height="100%" fill="#1a1626"/>${v}${h}` +
+    `<rect width="100%" height="100%" fill="none" stroke="#ffd166" stroke-width="8"/>${list}${pxMarks}</svg>`
+  )
+}
+
 // ---- SVG にまとめる ----
 
 const STYLE = [
@@ -913,11 +948,26 @@ function layerSvg(l: Layer): string {
   return l.clip ? `<g clip-path="url(#${l.clip})">${g}</g>` : g
 }
 
+// 床は窓の高さの 84%。おへやの枠は高さが窓の 40%、幅が 360px（絵はこの枠に収まる大きさ）。
+// 左右は、サイドバー（およそ 215px）・右のパネル（およそ 315px）の外になるよう、端から何 px 内側に置くか
+const FLOOR_AT = 84
+const ROOM_HEIGHT = 40
+const ROOM_BOX = 360
+export const ROOM_INSET = { left: 230, right: 330 }
+
 function frameSvg(s: RoomScene, layers: Layer[]): string {
   const wall = WALL[s.time]
   const art = layers.map(layerSvg).join('')
-  // おへやの絵は、床（窓の高さの 84%）に立つよう、右（左）下にそろえて置く
-  const box = s.side === 'left' ? { x: '1%', align: 'xMinYMax' } : { x: '59%', align: 'xMaxYMax' }
+  // 背景の枠は、左のサイドバーと右のパネルの下まで入った、アプリの窓まるごと（/parade theme ruler で測った）。
+  // パネルの幅は窓の大きさによらず決まった px なので、おへやは端から決まった px だけ内側の、決まった幅の枠に置く。
+  // 右に置くときは、右はしを原点にした入れ子の svg の中に、左向きに置く
+  const roomBox = (x: number, align: string) =>
+    `<svg x="${x}" y="${FLOOR_AT - ROOM_HEIGHT}%" width="${ROOM_BOX}" height="${ROOM_HEIGHT}%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="${align} meet" overflow="visible" shape-rendering="crispEdges">`
+  const open =
+    s.side === 'left'
+      ? roomBox(ROOM_INSET.left, 'xMinYMax')
+      : `<svg x="100%" width="1" height="100%" overflow="visible">${roomBox(-(ROOM_INSET.right + ROOM_BOX), 'xMaxYMax')}`
+  const close = s.side === 'left' ? '</svg>' : '</svg></svg>'
   const lampGlow = s.items.includes('lamp')
     ? `<circle class="glow" cx="32" cy="29" r="15" fill="url(#lg)"/>`
     : ''
@@ -932,15 +982,15 @@ function frameSvg(s: RoomScene, layers: Layer[]): string {
     `</defs>` +
     `<rect width="100%" height="100%" fill="${hex(wall)}"/>` +
     `<rect width="100%" height="100%" fill="url(#wp)"/>` +
-    `<rect y="84%" width="100%" height="16%" fill="${hex(FLOOR_COLOR)}"/>` +
-    `<rect y="84%" width="100%" height="16%" fill="url(#fl)"/>` +
-    `<rect y="84%" width="100%" height="4" fill="${hex(darken(FLOOR_COLOR, 0.7))}"/>` +
-    `<svg x="${box.x}" y="22%" width="40%" height="62%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="${box.align} meet" overflow="visible" shape-rendering="crispEdges">` +
+    `<rect y="${FLOOR_AT}%" width="100%" height="${100 - FLOOR_AT}%" fill="${hex(FLOOR_COLOR)}"/>` +
+    `<rect y="${FLOOR_AT}%" width="100%" height="${100 - FLOOR_AT}%" fill="url(#fl)"/>` +
+    `<rect y="${FLOOR_AT}%" width="100%" height="4" fill="${hex(darken(FLOOR_COLOR, 0.7))}"/>` +
+    open +
     `<defs><clipPath id="win"><rect x="${SKY_BOX.x}" y="${SKY_BOX.y}" width="${SKY_BOX.w}" height="${SKY_BOX.h}"/></clipPath>` +
     `<clipPath id="art"><rect width="${W}" height="${H}"/></clipPath></defs>` +
     lampGlow +
     art +
-    `</svg>` +
+    close +
     sleepy +
     `</svg>`
   )

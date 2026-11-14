@@ -34,7 +34,7 @@ import {
 } from './game'
 import { messageOf } from './message'
 import { HOLIDAY_NAMES, SEASON_NAMES, calendarOf, parseMonthDay, timeOfDay } from './palette'
-import { ACTIVITY_NAMES, ROOM_ITEMS, activityOf, holdActivity, parseScene, roomSvg, sceneName } from './room'
+import { ACTIVITY_NAMES, ROOM_ITEMS, RULER_SCENE, activityOf, holdActivity, parseScene, roomSvg, rulerSvg, sceneName } from './room'
 import type { RoomScene, Side } from './room'
 import { isMarching } from './scene'
 import { WEATHER_NAMES, WEATHER_WORDS, weatherAt } from './weather'
@@ -303,8 +303,11 @@ async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
 // 背景を出していれば、場面の名前が変わったときだけ $.theme.set を呼ぶ（描き直しは、そのときだけ）
 async function refreshRoom($: EngineInterface) {
   if (!(await read($, backdrop))) return
+  const current = await read($, roomScene)
+  // 目盛り（/parade theme ruler）を出している間は、おへやで上書きしない
+  if (current === RULER_SCENE) return
   const name = sceneName(await roomOf($, await $.clock.now()))
-  if (name === (await read($, roomScene))) return
+  if (name === current) return
   await update($, roomScene, () => name)
   return $.theme.set({ backdrop: { scene: name, glass: GLASS }, overrideColorScheme: 'dark' })
 }
@@ -409,9 +412,18 @@ export const register: Register = on => {
     }
     // /parade theme で背景のおへやを出す・しまう。/parade theme left・right で置く側を決めて出す
     const [word, sideWord] = arg.split(/\s+/)
+    // /parade theme ruler：背景の枠の目盛りを出す（置き場所を確かめるため。/parade theme でおへやにもどる）
+    if (word !== undefined && THEME_WORDS.includes(word) && sideWord === 'ruler') {
+      await update($, backdrop, () => true)
+      await update($, roomScene, () => RULER_SCENE)
+      await $.theme.set({ backdrop: { scene: RULER_SCENE, glass: false }, overrideColorScheme: 'dark' })
+
+      return { text: '背景に目盛りを出したよ（/parade theme でおへやにもどる）' }
+    }
     if (word !== undefined && THEME_WORDS.includes(word)) {
       const side = sideWord === 'left' || sideWord === '左' ? 'left' : sideWord === 'right' || sideWord === '右' ? 'right' : null
-      const isOn = side !== null || !(await read($, backdrop))
+      // 目盛りを出しているときの /parade theme は、おへやにもどす
+      const isOn = side !== null || (await read($, roomScene)) === RULER_SCENE || !(await read($, backdrop))
       if (side) {
         await update($, backdropSide, () => side)
         await $.store.set(THEME_SIDE_KEY, side)
@@ -638,8 +650,9 @@ export const register: Register = on => {
   // ほかのプラグインの背景は、そのプラグインにまかせる
   on('ui.render', { component: 'Backdrop' }, ($, e, next) => {
     if (e.props.plugin !== 'clawd-parade') return next(e)
-    const scene = parseScene(e.props.scene)
     const ui = $.ui.resolve(e)
+    if (e.props.scene === RULER_SCENE && 'Svg' in ui) return <ui.Svg source={rulerSvg()} alt="背景の目盛り" isInteractive />
+    const scene = parseScene(e.props.scene)
     if (scene === null || !('Svg' in ui)) return next(e)
     const who = scene.character === 'clawd' ? 'Clawd' : 'ねこ'
 
