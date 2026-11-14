@@ -353,7 +353,8 @@ export const UPGRADES: Upgrade[] = [
   { id: 'stardust', name: '星のかけら', about: '放置で ♡ +2/秒', base: 1000, growth: 1.15 },
 ]
 
-export type Cosmetic = { id: CosmeticId; name: string; about: string; price: number; hat?: Hat }
+// room はデスクトップの背景のおへやに出るもの（/parade theme）。ショップでは「おへやのもの」に並べる
+export type Cosmetic = { id: CosmeticId; name: string; about: string; price: number; hat?: Hat; room?: true }
 
 export const COSMETICS: Cosmetic[] = [
   { id: 'ribbon', name: 'リボン', about: '頭の角にちょこんと', price: 300, hat: 'ribbon' },
@@ -362,6 +363,12 @@ export const COSMETICS: Cosmetic[] = [
   { id: 'shootingStars', name: '流れ星', about: '夜空にときどき流れ星', price: 2000 },
   { id: 'crown', name: '王冠', about: 'なでなでの王さま', price: 5000, hat: 'crown' },
   { id: 'aurora', name: 'オーロラ', about: '夜空にオーロラがゆれる', price: 8000 },
+  { id: 'lamp', name: 'あかりのランプ', about: 'ソファのとなりで、ふんわり光る', price: 600, room: true },
+  { id: 'plant', name: '観葉植物', about: '窓辺でゆれる', price: 1500, room: true },
+  { id: 'rug', name: 'しましまのラグ', about: '床にしく', price: 3000, room: true },
+  { id: 'poster', name: '星のポスター', about: 'かべにはる', price: 5000, room: true },
+  { id: 'garland', name: 'きらきらガーランド', about: 'かべの上で、かわりばんこに光る', price: 12_000, room: true },
+  { id: 'fishbowl', name: '金魚ばち', about: '窓辺で金魚がおよぐ', price: 30_000, room: true },
 ]
 
 // お店の取り引きの結果：買えたら新しいゲーム、買えなければ断る理由
@@ -422,7 +429,7 @@ export function wear(g: Game, hat: Hat | null): Dealt {
   return hat === null || g.owned.includes(hat) ? ok({ ...g, hat }) : no('そのぼうしはまだ持ってないよ')
 }
 
-// 買った空の飾り（流れ星・オーロラ）が出ているか。しまう（off に入れる）まで出す
+// 買った空の飾り（流れ星・オーロラ）・おへやのものが出ているか。しまう（off に入れる）まで出す
 export const isLit = (g: Game, id: CosmeticId) => g.owned.includes(id) && !g.off.includes(id)
 
 // 買った空の飾りを出す・しまう（押すたびに入れ替わる）。夢のプレゼントの枠は使わない
@@ -775,7 +782,7 @@ export const ACHIEVEMENTS = [
   { id: 'glove25', name: '手袋マニア', about: 'やわらか手袋 Lv25', test: f => levelOf(f.game, 'glove') >= 25 },
   { id: 'idle10', name: 'ほうちプレイ', about: '放置で ♡ 10/秒', test: f => f.rate >= 10 },
   { id: 'hat', name: 'おしゃれさん', about: 'ぼうしを買う', test: f => COSMETICS.some(c => c.hat && f.game.owned.includes(c.id)) },
-  { id: 'collector', name: 'コレクター', about: 'きせかえを全部そろえる', test: f => COSMETICS.every(c => f.game.owned.includes(c.id)) },
+  { id: 'collector', name: 'コレクター', about: 'きせかえを全部そろえる', test: f => COSMETICS.every(c => c.room || f.game.owned.includes(c.id)) },
   { id: 'gift1', name: 'はじめてのプレゼント', about: 'Clawd に贈り物をする', test: f => f.game.given > 0 },
   {
     id: 'sweets10',

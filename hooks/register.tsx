@@ -3,13 +3,15 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, DiaryKind, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
+import type { Character, DiaryKind, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
 import { bandView } from './band'
 import { dayOf, record, tidyDiary } from './diary'
 import type { Deal, Situation } from './game'
 import {
   HOOK_FRAME_MS,
   accrue,
+  isLit,
+  lookOf,
   giftOf,
   giveGift,
   grant,
@@ -31,7 +33,9 @@ import {
   unlocked,
 } from './game'
 import { messageOf } from './message'
-import { HOLIDAY_NAMES, SEASON_NAMES, calendarOf, parseMonthDay } from './palette'
+import { HOLIDAY_NAMES, SEASON_NAMES, calendarOf, parseMonthDay, timeOfDay } from './palette'
+import { ACTIVITY_NAMES, ROOM_ITEMS, RULER_SCENE, activityOf, holdActivity, parseScene, roomSvg, rulerSvg, sceneName } from './room'
+import type { RoomScene, Side } from './room'
 import { isMarching } from './scene'
 import { WEATHER_NAMES, WEATHER_WORDS, weatherAt } from './weather'
 import { SHOP, shopView } from './shop'
@@ -84,6 +88,11 @@ const weatherOverride = atom({ plugin: 'clawd-parade', key: 'weatherOverride' } 
 // 前回 store から読んだ（store に書いた）ゲームとなでた回数。次に保存するときは、ここからの差分を足し込む
 const synced = atom({ plugin: 'clawd-parade', key: 'synced' } as const, { game: newGame(0, 0), pets: 0 } as Synced)
 const holding = atom({ plugin: 'clawd-parade', key: 'holding' } as const, null as Holding)
+// /parade theme：デスクトップの背景に Clawd のおへやを描く
+const backdrop = atom({ plugin: 'clawd-parade', key: 'backdrop' } as const, false)
+const backdropSide = atom({ plugin: 'clawd-parade', key: 'backdropSide' } as const, 'right' as Side)
+const roomHeld = atom({ plugin: 'clawd-parade', key: 'roomHeld' } as const, null as RoomHeld | null)
+const roomScene = atom({ plugin: 'clawd-parade', key: 'roomScene' } as const, null as string | null)
 
 const PETS_KEY = 'pets'
 const GAME_KEY = 'game'
@@ -91,6 +100,12 @@ const GAME_KEY = 'game'
 const IDLE_KEY = 'idlePaidAt'
 // 保存は 5 秒に 1 回まで
 const SAVE_EVERY_MS = 5000
+// /parade theme を入れているか（次のセッションでも背景に描く）と、おへやを置く側
+const THEME_KEY = 'theme'
+const THEME_SIDE_KEY = 'themeSide'
+const THEME_WORDS = ['theme', 'テーマ', '背景', 'はいけい']
+// 背景を描く面は、会話のパネルを少しすりガラスにする。おへやは暗めなので、画面は暗い色にそろえてもらう
+const GLASS = { blur: 8, opacity: 0.5 }
 
 async function setMood($: EngineInterface, kind: MoodKind) {
   const at = await $.clock.now()
@@ -238,6 +253,65 @@ async function buy($: EngineInterface, label: string, deal: Deal) {
 // 帯に出した贈り物を贈る（帯のボタンと、広いデスクトップの札から）
 const giveTreat = ($: EngineInterface, id: TreatId) => buy($, `🎁 ${giftOf(id).name} をあげたよ！`, (one, when) => giveGift(one, id, when))
 
+// ---- 背景のおへや（/parade theme） --------------------------------------------
+
+// いまの state から、背景に描く場面を作る。絵を決めるものは全部ここに入れる（背景のフックは名前しか見ない）
+async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
+  const [m, list, w, who, g, held, pinned, forced, side, prev] = await Promise.all([
+    read($, mood),
+    read($, friends),
+    read($, work),
+    read($, character),
+    read($, game),
+    read($, holding),
+    read($, dateOverride),
+    read($, weatherOverride),
+    read($, backdropSide),
+    read($, roomHeld),
+  ])
+  const clock = new Date(now)
+  const hour = clock.getHours()
+  const date = pinned ?? { month: clock.getMonth() + 1, day: clock.getDate() }
+  const weather = forced ?? weatherAt(clock.getFullYear(), date.month, date.day, hour)
+  const { season, holiday } = calendarOf(date.month, date.day)
+  const look = lookOf(g, now, held, holiday)
+  const kept = holdActivity(prev, activityOf(m, w.isRunning ? w.tool : null, now), now)
+  if (kept !== prev) await update($, roomHeld, () => kept)
+  return {
+    activity: kept.kind,
+    friends: list.filter(f => f.doneAt === null).length,
+    time: timeOfDay(hour),
+    weather,
+    season,
+    holiday,
+    character: who,
+    hat: look.hat,
+    items: ROOM_ITEMS.filter(id => isLit(g, id)),
+    sky: {
+      stars: look.stars === 0 ? 0 : look.stars < 12 ? 1 : 2,
+      aurora: look.aurora,
+      shootingStars: look.shootingStars,
+      moonTrip: look.dreams.includes('moonTrip'),
+      noBugs: look.dreams.includes('noBugs'),
+      telescope: look.dreams.includes('telescope'),
+      library: look.dreams.includes('library'),
+    },
+    side,
+  }
+}
+
+// 背景を出していれば、場面の名前が変わったときだけ $.theme.set を呼ぶ（描き直しは、そのときだけ）
+async function refreshRoom($: EngineInterface) {
+  if (!(await read($, backdrop))) return
+  const current = await read($, roomScene)
+  // 目盛り（/parade theme ruler）を出している間は、おへやで上書きしない
+  if (current === RULER_SCENE) return
+  const name = sceneName(await roomOf($, await $.clock.now()))
+  if (name === current) return
+  await update($, roomScene, () => name)
+  return $.theme.set({ backdrop: { scene: name, glass: GLASS }, overrideColorScheme: 'dark' })
+}
+
 let timer: { cancel: () => void } | undefined
 let beat = 0
 let isStepping = false
@@ -256,6 +330,9 @@ async function step($: EngineInterface) {
       read($, holding),
     ])
     const now = await $.clock.now()
+
+    // 背景のおへやは 1 秒ごとに見る（場面が変わったときだけ描き直してもらう）
+    if (beat % ACCRUE_EVERY === 0) await refreshRoom($)
 
     if (beat % ACCRUE_EVERY === 0 && g.passiveAt > 0) {
       const at = situationOf(w, list)
@@ -306,6 +383,14 @@ export const register: Register = on => {
       await update($, synced, s => ({ ...s, game: fill(s.game) }))
     }
     savedAt = now
+    // テーマは --resume で戻らず、読み込み直しでも消えるので、入れていればセッションの始めに毎回描いてもらう
+    await update($, roomScene, () => null)
+    if ((await $.store.get(THEME_KEY)) === true) {
+      const side = await $.store.get(THEME_SIDE_KEY)
+      await update($, backdropSide, () => (side === 'left' ? 'left' : 'right'))
+      await update($, backdrop, () => true)
+      await refreshRoom($)
+    }
     timer?.cancel()
     timer = $.clock.every(HOOK_FRAME_MS, () => void step($))
 
@@ -324,6 +409,43 @@ export const register: Register = on => {
       const opened = await $.ui.open({ id: SHOP, title: 'なでなでショップ' })
 
       return { text: opened.isPlaced ? 'なでなでショップを開いたよ！' : `ショップはまだ開けないみたい（${opened.reason}）` }
+    }
+    // /parade theme で背景のおへやを出す・しまう。/parade theme left・right で置く側を決めて出す
+    const [word, sideWord] = arg.split(/\s+/)
+    // /parade theme ruler：背景の枠の目盛りを出す（置き場所を確かめるため。/parade theme でおへやにもどる）
+    if (word !== undefined && THEME_WORDS.includes(word) && sideWord === 'ruler') {
+      await update($, backdrop, () => true)
+      await update($, roomScene, () => RULER_SCENE)
+      await $.theme.set({ backdrop: { scene: RULER_SCENE, glass: false }, overrideColorScheme: 'dark' })
+
+      return { text: '背景に目盛りを出したよ（/parade theme でおへやにもどる）' }
+    }
+    if (word !== undefined && THEME_WORDS.includes(word)) {
+      const side = sideWord === 'left' || sideWord === '左' ? 'left' : sideWord === 'right' || sideWord === '右' ? 'right' : null
+      // 目盛りを出しているときの /parade theme は、おへやにもどす
+      const isOn = side !== null || (await read($, roomScene)) === RULER_SCENE || !(await read($, backdrop))
+      if (side) {
+        await update($, backdropSide, () => side)
+        await $.store.set(THEME_SIDE_KEY, side)
+      }
+      await update($, backdrop, () => isOn)
+      await $.store.set(THEME_KEY, isOn)
+      await update($, roomScene, () => null)
+      if (!isOn) {
+        // テーマは 1 つだけ。外すときは、ほかのプラグインのテーマも外れる（頼まれたときだけ外す）
+        await $.theme.clear()
+
+        return { text: 'おへやの背景をしまったよ（/parade theme でまた出せる）' }
+      }
+      const set = await refreshRoom($)
+      const where = (await read($, backdropSide)) === 'left' ? '左' : '右'
+
+      return {
+        text:
+          set && !set.isDrawn
+            ? `おへやの背景は、デスクトップのアプリで出るよ（いまは描けないみたい：${set.reason}）`
+            : `デスクトップの背景を Clawd のおへやにしたよ！（窓の${where}側。なでるのは入力欄の上の帯でね。/parade theme left・right で置く側、/parade theme でしまう）`,
+      }
     }
     if (arg === 'debug') {
       const isOn = await update($, touchDebug, v => !v)
@@ -363,7 +485,7 @@ export const register: Register = on => {
 
       return { text: picked === 'clawd' ? 'Clawd がやってきた！' : 'ねこたちがやってきた！' }
     }
-    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade clawd / /parade cat / /parade debug / /parade debug 12/25 / /parade debug rain' }
+    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade theme（left・right） / /parade clawd / /parade cat / /parade debug / /parade debug 12/25 / /parade debug rain' }
 
     const hidden = await update($, isHidden, v => !v)
 
@@ -509,6 +631,8 @@ export const register: Register = on => {
       maxRows: e.props.maxRows,
       character: who,
       isDebug,
+      // 背景におへやを描いている間は、デスクトップの帯はセリフと「なでる」ボタンだけ
+      isCompact: await read($, backdrop),
       onPet: () => void pet($, 'pet'),
       onGift: id => void giveTreat($, id),
     })
@@ -520,6 +644,19 @@ export const register: Register = on => {
         {mine}
       </Box>
     )
+  })
+
+  // 背景のおへや（/parade theme）。場面の名前だけから描く（state を読まないので、名前が変わらないかぎり描き直されない）。
+  // ほかのプラグインの背景は、そのプラグインにまかせる
+  on('ui.render', { component: 'Backdrop' }, ($, e, next) => {
+    if (e.props.plugin !== 'clawd-parade') return next(e)
+    const ui = $.ui.resolve(e)
+    if (e.props.scene === RULER_SCENE && 'Svg' in ui) return <ui.Svg source={rulerSvg()} alt="背景の目盛り" isInteractive />
+    const scene = parseScene(e.props.scene)
+    if (scene === null || !('Svg' in ui)) return next(e)
+    const who = scene.character === 'clawd' ? 'Clawd' : 'ねこ'
+
+    return <ui.Svg source={roomSvg(scene)} alt={`${who}のおへや（${ACTIVITY_NAMES[scene.activity]}）`} isInteractive />
   })
 
   // なでなでショップ（/parade shop で開くパネル）

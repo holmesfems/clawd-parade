@@ -47,11 +47,9 @@ function base64(bytes: Uint8Array): string {
 // デスクトップはコードフォントの行の高さが半角ブロックと揃わず縞になるので、
 // ドット絵は 1 ピクセル = 1 マスの SVG にして、夜空の窓に入れて描く
 
-// palette は drawScene に渡したものと同じにする（背景の空の色）
-export function toSvg(g: Grid, pixel: number, palette: Palette): { source: string; width: number; height: number } {
+// ドット絵を path にする。色ごとに 1 本の path にまとめる（横に続く同じ色は 1 つの長方形）。null のマスは描かない
+export function pathsOf(g: Grid): string {
   const w = g[0]?.length ?? 0
-  const h = g.length
-  // 色ごとに 1 本の path にまとめる（横に続く同じ色は 1 つの長方形）
   const paths = new Map<number, string>()
   g.forEach((row, y) => {
     for (let x = 0; x < w; ) {
@@ -66,7 +64,14 @@ export function toSvg(g: Grid, pixel: number, palette: Palette): { source: strin
       x = end
     }
   })
-  const body = [...paths].map(([c, d]) => `<path fill="${hex(c)}" d="${d}"/>`).join('')
+  return [...paths].map(([c, d]) => `<path fill="${hex(c)}" d="${d}"/>`).join('')
+}
+
+// palette は drawScene に渡したものと同じにする（背景の空の色）
+export function toSvg(g: Grid, pixel: number, palette: Palette): { source: string; width: number; height: number } {
+  const w = g[0]?.length ?? 0
+  const h = g.length
+  const body = pathsOf(g)
   const width = w * pixel
   const height = h * pixel
   const source =

@@ -307,6 +307,8 @@ export type BandInput = BandState & {
   maxRows: number
   character: Character
   isDebug: boolean
+  // デスクトップの背景におへやを描いている間（/parade theme）。デスクトップの帯は絵を出さず、セリフと「なでる」ボタンだけにする
+  isCompact?: boolean
   onPet: () => void
   onGift: (id: TreatId) => void
 }
@@ -404,7 +406,8 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
     weather: input.weather ?? null,
   }
   // デスクトップの絵は px で描くので、行数の余裕は見ない
-  const canDraw = cols >= MIN_SCENE_CELLS && (isDesktop || (input.surface === 'terminal' && input.maxRows >= room))
+  const canDraw =
+    cols >= MIN_SCENE_CELLS && ((isDesktop && !input.isCompact) || (input.surface === 'terminal' && input.maxRows >= room))
 
   // 端末はなでなでできる Client を優先し、無い面では絵だけの Raster にする。
   // デスクトップは SVG の上に、同じ大きさの見えない手ざわり層（Client）を重ねる
