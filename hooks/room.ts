@@ -9,7 +9,7 @@
 import type { Character, Hat, MoodKind, RoomActivity, RoomCrew, RoomHeld, RoomItemId, Weather } from '../types'
 import { drawHat } from './decor'
 import { pathsOf } from './encode'
-import { blit, dot, hash, put } from './grid'
+import { blit, dot, hash, put, stampWith } from './grid'
 import type { Grid, Px, Sprite } from './grid'
 import { C, darken, hex, mix } from './palette'
 import type { Holiday, Season, TimeOfDay } from './palette'
@@ -291,7 +291,7 @@ type Pose = {
   y: number
   isSitting: boolean
   mood: MoodKind
-  eyes: 'open' | 'blink' | 'happy' | 'wide' | 'sad' | 'x'
+  eyes: 'open' | 'blink' | 'happy' | 'wide' | 'sad' | 'x' | 'down'
   // Clawd ごと動かす CSS のクラス
   motion: string
 }
@@ -317,7 +317,7 @@ function poseOf(a: Activity): Pose {
     case 'run':
       return { x: DESK_X, y: DESK_TOP, isSitting: true, mood: 'working', eyes: 'open', motion: 'bob' }
     case 'research':
-      return { x: 38, y: FLOOR - 11, isSitting: false, mood: 'working', eyes: 'open', motion: 'bob' }
+      return { x: 38, y: FLOOR - 11, isSitting: false, mood: 'working', eyes: 'down', motion: 'bob' }
     case 'fight':
       return { x: 44, y: FLOOR - 11, isSitting: false, mood: 'error', eyes: 'sad', motion: 'ty' }
     case 'wait':
@@ -407,7 +407,7 @@ export function roomSvg(s: RoomScene): string {
   const body = hero(s, pose, pose.eyes)
   blit(heroLayer, body, hx, hy)
   const heroLayers: Layer[] = [{ cls: '', g: heroLayer }]
-  if (pose.eyes === 'open' || pose.eyes === 'wide') {
+  if (pose.eyes === 'open' || pose.eyes === 'wide' || pose.eyes === 'down') {
     // まばたきは、目を閉じた体をまるごと上に重ねる（#51）。違うマスだけを重ねると、背景では crispEdges を付けられないので
     // ドットのふちがぼやけ、下の黒い目の四角いふちがすけて見えた。体ごとなら、閉じた目のまわりのマスは体の色の path と
     // ひとつながりになり、ふちが下の目の上に来ない
@@ -423,7 +423,7 @@ export function roomSvg(s: RoomScene): string {
     drawHat(hatLayer, s.hat, s.character === 'clawd', hx, hy)
     heroLayers.push({ cls: '', g: hatLayer })
   }
-  if (s.activity === 'research') heroLayers.push(...book(hx, hy))
+  if (s.activity === 'research') heroLayers.push(...book(hx, hy, body))
   // 座っているときは机・ソファのうしろ、立っているときは家具の前（床の上）に描く
   const heroGroup: Layer = { cls: `hero ${pose.motion}`, g: blank(), nested: heroLayers }
   if (pose.isSitting) layers.push(heroGroup)
@@ -722,21 +722,47 @@ function sign(hx: number, hy: number, lift = 0): Grid {
   return g
 }
 
-function book(hx: number, hy: number): Layer[] {
+// 本と虫めがねの色。w 紙・s 綴じ目と紙のかげ・l 字の行・c 表紙・m 虫めがねのわく・j レンズ・h 柄
+const stampBook = stampWith({ w: 0xf5f0e6, s: 0xc9bfae, l: 0x9a9cad, c: 0x8a5a44, m: 0xb0b6c8, j: 0x8ad8ff, h: 0x6b4a3a, W: C.white })
+
+// 見開きの本（#54）。外のはしが高く、綴じ目が低い V の形で、手前に表紙が見える
+const BOOK_OPEN = [
+  'ww.........ww',
+  'wwwww...wwwww',
+  'wllwwwsllwwww',
+  'cwwllwswwllwc',
+  '.ccccc.ccccc.',
+]
+// めくっている紙の 3 コマ：右の紙が立ち上がる → 綴じ目の上で立つ → 左へ倒れる。綴じ目（6 列目）からの位置
+const PAGE_UP = ['.ww', 'ww.']
+const PAGE_STAND = ['w', 'w', 'w']
+// 虫めがね：銀のわく・水色のレンズ・左上に白い光・右下に柄
+const LENS = ['.mmm...', 'mWjjm..', 'mjjjm..', 'mjjjm..', '.mmmh..', '....hh.', '.....hh']
+
+// 本は体の右下に持ち、体のふちから 3 ドットはみ出させる（体のまんなかに重ねると、エプロンのように見えた）。
+// めくる紙が目にかからない高さ
+function book(hx: number, hy: number, body: Sprite): Layer[] {
+  const bx = hx + body.w - 10
+  const by = hy + body.h - 5
+  const spine = bx + 6
   const open = blank()
-  rect(open, hx + 4, hy + 5, 10, 4, 0xf5f0e6)
-  rect(open, hx + 8, hy + 5, 1, 4, 0xc9bfae)
-  rect(open, hx + 3, hy + 9, 12, 1, 0x8a5a44)
-  const a = blank()
-  const b = blank()
-  for (let r = 0; r < 3; r++) {
-    rect(a, hx + 5, hy + 6 + r, 2, 1, 0x9a9cad)
-    rect(b, hx + 10, hy + 6 + r, 2, 1, 0x9a9cad)
-  }
+  stampBook(open, BOOK_OPEN, bx, by)
+  // 3 秒のうち 2 秒は止まって読み、残りの 1 秒で 3 コマめくる。止まった絵では、開いた本だけ
+  const up = blank()
+  stampBook(up, PAGE_UP, spine + 1, by - 2)
+  const stand = blank()
+  stampBook(stand, PAGE_STAND, spine, by - 3)
+  const down = blank()
+  stampBook(down, PAGE_UP, spine - 3, by - 2, true)
+  // 虫めがねは頭の右ななめ上で、小さく円をえがいて探す（机のキーボードに重ならない高さ）
+  const lens = blank()
+  stampBook(lens, LENS, hx + body.w - 1, hy - 10)
   return [
     { cls: '', g: open },
-    { cls: 'fa slow', g: a },
-    { cls: 'fb slow', g: b },
+    { cls: 'pf pf1', g: up },
+    { cls: 'pf pf2', g: stand },
+    { cls: 'pf pf3', g: down },
+    { cls: 'seek', g: lens },
   ]
 }
 
@@ -768,12 +794,6 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
       for (const [dx, dy] of [[0, -2], [2, 0], [0, 2], [-2, 0], [-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [1, 0], [0, 1], [-1, 0]] as const) dot(gear, 46 + dx, 20 + DESK_DROP + dy, 0xb0b6c8)
       dot(gear, 46, 20 + DESK_DROP, METAL)
       add('spin', gear)
-      break
-    }
-    case 'research': {
-      const q = blank()
-      put(q, '?', cx + 8, top - 5, C.ask)
-      add('float', q)
       break
     }
     case 'fight': {
@@ -813,6 +833,7 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
     case 'wait':
     case 'rest':
     case 'write':
+    case 'research':
       break
   }
 }
@@ -900,6 +921,10 @@ const STYLE = [
   '.au{animation:au 7s ease-in-out infinite alternate}@keyframes au{from{opacity:.45;transform:translateX(-1px)}to{opacity:.95;transform:translateX(1px)}}',
   '.shoot{opacity:0;animation:shoot 9s linear infinite}',
   '@keyframes shoot{0%{opacity:0;transform:translate(0,0)}3%{opacity:1}12%{opacity:0;transform:translate(-14px,7px)}100%{opacity:0;transform:translate(-14px,7px)}}',
+  // しらべるの本：3 秒のうち 2 秒は止まって読み、残りの 1 秒で 3 コマめくる（#54）
+  '.pf{opacity:0;animation:3s steps(1,end) infinite}.pf1{animation-name:pf1}.pf2{animation-name:pf2}.pf3{animation-name:pf3}',
+  '@keyframes pf1{0%{opacity:0}67%{opacity:1}78%{opacity:0}}@keyframes pf2{0%{opacity:0}78%{opacity:1}89%{opacity:0}}@keyframes pf3{0%{opacity:0}89%{opacity:1}100%{opacity:1}}',
+  '.seek{animation:seek 2.4s steps(1,end) infinite}@keyframes seek{0%{transform:translate(0,0)}25%{transform:translate(1px,-1px)}50%{transform:translate(2px,0)}75%{transform:translate(1px,1px)}}',
   '.float{animation:float 2.4s ease-in-out infinite alternate}@keyframes float{from{transform:translateY(0)}to{transform:translateY(-2px)}}',
   '.zz{opacity:0;animation:zz 3.3s linear infinite}@keyframes zz{0%{opacity:0;transform:translate(0,0)}20%{opacity:1}100%{opacity:0;transform:translate(3px,-7px)}}',
   '.spin{transform-origin:50% 50%;animation:spin 1.6s steps(8,end) infinite}@keyframes spin{to{transform:rotate(360deg)}}',

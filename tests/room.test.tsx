@@ -147,6 +147,17 @@ test('まばたきは目を閉じた体をまるごと重ね、ぼうしはそ�
   expect(plain).toContain('.ln,.zz{opacity:1}')
 })
 
+test('しらべるは、見開きの本をめくり、虫めがねで探す（「?」は出さない）。止まった絵では開いた本だけ', () => {
+  const svg = roomSvg({ ...BASE, activity: 'research' })
+  for (const cls of ['pf pf1', 'pf pf2', 'pf pf3', 'seek']) expect(svg).toContain(`class="${cls}"`)
+  // めくる紙は、見えない（opacity:0）ところから出す。動きを減らす設定では開いた本だけが残る
+  expect(svg).toContain('.pf{opacity:0;')
+  expect(svg).not.toContain('.pf{opacity:1')
+  // 「?」は出さない（ふわふわ浮く「?」の層があった）
+  expect(svg).not.toContain('class="float"')
+  expect(roomSvg({ ...BASE, activity: 'research', character: 'neko' })).toContain('class="seek"')
+})
+
 test('おうちの外：空・地面・道・おうち・庭を描く。歩いて来る仲間は道の上、残りはおへやの中。アプリで止まる書き方は使わない', () => {
   const svg = roomSvg({ ...BASE, friends: 3, arriving: 2 })
   expect(svg).toContain('url(#sk)')
