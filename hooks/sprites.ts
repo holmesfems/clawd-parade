@@ -59,7 +59,8 @@ const stampFace = stampWith({ k: C.eye, w: C.white, c: C.cheek, b: C.tear })
 // 輪郭のあるスプライト（sprite() で作ったもの）に、シルエット基準の座標で顔を押す（輪郭ぶん +1 して置く）
 const stampOutlined = (s: Sprite, rows: Stamp, x: number, y: number) => stampFace(s.px, rows, x + 1, y + 1)
 
-type Eyes = 'open' | 'blink' | 'happy' | 'wide' | 'sad' | 'x'
+// down は、手もとの本を見下ろす目（背景のしらべる）
+type Eyes = 'open' | 'blink' | 'happy' | 'wide' | 'sad' | 'x' | 'down'
 type Mouth = 'smile' | 'open' | 'flat' | 'frown' | 'tiny'
 
 const EYES: Record<Eyes, [Stamp, Stamp]> = {
@@ -69,6 +70,7 @@ const EYES: Record<Eyes, [Stamp, Stamp]> = {
   wide: [['ww.', 'wk.'], ['.ww', '.wk']],
   sad: [['k..', '.kk'], ['..k', 'kk.']],
   x: [['k.k', '.k.'], ['k.k', '.k.']],
+  down: [['...', '.kk'], ['...', '.kk']],
 }
 const MOUTHS: Record<Mouth, Stamp> = {
   smile: ['k..k', '.kk.'],
@@ -174,6 +176,7 @@ const CLAWD_EYES: Record<Eyes, [Stamp, Stamp]> = {
   wide: [['kkkk', 'kwkk', 'kkkk'], ['kkkk', 'kwkk', 'kkkk']],
   sad: [['....', '..kk', 'kk..'], ['....', 'kk..', '..kk']],
   x: [['k..k', '.kk.', 'k..k'], ['k..k', '.kk.', 'k..k']],
+  down: [['....', '..kk', '..kk'], ['....', '..kk', '..kk']],
 }
 const CLAWD_MOUTHS: Partial<Record<MoodKind, Stamp>> = {
   done: ['k..k', '.kk.'],
