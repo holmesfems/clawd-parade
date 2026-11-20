@@ -280,11 +280,6 @@ function rect(g: Grid, x: number, y: number, w: number, h: number, color: number
 // 絵の上のほうの行だけ（座っているとき、足を描かない）
 const cropped = (s: Sprite, rows: number): Sprite => ({ w: s.w, h: rows, px: s.px.slice(0, rows) })
 
-// 2 つの絵で違うマスだけ（まばたきなど、一部だけ入れかえる動き）
-function diff(a: Sprite, b: Sprite): Sprite {
-  return { w: b.w, h: b.h, px: b.px.map((row, y) => row.map((c, x) => (c !== a.px[y]?.[x] ? (c ?? null) : null))) }
-}
-
 // 重ねる絵の 1 枚。cls は動かす CSS のクラス、clip は窓（win）やおへや（art）の中だけに見せるとき。nested は一緒に動かす絵
 type Layer = { cls: string; g: Grid; style?: string; clip?: string; nested?: Layer[] }
 
@@ -411,14 +406,23 @@ export function roomSvg(s: RoomScene): string {
   // 体がはねるのと別に手をふると動きがちぐはぐに見え、上げたままだと手の形が不自然に見える
   const body = hero(s, pose, pose.eyes)
   blit(heroLayer, body, hx, hy)
-  if (s.hat) drawHat(heroLayer, s.hat, s.character === 'clawd', hx, hy)
   const heroLayers: Layer[] = [{ cls: '', g: heroLayer }]
   if (pose.eyes === 'open' || pose.eyes === 'wide') {
+    // まばたきは、目を閉じた体をまるごと上に重ねる（#51）。違うマスだけを重ねると、背景では crispEdges を付けられないので
+    // ドットのふちがぼやけ、下の黒い目の四角いふちがすけて見えた。体ごとなら、閉じた目のまわりのマスは体の色の path と
+    // ひとつながりになり、ふちが下の目の上に来ない
     const blinkLayer = blank()
-    blit(blinkLayer, diff(body, hero(s, pose, 'blink')), hx, hy)
+    blit(blinkLayer, hero(s, pose, 'blink'), hx, hy)
     heroLayers.push({ cls: 'blink', g: blinkLayer })
   }
-  if (s.activity === 'wait') heroLayers.push({ cls: '', g: sign(hx, hy) })
+  // 札は、ぼうしがあるときはぼうしの上まで上げる（#52）
+  if (s.activity === 'wait') heroLayers.push({ cls: '', g: sign(hx, hy, s.hat ? HAT_ROOM : 0) })
+  // ぼうしは、まばたきの体と札より後に描く（体ごと重ねるまばたきや札に隠れないように）
+  if (s.hat) {
+    const hatLayer = blank()
+    drawHat(hatLayer, s.hat, s.character === 'clawd', hx, hy)
+    heroLayers.push({ cls: '', g: hatLayer })
+  }
   if (s.activity === 'research') heroLayers.push(...book(hx, hy))
   // 座っているときは机・ソファのうしろ、立っているときは家具の前（床の上）に描く
   const heroGroup: Layer = { cls: `hero ${pose.motion}`, g: blank(), nested: heroLayers }
@@ -702,11 +706,15 @@ function keys(add: (cls: string, g: Grid) => void) {
 
 // ---- しごとの小物 ----
 
-function sign(hx: number, hy: number): Grid {
+// ぼうしの高さ（頭の上に出る行。いちばん高いサンタ・王冠・ねこみみで 3 行）と、札とのすきま 1 行
+const HAT_ROOM = 4
+
+// lift は、札をふだんより何ドット上げるか。柄はそのぶん長くなる
+function sign(hx: number, hy: number, lift = 0): Grid {
   const g = blank()
   const sx = hx + 2
-  const sy = hy - 12
-  rect(g, sx + 6, sy + 8, 1, 4, WOOD_D)
+  const sy = hy - 12 - lift
+  rect(g, sx + 6, sy + 8, 1, 4 + lift, WOOD_D)
   rect(g, sx, sy, 14, 8, 0xf5f0e6)
   rect(g, sx, sy, 14, 1, 0xd8cfbf)
   put(g, '?', sx + 3, sy + 2, 0xd97757)
@@ -914,7 +922,8 @@ const STYLE = [
   '.pour{animation:pour .6s linear infinite}.flurry{animation:pour 7s linear infinite}@keyframes pour{to{transform:translateY(96px)}}',
   '.smoke{animation:smoke 4s linear infinite}@keyframes smoke{0%{opacity:0;transform:translate(0,2px)}30%{opacity:1}100%{opacity:0;transform:translate(2px,-6px)}}',
   // 動きを減らす設定では、止まった絵にする（どのしごとも、止まった絵で分かる）
-  '@media (prefers-reduced-motion: reduce){*{animation:none!important}}',
+  // コードの行・考えごとの「…」・Zzz は、見えない（opacity:0）ところからアニメで出すので、止めたときは見せておく（#53）
+  '@media (prefers-reduced-motion: reduce){*{animation:none!important}.ln,.zz{opacity:1}}',
 ].join('')
 
 function layerSvg(l: Layer): string {

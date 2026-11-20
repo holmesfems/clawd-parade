@@ -133,6 +133,20 @@ test('おへやの絵：同じ場面なら同じ SVG。しごとごとに違う�
   }
 })
 
+test('まばたきは目を閉じた体をまるごと重ね、ぼうしはその上。札はぼうしの上に上げる。動きを減らす設定でもコードの行・Zzz は見える', () => {
+  // #51：まばたきの層に体の色が入っている（違うマスだけなら、閉じた目のまわりの数マスしかない）
+  const blink = /<g class="blink">(.*?)<\/g>/.exec(roomSvg({ ...BASE, activity: 'write' }))?.[1] ?? ''
+  expect(blink).toContain('fill="#d97757"')
+  expect((blink.match(/M/g) ?? []).length).toBeGreaterThan(10)
+  // #52：ぼうしがあると、札がぼうしの高さぶん上がる（札の絵が変わる）。ぼうしの層は札より後
+  const plain = roomSvg({ ...BASE, activity: 'wait' })
+  const crowned = roomSvg({ ...BASE, activity: 'wait', hat: 'crown' })
+  expect(crowned).not.toBe(plain)
+  expect(crowned.lastIndexOf('fill="#ffd166"')).toBeGreaterThan(crowned.indexOf('fill="#f5f0e6"'))
+  // #53
+  expect(plain).toContain('.ln,.zz{opacity:1}')
+})
+
 test('おうちの外：空・地面・道・おうち・庭を描く。歩いて来る仲間は道の上、残りはおへやの中。アプリで止まる書き方は使わない', () => {
   const svg = roomSvg({ ...BASE, friends: 3, arriving: 2 })
   expect(svg).toContain('url(#sk)')
