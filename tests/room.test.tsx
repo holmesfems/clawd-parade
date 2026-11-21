@@ -170,11 +170,17 @@ test('おうちの外：空・地面・道・おうち・庭を描く。歩い�
   const hops = (source: string) => source.match(/class="hop"/g)?.length ?? 0
   expect(hops(roomSvg({ ...BASE, friends: 3 })) - hops(svg)).toBe(2)
   // 雪の日は外にも降る。季節で庭が変わる
-  expect(roomSvg({ ...BASE, weather: 'snow' })).toContain('class="flurry"')
-  expect(roomSvg({ ...BASE, weather: 'rain' })).toContain('class="pour"')
+  // 雨は斜めの 3 層（遠いほどうすく遅い）としぶき、雪は 2 層（#50）
+  const rain = roomSvg({ ...BASE, weather: 'rain' })
+  for (const id of ['rain0', 'rain1', 'rain2']) expect(rain).toContain(`class="${id}"`)
+  expect(rain.match(/transform="skewX\(-1\d\)"/g)).toHaveLength(3)
+  const snow = roomSvg({ ...BASE, weather: 'snow' })
+  for (const id of ['snow0', 'snow1']) expect(snow).toContain(`class="${id}"`)
+  expect(snow).not.toContain('skewX')
+  expect(roomSvg(BASE)).not.toContain('class="rain0"')
   expect(new Set((['spring', 'summer', 'autumn', 'winter'] as const).map(season => roomSvg({ ...BASE, season }))).size).toBe(4)
   // アプリの背景で、CSS のアニメーションが全部止まる書き方（docs/backdrop-investigation.md）
-  for (const scene of [BASE, FULL, { ...FULL, weather: 'rain' as const }]) {
+  for (const scene of [BASE, FULL, { ...FULL, weather: 'rain' as const }, { ...FULL, weather: 'snow' as const }]) {
     const source = roomSvg(scene)
     expect(source).not.toContain('crispEdges')
     expect(source).not.toMatch(/dvw/)
@@ -184,7 +190,7 @@ test('おうちの外：空・地面・道・おうち・庭を描く。歩い�
 test('おへやのもの・夢のプレゼント・天気が絵に出る', () => {
   const plain = roomSvg(BASE)
   for (const id of ROOM_ITEMS) expect(roomSvg({ ...BASE, items: [id] })).not.toBe(plain)
-  expect(roomSvg({ ...BASE, weather: 'rain' })).toContain('class="rain"')
+  expect(roomSvg({ ...BASE, weather: 'rain' })).toContain('class="rainw"')
   expect(roomSvg({ ...BASE, weather: 'snow' })).toContain('class="snow"')
   expect(roomSvg({ ...BASE, sky: { ...BASE.sky, aurora: true } })).toContain('class="au"')
   expect(roomSvg({ ...BASE, sky: { ...BASE.sky, library: true } })).not.toBe(plain)
