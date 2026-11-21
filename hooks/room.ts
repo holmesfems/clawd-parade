@@ -6,7 +6,7 @@
 // なので、絵を決めるものは全部「場面の名前」（sceneName）に入れ、背景を描くフックは名前だけから SVG を作る（roomSvg）。
 // 動きは SVG の中の CSS でずっと動かし、名前が変わったときだけ描き直してもらう。
 
-import type { Character, Hat, MoodKind, RoomActivity, RoomCrew, RoomHeld, RoomItemId, Weather } from '../types'
+import type { Character, Hat, MoodKind, PlaceId, RoomActivity, RoomCrew, RoomHeld, RoomItemId, Weather } from '../types'
 import { drawHat } from './decor'
 import { pathsOf } from './encode'
 import { blit, dot, hash, put, stampWith } from './grid'
@@ -204,6 +204,8 @@ export type RoomScene = {
   holiday: Holiday | null
   character: Character
   hat: Hat | null
+  // おうちのまわり（#59）
+  place: PlaceId
   items: RoomItemId[]
   sky: RoomSky
   side: Side
@@ -226,6 +228,7 @@ const WEATHER_CODES: Record<Weather, string> = { clear: 'c', cloudy: 'o', rain: 
 const SEASON_CODES: Record<Season, string> = { spring: 'p', summer: 'u', autumn: 'a', winter: 'w' }
 const HOLIDAY_CODES: Record<Holiday | 'none', string> = { none: 'x', christmas: 'c', newYear: 'y', halloween: 'h', tanabata: 't', tsukimi: 'k' }
 const HAT_CODES: Record<Hat | 'none', string> = { none: 'x', ribbon: 'r', catEars: 'k', santa: 's', crown: 'o' }
+const PLACE_CODES: Record<PlaceId, string> = { country: 'c', city: 't', sea: 's', mountain: 'm' }
 
 const invert = <K extends string>(table: Record<K, string>) => Object.fromEntries(Object.entries(table).map(([k, v]) => [v, k])) as Record<string, K>
 const ACT_OF = invert(ACT_CODES)
@@ -234,6 +237,7 @@ const WEATHER_OF = invert(WEATHER_CODES)
 const SEASON_OF = invert(SEASON_CODES)
 const HOLIDAY_OF = invert(HOLIDAY_CODES)
 const HAT_OF = invert(HAT_CODES)
+const PLACE_OF = invert(PLACE_CODES)
 
 const SKY_FLAGS = ['aurora', 'shootingStars', 'moonTrip', 'noBugs', 'telescope', 'library'] as const
 
@@ -242,10 +246,10 @@ export function sceneName(s: RoomScene): string {
   const items = ROOM_ITEMS.reduce<number>((n, id, i) => (s.items.includes(id) ? n | (1 << i) : n), 0)
   const sky = SKY_FLAGS.reduce<number>((n, key, i) => (s.sky[key] ? n | (1 << (i + 2)) : n), s.sky.stars)
   return [
-    'r2',
+    'r3',
     `${ACT_CODES[s.activity]}${Math.max(0, VARIANTS[s.activity].indexOf(s.variant)).toString(36)}${Math.max(0, Math.min(3, s.friends))}${s.arriving > 0 ? Math.min(3, s.arriving) : ''}`,
     `${TIME_CODES[s.time]}${WEATHER_CODES[s.weather]}${SEASON_CODES[s.season]}${HOLIDAY_CODES[s.holiday ?? 'none']}`,
-    `${s.character === 'clawd' ? 'c' : 'n'}${HAT_CODES[s.hat ?? 'none']}`,
+    `${s.character === 'clawd' ? 'c' : 'n'}${HAT_CODES[s.hat ?? 'none']}${PLACE_CODES[s.place]}`,
     items.toString(36),
     sky.toString(36),
     s.side === 'left' ? 'L' : 'R',
@@ -254,9 +258,11 @@ export function sceneName(s: RoomScene): string {
 
 // 名前から場面にもどす。読めない名前は null
 export function parseScene(name: string): RoomScene | null {
-  const m = /^r2-([a-z]{2})([0-9a-z])([0-3])([1-3])?-([a-z])([a-z])([a-z])([a-z])-([cn])([a-z])-([0-9a-z]+)-([0-9a-z]+)-([RL])$/.exec(name)
+  const m = /^r3-([a-z]{2})([0-9a-z])([0-3])([1-3])?-([a-z])([a-z])([a-z])([a-z])-([cn])([a-z])([a-z])-([0-9a-z]+)-([0-9a-z]+)-([RL])$/.exec(name)
   if (!m) return null
-  const [, act, variantCode, friends, arriving, time, weather, season, holiday, char, hat, items, sky, side] = m
+  const [, act, variantCode, friends, arriving, time, weather, season, holiday, char, hat, placeCode, items, sky, side] = m
+  const place = PLACE_OF[placeCode!]
+  if (!place) return null
   const activity = ACT_OF[act!]
   const variant = activity ? VARIANTS[activity][parseInt(variantCode!, 36)] : undefined
   if (!variant) return null
@@ -279,6 +285,7 @@ export function parseScene(name: string): RoomScene | null {
     holiday: ho === 'none' ? null : ho,
     character: char === 'c' ? 'clawd' : 'neko',
     hat: ha === 'none' ? null : ha,
+    place,
     items: ROOM_ITEMS.filter((_, i) => itemBits & (1 << i)),
     sky: {
       stars: Math.min(2, skyBits & 3) as RoomSky['stars'],
@@ -1558,6 +1565,10 @@ function gardenLayers(s: RoomScene): Layer[] {
   }
   out.push({ cls: '', g: sky })
 
+  if (s.place !== 'country') {
+    placeGarden(s, out, grid, fill)
+    return out
+  }
   // 木（季節で葉の色が変わる。冬は枝だけ、雪の日は枝に雪がつもる）
   const trunk = grid()
   fill(trunk, 15, 30, 4, 24, shade(WOOD_D, t))
@@ -1731,6 +1742,171 @@ function fallSvg(layers: FallLayer[]): string {
     .join('')
 }
 
+// ---- 立地ごとの庭と遠く（#59） ----
+
+// 立地の庭：街は街灯とバス停、海辺はヤシの木とパラソル、山はもみの木・まきの山・たき火
+function placeGarden(s: RoomScene, out: Layer[], grid: () => Grid, fill: (g: Grid, x: number, y: number, w: number, h: number, c: number) => void) {
+  const t = s.time
+  const isSnowy = s.weather === 'snow'
+  const night = isNight(t)
+  const snowOn = (g: Grid, x: number, y: number, w: number) => {
+    if (isSnowy) fill(g, x, y, w, 1, 0xf2f6fa)
+  }
+  if (s.place === 'city') {
+    // 街灯：細い柱と、上のあかり（夕方と夜は光の輪がふんわり）
+    const lamp = grid()
+    fill(lamp, 16, 22, 2, 32, shade(0x4a4c5e, t))
+    fill(lamp, 13, 20, 8, 2, shade(0x4a4c5e, t))
+    fill(lamp, 13, 22, 3, 2, night || t === 'evening' ? 0xffe9a8 : shade(0xd8d4e0, t))
+    snowOn(lamp, 13, 19, 8)
+    out.push({ cls: '', g: lamp })
+    if (night || t === 'evening') {
+      const glow = grid()
+      for (let dy = 0; dy < 10; dy++) fill(glow, 14 - Math.floor(dy / 2), 24 + dy, 2 + Math.floor(dy / 2) * 2, 1, 0xffe9a8)
+      out.push({ cls: 'glow', g: glow })
+    }
+    // バス停：青い丸の札と柱、ベンチ
+    const stop = grid()
+    fill(stop, 52, 32, 1, 22, shade(0x9a9cad, t))
+    fill(stop, 49, 28, 7, 5, shade(0x4f8fc6, t))
+    fill(stop, 51, 29, 3, 3, shade(0xf5f0e6, t))
+    fill(stop, 40, 48, 9, 1, shade(0x8a6450, t))
+    fill(stop, 41, 49, 1, 5, shade(0x4a4c5e, t))
+    fill(stop, 47, 49, 1, 5, shade(0x4a4c5e, t))
+    snowOn(stop, 49, 27, 7)
+    out.push({ cls: '', g: stop })
+  } else if (s.place === 'sea') {
+    // ヤシの木：少し曲がった幹と、ゆれる葉
+    const trunk = grid()
+    const bend = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+    bend.forEach((dx, i) => fill(trunk, 18 - dx, 26 + i, 3, 1, shade(i % 3 === 0 ? 0x7a5a3a : 0x9a7a4a, t)))
+    out.push({ cls: '', g: trunk })
+    const fronds = grid()
+    const leaf = shade(isSnowy ? 0xdfe7ee : 0x4f9b57, t)
+    const leafDots = [[-1, 0], [-2, 0], [-3, 0], [-4, 1], [-5, 1], [-6, 2], [-7, 3], [1, 0], [2, 0], [3, 0], [4, 1], [5, 1], [6, 2], [7, 3], [0, -1], [-1, -2], [-2, -3], [1, -2], [2, -3], [-3, -1], [3, -1], [-4, 2], [4, 2], [-8, 4], [8, 4]]
+    for (const [dx, dy] of leafDots) fill(fronds, 19 + dx!, 25 + dy!, 2, 1, leaf)
+    out.push({ cls: 'sway slow', g: fronds })
+    // パラソル（赤と白のしま）と、砂の上の貝がら
+    const umbrella = grid()
+    fill(umbrella, 52, 38, 1, 16, shade(0xcfd0db, t))
+    for (let i = 0; i <= 10; i++) fill(umbrella, 47 + i, 37 - (i > 1 && i < 9 ? 1 : 0), 1, 2, shade(i % 2 ? 0xf5f0e6 : 0xe0464b, t))
+    fill(umbrella, 30, 53, 2, 1, shade(0xffd0e6, t))
+    fill(umbrella, 62, 53, 1, 1, shade(0xf5f0e6, t))
+    out.push({ cls: '', g: umbrella })
+  } else {
+    // もみの木を 2 本（雪の日・冬は枝の先に雪）
+    const firs = grid()
+    const needle = shade(0x2e6b46, t)
+    const trees = [[14, 22, 30], [26, 32, 20]]
+    for (const [cx, top, h] of trees) {
+      for (let dy = 0; dy < h! - 4; dy++) {
+        const half = 1 + Math.floor((dy % 8) / 2) + Math.floor(dy / 8)
+        const isTip = (isSnowy || s.season === 'winter') && dy % 8 === 0
+        fill(firs, cx! - half, top! + dy, half * 2 + 1, 1, isTip ? 0xf2f6fa : needle)
+      }
+      fill(firs, cx! - 1, top! + h! - 4, 3, 4, shade(WOOD_D, t))
+    }
+    out.push({ cls: '', g: firs })
+    // まきの山と、小さなたき火（火が赤と黄にちらつく。雨の日は消えている）
+    const logs = grid()
+    fill(logs, 48, 51, 10, 3, shade(0x8a6450, t))
+    fill(logs, 49, 49, 8, 2, shade(0x6b4a3a, t))
+    for (const x of [49, 52, 55]) fill(logs, x, 52, 1, 1, shade(0xc9a370, t))
+    fill(logs, 38, 52, 6, 2, shade(0x4b3328, t))
+    out.push({ cls: '', g: logs })
+    if (s.weather !== 'rain') {
+      const fireA = grid()
+      const fireB = grid()
+      fill(fireA, 39, 49, 2, 3, 0xff6b3a)
+      fill(fireA, 41, 50, 1, 2, 0xffd166)
+      fill(fireB, 40, 48, 2, 4, 0xffd166)
+      fill(fireB, 39, 50, 1, 2, 0xff6b3a)
+      out.push({ cls: 'fa quick', g: fireA })
+      out.push({ cls: 'fb quick', g: fireB })
+    }
+  }
+}
+
+// 遠くのけしき：いなかは丘、街はビルの並び（夕方と夜は窓あかり）、海辺は水平線ときらめく海と灯台、山は雪の山なみ
+function farSvg(s: RoomScene): string {
+  const t = s.time
+  if (s.place === 'city') {
+    const lit = isNight(t) || t === 'evening'
+    // 窓は、ばらばらにあかりのついた 4×4 の窓のもようを 3 種類作って、ビルごとに敷く（窓を 1 つずつ描くと SVG が長くなりすぎた）
+    const windowColor = lit ? '#ffe9a8' : hex(mix(0x8ab4ff, skyOf(s), 0.5))
+    let patterns = ''
+    for (let k = 0; k < 3; k++) {
+      let cells = ''
+      for (let r = 0; r < 4; r++)
+        for (let c = 0; c < 4; c++) if (hash(k * 100 + r * 4 + c + 900) < (lit ? 0.4 : 0.22)) cells += `<rect x="${c * 12}" y="${r * 14}" width="5" height="6"/>`
+      patterns += `<pattern id="bw${k}" width="48" height="56" patternUnits="userSpaceOnUse"><g fill="${windowColor}">${cells}</g></pattern>`
+    }
+    let out = `<defs>${patterns}</defs>`
+    for (let i = 0; i < 26; i++) {
+      const w = 50 + Math.floor(hash(i * 13 + 1) * 70)
+      const h = 70 + Math.floor(hash(i * 7 + 3) * 150)
+      const x = (i * 4 - 2 + hash(i * 5) * 2).toFixed(1)
+      const body = hex(shade(mix(0x3a4258, skyOf(s), 0.35 + hash(i) * 0.2), t))
+      out +=
+        `<svg x="${x}%" y="${-h}" overflow="visible"><rect width="${w}" height="${h}" fill="${body}"/>` +
+        `<rect x="8" y="10" width="${w - 16}" height="${h - 20}" fill="url(#bw${i % 3})"${lit && i % 4 === 0 ? ' class="tw"' : ''}/></svg>`
+    }
+    return `<svg y="${FLOOR_AT}%" overflow="visible">${out}</svg>`
+  }
+  if (s.place === 'sea') {
+    const sea = shade(mix(0x3f8fd0, skyOf(s), 0.25), t)
+    const isLeft = s.side === 'left'
+    let sparkle = ''
+    for (let i = 0; i < 24; i++) sparkle += `<rect x="${(hash(i * 3 + 7) * 100).toFixed(1)}%" y="${(20 + hash(i * 11) * 75).toFixed(0)}%" width="8" height="2"/>`
+    // 遠くの灯台は庭の側（会話の列にかからない）
+    const lighthouseX = isLeft ? 90 : 6
+    const light = isNight(t) || t === 'evening' ? `<g class="tw quick"><rect x="-4" y="-46" width="16" height="6" fill="#ffe9a8"/></g>` : ''
+    const white = hex(shade(0xf5f0e6, t))
+    const red = hex(shade(0xe0464b, t))
+    return (
+      `<rect y="${FLOOR_AT - 8}%" width="100%" height="8%" fill="${hex(sea)}"/>` +
+      `<rect y="${FLOOR_AT - 8}%" width="100%" height="3" fill="${hex(mix(sea, 0xffffff, 0.35))}"/>` +
+      `<svg y="${FLOOR_AT - 8}%" width="100%" height="8%" overflow="visible"><g fill="#ffffff" opacity=".7" class="tw">${sparkle}</g></svg>` +
+      `<svg x="${lighthouseX}%" y="${FLOOR_AT - 8}%" overflow="visible"><rect x="0" y="-40" width="8" height="40" fill="${white}"/>` +
+      `<rect x="0" y="-30" width="8" height="6" fill="${red}"/><rect x="0" y="-14" width="8" height="6" fill="${red}"/>` +
+      `<rect x="-1" y="-44" width="10" height="4" fill="${hex(shade(0x4a4c5e, t))}"/>${light}</svg>` +
+      // ゆっくり動くヨット
+      `<svg x="${isLeft ? 70 : 34}%" y="${FLOOR_AT - 5}%" overflow="visible"><g class="drift"><rect x="0" y="-4" width="22" height="4" fill="${hex(shade(0x8a6450, t))}"/>` +
+      `<rect x="10" y="-26" width="2" height="22" fill="${hex(shade(0x6b4a3a, t))}"/><path d="M12 -26 L24 -6 L12 -6 Z" fill="${white}"/></g></svg>`
+    )
+  }
+  if (s.place === 'mountain') {
+    const peakAt = (seed: number, top: number, i: number) => ({
+      x: i * 10 + (hash(seed * 50 + i) - 0.5) * 4,
+      y: i % 2 ? 30 - top * (0.55 + hash(seed * 70 + i) * 0.45) : 30 - top * 0.25,
+    })
+    const range = (seed: number, top: number, haze: number) => {
+      let d = 'M0 30'
+      for (let i = 0; i <= 10; i++) {
+        const { x, y } = peakAt(seed, top, i)
+        d += `L${x.toFixed(1)} ${y.toFixed(1)}`
+      }
+      // 雪：とがったところに白い三角
+      let snow = ''
+      for (let i = 1; i <= 10; i += 2) {
+        const { x, y } = peakAt(seed, top, i)
+        snow += `M${(x - 3).toFixed(1)} ${(y + 4).toFixed(1)}L${x.toFixed(1)} ${y.toFixed(1)}L${(x + 3).toFixed(1)} ${(y + 4).toFixed(1)}Z`
+      }
+      return `<path d="${d}L100 30Z" fill="${hex(shade(mix(0x5a6478, skyOf(s), haze), t))}"/><path d="${snow}" fill="${hex(shade(0xf2f6fa, t))}"/>`
+    }
+    return `<svg y="${FLOOR_AT - 20}%" width="100%" height="20%" viewBox="0 0 100 30" preserveAspectRatio="none">${range(2, 28, 0.55)}${range(7, 18, 0.3)}</svg>`
+  }
+  return hillsSvg(s)
+}
+
+// 地面と道の色（立地ごと。雪の日はどこも白い）。line は街の道の点線・海辺の板の継ぎ目
+const PLACE_GROUND: Record<PlaceId, { ground?: number; path: number; line?: number }> = {
+  country: { path: 0xcdb98f },
+  city: { ground: 0x6a6b74, path: 0x3e3f46, line: 0xf5f0e6 },
+  sea: { ground: 0xe0cc92, path: 0xb08a5a, line: 0x8a6a42 },
+  mountain: { path: 0x9a7a55 },
+}
+
 // ---- 外のにぎやかさ（#55） ----
 
 // 鳥：V の字の鳥を 3 羽の群れで、羽ばたき 2 コマ。朝・昼・夕方の、晴れとくもりの日だけ。
@@ -1739,7 +1915,8 @@ const BIRD_UP = [[0, 0], [4, 0], [1, 1], [3, 1], [2, 2]]
 const BIRD_DOWN = [[0, 1], [1, 1], [3, 1], [4, 1], [2, 2]]
 function birdsSvg(s: RoomScene): string {
   if (isNight(s.time) || s.weather === 'rain' || s.weather === 'snow') return ''
-  const color = s.time === 'evening' ? '#2a2033' : '#3a3f55'
+  // 海辺は白いカモメ
+  const color = s.place === 'sea' ? '#f2f2f2' : s.time === 'evening' ? '#2a2033' : '#3a3f55'
   const px = 4
   const bird = (dots: number[][]) => dots.map(([x, y]) => `<rect x="${x! * px}" y="${y! * px}" width="${px}" height="${px}"/>`).join('')
   // 群れの形（先頭と、うしろの 2 羽）
@@ -1867,8 +2044,16 @@ function frameSvg(s: RoomScene, layers: Layer[]): string {
     art
   // 庭は、おへやと反対側に置く
   const garden = `<g transform="translate(0 ${-GARDEN_UP})">${gardenLayers(s).map(layerSvg).join('')}</g>`
-  const ground = shade(s.weather === 'snow' ? SNOW_GROUND : GRASS[s.season], t)
-  const path = shade(s.weather === 'snow' ? 0xc4ccd6 : 0xcdb98f, t)
+  const place = PLACE_GROUND[s.place]
+  const ground = shade(s.weather === 'snow' ? SNOW_GROUND : place.ground ?? GRASS[s.season], t)
+  const path = shade(s.weather === 'snow' ? 0xc4ccd6 : place.path, t)
+  // 街の道の白い点線・海辺の板の道の継ぎ目
+  const roadLine =
+    place.line === undefined || s.weather === 'snow'
+      ? ''
+      : s.place === 'city'
+        ? `<rect y="54" width="100%" height="3" fill="url(#dash)"/>`
+        : `<rect y="43" width="100%" height="24" fill="url(#plank)"/>`
   const sleepy = s.activity === 'sleep' ? `<rect class="dim" width="100%" height="100%" fill="#05040a"/>` : ''
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">` +
@@ -1877,17 +2062,19 @@ function frameSvg(s: RoomScene, layers: Layer[]): string {
     `<linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${hex(skyTop(s))}"/><stop offset=".84" stop-color="${hex(skyOf(s))}"/></linearGradient>` +
     // かべ紙は、おへやのドットの大きさで数える（おうちの中だけに使う）
     `<pattern id="wp" width="6" height="6" patternUnits="userSpaceOnUse"><rect x="3" y="3" width=".4" height=".4" fill="${hex(mix(WALL[t], 0xffffff, 0.06))}"/></pattern>` +
+    `<pattern id="dash" width="60" height="3" patternUnits="userSpaceOnUse"><rect width="30" height="3" fill="${hex(shade(PLACE_GROUND.city.line!, t))}"/></pattern>` +
+    `<pattern id="plank" width="40" height="24" patternUnits="userSpaceOnUse"><rect width="2" height="24" fill="${hex(shade(PLACE_GROUND.sea.line!, t))}"/></pattern>` +
     `<radialGradient id="lg"><stop offset="0" stop-color="#ffd98a" stop-opacity=".9"/><stop offset="1" stop-color="#ffd98a" stop-opacity="0"/></radialGradient>` +
     `</defs>` +
     // 空
     `<rect width="100%" height="100%" fill="url(#sk)"/>` +
     skySvg(s) +
-    hillsSvg(s) +
+    farSvg(s) +
     // 地面（床の高さから下）
     `<rect y="${FLOOR_AT}%" width="100%" height="${100 - FLOOR_AT}%" fill="${hex(ground)}"/>` +
     `<rect y="${FLOOR_AT}%" width="100%" height="5" fill="${hex(mix(ground, 0xffffff, 0.18))}"/>` +
     // 道：おうちの土台の下を、横にのびる
-    `<svg y="${FLOOR_AT}%" overflow="visible"><rect y="40" width="100%" height="30" fill="${hex(path)}"/><rect y="40" width="100%" height="3" fill="${hex(mix(path, 0xffffff, 0.2))}"/><rect y="67" width="100%" height="3" fill="${hex(darken(path, 0.8))}"/></svg>` +
+    `<svg y="${FLOOR_AT}%" overflow="visible"><rect y="40" width="100%" height="30" fill="${hex(path)}"/><rect y="40" width="100%" height="3" fill="${hex(mix(path, 0xffffff, 0.2))}"/><rect y="67" width="100%" height="3" fill="${hex(darken(path, 0.8))}"/>${roadLine}</svg>` +
     splashSvg(s) +
     (s.side === 'left' ? atRight(garden) + atLeft(room) : atLeft(garden) + atRight(room)) +
     walkersSvg(s) +

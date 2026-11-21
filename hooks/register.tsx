@@ -3,12 +3,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, DiaryKind, RoomCrew, RoomForce, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
+import type { Character, DiaryKind, PlaceId, RoomCrew, RoomForce, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
 import { bandView } from './band'
 import { dayOf, record, tidyDiary } from './diary'
 import type { Deal, Situation } from './game'
 import {
   HOOK_FRAME_MS,
+  PLACE_NAMES,
   accrue,
   isLit,
   lookOf,
@@ -95,6 +96,8 @@ const backdropSide = atom({ plugin: 'clawd-parade', key: 'backdropSide' } as con
 const roomHeld = atom({ plugin: 'clawd-parade', key: 'roomHeld' } as const, null as RoomHeld | null)
 // /parade debug act で選んだ、見てみたいしごとと絵（#56。絵を確かめるため）。このセッションだけで、保存しない
 const roomForce = atom({ plugin: 'clawd-parade', key: 'roomForce' } as const, null as RoomForce | null)
+// /parade debug place で選んだ立地（#59。買わずに絵を確かめるため）。このセッションだけで、保存しない
+const placeForce = atom({ plugin: 'clawd-parade', key: 'placeForce' } as const, null as PlaceId | null)
 const roomCrew = atom({ plugin: 'clawd-parade', key: 'roomCrew' } as const, { count: 0, arriving: 0, since: 0 } as RoomCrew)
 const roomScene = atom({ plugin: 'clawd-parade', key: 'roomScene' } as const, null as string | null)
 
@@ -261,7 +264,7 @@ const giveTreat = ($: EngineInterface, id: TreatId) => buy($, `🎁 ${giftOf(id)
 
 // いまの state から、背景に描く場面を作る。絵を決めるものは全部ここに入れる（背景のフックは名前しか見ない）
 async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
-  const [m, list, w, who, g, held, pinned, forced, side, prev, prevCrew, force] = await Promise.all([
+  const [m, list, w, who, g, held, pinned, forced, side, prev, prevCrew, force, placeForced] = await Promise.all([
     read($, mood),
     read($, friends),
     read($, work),
@@ -274,6 +277,7 @@ async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
     read($, roomHeld),
     read($, roomCrew),
     read($, roomForce),
+    read($, placeForce),
   ])
   const clock = new Date(now)
   const hour = clock.getHours()
@@ -298,6 +302,7 @@ async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
     holiday,
     character: who,
     hat: look.hat,
+    place: placeForced ?? g.place,
     items: ROOM_ITEMS.filter(id => isLit(g, id)),
     sky: {
       stars: look.stars === 0 ? 0 : look.stars < 12 ? 1 : 2,
@@ -494,6 +499,22 @@ export const register: Register = on => {
 
         return { text: `背景を「${ACTIVITY_NAMES[kind]}（${variant}）」で描くよ（/parade debug act off でもどる）` }
       }
+      // /parade debug place sea：買わずに、その立地で背景を描く。/parade debug place off でもどす（#59）
+      if (when === 'place' || when.startsWith('place ')) {
+        const word = when.slice('place'.length).trim()
+        if (word === 'off') {
+          await update($, placeForce, () => null)
+          await refreshRoom($)
+
+          return { text: '背景のおうちのまわりを、住んでいるところにもどしたよ' }
+        }
+        const place = (Object.keys(PLACE_NAMES) as PlaceId[]).find(p => p === word)
+        if (!place) return { text: `立地を選んでね（例: /parade debug place sea）。${(Object.keys(PLACE_NAMES) as PlaceId[]).join('・')}。もどすときは /parade debug place off` }
+        await update($, placeForce, () => place)
+        await refreshRoom($)
+
+        return { text: `背景を「${PLACE_NAMES[place]}」で描くよ（買ってはいないよ。/parade debug place off でもどる）` }
+      }
       const forced = WEATHER_WORDS[when]
       if (forced) {
         await update($, weatherOverride, () => forced)
@@ -516,7 +537,7 @@ export const register: Register = on => {
 
       return { text: picked === 'clawd' ? 'Clawd がやってきた！' : 'ねこたちがやってきた！' }
     }
-    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade theme（left・right） / /parade clawd / /parade cat / /parade debug / /parade debug 12/25 / /parade debug rain / /parade debug act' }
+    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade theme（left・right） / /parade clawd / /parade cat / /parade debug / /parade debug 12/25 / /parade debug rain / /parade debug act / /parade debug place' }
 
     const hidden = await update($, isHidden, v => !v)
 

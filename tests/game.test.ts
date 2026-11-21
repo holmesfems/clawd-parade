@@ -47,6 +47,7 @@ import {
   starPrice,
   starRate,
   switchCosmetic,
+  moveTo,
   toMilestone,
   toggleDream,
   toolTip,
@@ -847,10 +848,26 @@ test('restore：1.4.3 のセーブ（星の無いころ）はそのまま読め�
     passiveAt: 77,
   }
   const g = restore(JSON.parse(JSON.stringify(saved)), newGame(0, 5_000))
-  // 1.6.0 で足した項目（飾る夢・しまった空の飾り）は「まだ選んでいない」で、1.10.0 の日記（#43）は空で埋まる
-  expect(g).toEqual({ ...saved, shown: null, off: [], diary: {}, totals: {}, bestStreak: 0, passiveAt: 5_000 } as Game)
+  // 1.6.0 で足した項目（飾る夢・しまった空の飾り）は「まだ選んでいない」で、1.10.0 の日記（#43）は空で埋まる。1.18.0 の立地（#59）はいなか
+  expect(g).toEqual({ ...saved, shown: null, off: [], diary: {}, totals: {}, bestStreak: 0, place: 'country', passiveAt: 5_000 } as Game)
   expect(starCount(g)).toBe(0)
   expect(starRate(g)).toBe(1)
+})
+
+test('ひっこし（#59）：立地を買うとすぐ引っこし、買った立地といなかのあいだで引っこせる。買っていない立地の保存は、いなか', () => {
+  const rich = game({ hearts: 1e6 })
+  expect(rich.place).toBe('country')
+  const bought = buyCosmetic(rich, 'sea')
+  expect(bought.ok && bought.game.place).toBe('sea')
+  expect(bought.ok && bought.game.hearts).toBe(1e6 - 100_000)
+  const back = bought.ok ? moveTo(bought.game, 'country') : bought
+  expect(back.ok && back.game.place).toBe('country')
+  expect(moveTo(rich, 'city')).toEqual({ ok: false, reason: '街 はまだ買ってないよ' })
+  // 立地は「出す・しまう」ではない
+  expect(bought.ok && switchCosmetic(bought.game, 'sea').ok).toBe(false)
+  expect(restore({ hearts: 1, place: 'sea', owned: [] }, newGame(0, 5_000)).place).toBe('country')
+  expect(restore({ hearts: 1, place: 'sea', owned: ['sea'] }, newGame(0, 5_000)).place).toBe('sea')
+  expect(restore({ hearts: 1, place: 'moon', owned: ['moon'] }, newGame(0, 5_000)).place).toBe('country')
 })
 
 test('実績：100 億・1 兆・1 京を稼ぐ、星を 10・50・100 個贈る', () => {
@@ -1174,8 +1191,8 @@ test('restore：1.6.0 のセーブ（飾りを選んである）は、♡・強�
     passiveAt: 55,
   }
   const g = restore(JSON.parse(JSON.stringify(saved)), newGame(0, 5_000))
-  // 1.10.0 の日記（#43）は空で埋まる
-  expect(g).toEqual({ ...saved, diary: {}, totals: {}, bestStreak: 0, passiveAt: 5_000 } as Game)
+  // 1.10.0 の日記（#43）は空で埋まり、1.18.0 の立地（#59）はいなか
+  expect(g).toEqual({ ...saved, diary: {}, totals: {}, bestStreak: 0, place: 'country', passiveAt: 5_000 } as Game)
   expect(shownDreams(g)).toEqual(['greenTests', 'telescope', 'house', 'noBugs'])
   expect(lookOf(g, 5_000, null)).toMatchObject({ aurora: false, shootingStars: true, dreams: ['greenTests', 'telescope', 'house', 'noBugs'], stars: 24 })
   // 新しい段：贈った ♡ 9 兆は「うんめいのふたり」。実績はまだ渡していないので、次に見たときに取れる

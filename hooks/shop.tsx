@@ -43,6 +43,8 @@ import {
   toMilestone,
   toggleDream,
   wear,
+  moveTo,
+  PLACE_NAMES,
   workRate,
 } from './game'
 
@@ -72,13 +74,17 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
     const isWorn = c.hat !== undefined && g.hat === c.hat
     // 空の飾り（流れ星・オーロラ）は、ぼうしと同じように押すたびに出す・しまう（夢のプレゼントの枠は使わない）
     const isOn = isLit(g, c.id)
+    const isHome = c.place !== undefined && g.place === c.place
     const label =
       !isOwned ? `${c.name} ${formatHearts(c.price)}♡` :
+      c.place ? (isHome ? `${c.name} ✓住んでる` : `${c.name} へ引っこす`) :
       c.hat ? (isWorn ? `${c.name} ✓かぶってる` : `${c.name} をかぶる`) :
       isOn ? `${c.name} ✓出てる` : `${c.name} を出す`
     const press = !isOwned
-      ? buy(`${c.name} を買ったよ！`, one => buyCosmetic(one, c.id))
-      : c.hat
+      ? buy(c.place ? `${c.name} に引っこしたよ！` : `${c.name} を買ったよ！`, one => buyCosmetic(one, c.id))
+      : c.place
+        ? buy(`${c.name} に引っこしたよ！`, one => moveTo(one, c.place!))
+        : c.hat
         ? buy(isWorn ? `${c.name} をはずしたよ` : `${c.name} をかぶったよ！`, one => wear(one, isWorn ? null : c.hat ?? null))
         : buy(isOn ? `${c.name} をしまったよ` : `${c.name} を出したよ！`, one => switchCosmetic(one, c.id))
     const about = c.id === 'catEars' && who === 'neko' ? 'ねこはもとからねこみみ（Clawd だけ）' : c.about
@@ -86,6 +92,21 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
       <Box key={`c-${c.id}`} columnGap={1}>
         <Button key={`dress-${c.id}`} variant={!isOwned && g.hearts >= c.price ? 'primary' : 'secondary'} onPress={press}>
           {label}
+        </Button>
+        <Text dimColor wrap="truncate-end">
+          {about}
+        </Text>
+      </Box>
+    )
+  }
+
+  // ひっこしの、いなか（はじめから住んでいるところ。買わなくても選べる）
+  const move = (place: 'country', about: string) => {
+    const isHome = g.place === place
+    return (
+      <Box key={`p-${place}`} columnGap={1}>
+        <Button key={`move-${place}`} variant="secondary" onPress={buy(`${PLACE_NAMES[place]} に引っこしたよ！`, one => moveTo(one, place))}>
+          {isHome ? `${PLACE_NAMES[place]} ✓住んでる` : `${PLACE_NAMES[place]} へ引っこす`}
         </Button>
         <Text dimColor wrap="truncate-end">
           {about}
@@ -152,10 +173,14 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
       })}
 
       {header('きせかえ')}
-      {COSMETICS.filter(c => !c.room).map(dress)}
+      {COSMETICS.filter(c => !c.room && !c.place).map(dress)}
 
       {header('おへやのもの · デスクトップの背景（/parade theme）に出る')}
       {COSMETICS.filter(c => c.room).map(dress)}
+
+      {header(`ひっこし · 背景のおうちのまわり（いまは${PLACE_NAMES[g.place]}）`)}
+      {move('country', 'はじめのおうち。木とポストと、土の道')}
+      {COSMETICS.filter(c => c.place).map(dress)}
 
       {header(`プレゼント · なかよし度「${affection.name}」`)}
       <Text dimColor>

@@ -215,7 +215,7 @@ test('restore：1.9.0 のセーブ（日記の無いころ）は、ほかの項�
     passiveAt: 66,
   }
   const g = restore(JSON.parse(JSON.stringify(saved)), newGame(0, 5_000))
-  expect(g).toEqual({ ...saved, diary: {}, totals: {}, bestStreak: 0, passiveAt: 5_000 } as Game)
+  expect(g).toEqual({ ...saved, diary: {}, totals: {}, bestStreak: 0, place: 'country', passiveAt: 5_000 } as Game)
   // 合わせても、古い日を消しても、ほかの項目は変わらない
   expect(tidyDiary(g, TODAY)).toBe(g)
   expect(mergeGame(g, g, g)).toEqual(g)

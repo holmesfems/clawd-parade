@@ -1,7 +1,7 @@
 // なでなでゲームのルール。♡ の稼ぎ方・コンボ・フィーバー・お店・実績を、
 // $ に触らない純粋な関数だけで書く。保存や表示は register.tsx の仕事。
 
-import type { AchievementId, CosmeticId, DreamId, Friend, Game, GiftId, Hat, Holding, Look, Pets, TouchKind, TreatId, UpgradeId, Work } from '../types'
+import type { AchievementId, CosmeticId, DreamId, Friend, Game, GiftId, Hat, Holding, Look, Pets, PlaceId, TouchKind, TreatId, UpgradeId, Work } from '../types'
 import type { Holiday } from './palette'
 
 // ---- 数字 ---------------------------------------------------------------
@@ -64,6 +64,7 @@ export function newGame(hearts: number, now: number): Game {
     levels: {},
     owned: [],
     hat: null,
+    place: 'country',
     achievements: [],
     lastUnlock: null,
     gifts: {},
@@ -100,6 +101,8 @@ export function restore(saved: unknown, fallback: Game): Game {
     achievements: (stringsOf(saved.achievements) as AchievementId[] | undefined) ?? fallback.achievements,
     // 持っていないぼうしはかぶらない
     hat: saved.hat === null || (isHat(saved.hat) && owned.includes(saved.hat)) ? saved.hat : null,
+    // 買っていない立地には住まない（1.17 までの保存には place が無いので、いなか）
+    place: saved.place === 'country' || (isPlace(saved.place) && owned.includes(saved.place)) ? saved.place : 'country',
     lastUnlock: saved.lastUnlock === null || isStamp(saved.lastUnlock, isAchievementId) ? saved.lastUnlock : fallback.lastUnlock,
     lastGift: saved.lastGift === null || isStamp(saved.lastGift, isGiftId) ? saved.lastGift : fallback.lastGift,
     favorite: saved.favorite === null || isFavoriteId(saved.favorite) ? saved.favorite : fallback.favorite,
@@ -172,6 +175,7 @@ const isStamp = <T>(v: unknown, isId: (id: unknown) => id is T): v is { id: T; a
   isRecord(v) && isId(v.id) && isFiniteNumber(v.at)
 
 const isHat = (v: unknown): v is Hat => COSMETICS.some(c => c.hat !== undefined && c.hat === v)
+const isPlace = (v: unknown): v is Exclude<PlaceId, 'country'> => COSMETICS.some(c => c.place !== undefined && c.place === v)
 
 const isGiftId = (v: unknown): v is GiftId => typeof v === 'string' && Object.hasOwn(GIFTS, v)
 
@@ -275,6 +279,8 @@ const MERGE: { [K in keyof Game]-?: PolicyFor<Game[K]> } = {
   levels: 'counts',
   owned: 'union',
   hat: 'latest',
+  // 別のセッションで引っこしたら、あとから引っこしたほう
+  place: 'latest',
   achievements: 'union',
   lastUnlock: 'latest',
   gifts: 'counts',
@@ -353,8 +359,9 @@ export const UPGRADES: Upgrade[] = [
   { id: 'stardust', name: '星のかけら', about: '放置で ♡ +2/秒', base: 1000, growth: 1.15 },
 ]
 
-// room はデスクトップの背景のおへやに出るもの（/parade theme）。ショップでは「おへやのもの」に並べる
-export type Cosmetic = { id: CosmeticId; name: string; about: string; price: number; hat?: Hat; room?: true }
+// room はデスクトップの背景のおへやに出るもの（/parade theme）。ショップでは「おへやのもの」に並べる。
+// place は背景のおうちのまわり（#59）。ショップでは「ひっこし」に並べ、買ったら引っこす
+export type Cosmetic = { id: CosmeticId; name: string; about: string; price: number; hat?: Hat; room?: true; place?: Exclude<PlaceId, 'country'> }
 
 export const COSMETICS: Cosmetic[] = [
   { id: 'ribbon', name: 'リボン', about: '頭の角にちょこんと', price: 300, hat: 'ribbon' },
@@ -369,7 +376,13 @@ export const COSMETICS: Cosmetic[] = [
   { id: 'poster', name: '星のポスター', about: 'かべにはる', price: 5000, room: true },
   { id: 'garland', name: 'きらきらガーランド', about: 'かべの上で、かわりばんこに光る', price: 12_000, room: true },
   { id: 'fishbowl', name: '金魚ばち', about: '窓辺で金魚がおよぐ', price: 30_000, room: true },
+  { id: 'city', name: '街', about: 'ビルの夜景と街灯、アスファルトの道', price: 50_000, place: 'city' },
+  { id: 'sea', name: '海辺', about: 'きらめく海とヤシの木、遠くの灯台', price: 100_000, place: 'sea' },
+  { id: 'mountain', name: '山', about: '雪の山なみと、もみの木とたき火', price: 200_000, place: 'mountain' },
 ]
+
+// ショップの「ひっこし」の名前（いなかは、はじめから住んでいるところ）
+export const PLACE_NAMES: Record<PlaceId, string> = { country: 'いなか', city: '街', sea: '海辺', mountain: '山' }
 
 // お店の取り引きの結果：買えたら新しいゲーム、買えなければ断る理由
 export type Dealt = { ok: true; game: Game } | { ok: false; reason: string }
@@ -420,8 +433,13 @@ export function buyCosmetic(g: Game, id: CosmeticId): Dealt {
   if (!c) return no('そんな商品はないよ')
   if (g.owned.includes(id)) return no(`${c.name} はもう持ってるよ`)
   if (g.hearts < c.price) return short(c.price, g)
-  // 買ったぼうしはすぐかぶる
-  return ok({ ...g, hearts: g.hearts - c.price, owned: [...g.owned, id], hat: c.hat ?? g.hat })
+  // 買ったぼうしはすぐかぶり、買った立地へはすぐ引っこす
+  return ok({ ...g, hearts: g.hearts - c.price, owned: [...g.owned, id], hat: c.hat ?? g.hat, place: c.place ?? g.place })
+}
+
+// 買った立地（いなかはいつでも）へ引っこす（#59）
+export function moveTo(g: Game, place: PlaceId): Dealt {
+  return place === 'country' || g.owned.includes(place) ? ok({ ...g, place }) : no(`${PLACE_NAMES[place]} はまだ買ってないよ`)
 }
 
 // 持っているぼうしをかぶる（null ではずす）
@@ -435,7 +453,7 @@ export const isLit = (g: Game, id: CosmeticId) => g.owned.includes(id) && !g.off
 // 買った空の飾りを出す・しまう（押すたびに入れ替わる）。夢のプレゼントの枠は使わない
 export function switchCosmetic(g: Game, id: CosmeticId): Dealt {
   const c = COSMETICS.find(one => one.id === id)
-  if (!c || c.hat !== undefined) return no('そんな飾りはないよ')
+  if (!c || c.hat !== undefined || c.place !== undefined) return no('そんな飾りはないよ')
   if (!g.owned.includes(id)) return no(`${c.name} はまだ持ってないよ`)
   return ok({ ...g, off: g.off.includes(id) ? g.off.filter(one => one !== id) : [...g.off, id] })
 }
@@ -782,7 +800,7 @@ export const ACHIEVEMENTS = [
   { id: 'glove25', name: '手袋マニア', about: 'やわらか手袋 Lv25', test: f => levelOf(f.game, 'glove') >= 25 },
   { id: 'idle10', name: 'ほうちプレイ', about: '放置で ♡ 10/秒', test: f => f.rate >= 10 },
   { id: 'hat', name: 'おしゃれさん', about: 'ぼうしを買う', test: f => COSMETICS.some(c => c.hat && f.game.owned.includes(c.id)) },
-  { id: 'collector', name: 'コレクター', about: 'きせかえを全部そろえる', test: f => COSMETICS.every(c => c.room || f.game.owned.includes(c.id)) },
+  { id: 'collector', name: 'コレクター', about: 'きせかえを全部そろえる', test: f => COSMETICS.every(c => c.room || c.place || f.game.owned.includes(c.id)) },
   { id: 'gift1', name: 'はじめてのプレゼント', about: 'Clawd に贈り物をする', test: f => f.game.given > 0 },
   {
     id: 'sweets10',
