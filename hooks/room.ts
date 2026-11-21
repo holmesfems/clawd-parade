@@ -95,7 +95,7 @@ export type Held = Required<RoomHeld>
 // しごとごとの絵の名前。最初のものが、いつもの絵。足すときは後ろに足す（場面の名前に並びの番号を入れるので、並びを変えない）
 export type VariantTable = Record<Activity, readonly string[]>
 export const VARIANTS: VariantTable = {
-  rest: ['sofa'],
+  rest: ['sofa', 'phone', 'game', 'mug', 'music', 'stretch'],
   sleep: ['sofa'],
   think: ['desk'],
   research: ['book'],
@@ -362,10 +362,20 @@ const DESK_X = 51
 const DESK_DROP = 6
 const DESK_TOP = 27 + DESK_DROP
 
-function poseOf(a: Activity): Pose {
+// くつろぐの絵ごとのポーズ（#57）。ソファに座るものは、いつものくつろぐと同じ場所
+const REST_POSES: Record<string, Partial<Pose>> = {
+  phone: { eyes: 'down' },
+  game: { eyes: 'down', motion: 'jig' },
+  mug: { eyes: 'happy', motion: 'br slow' },
+  music: { eyes: 'happy', motion: 'groove' },
+  // 体操は、床のヨガマットの上に立って、のびちぢみする（腕は上げない：手を上げた形は不自然に見えた）
+  stretch: { x: 22, y: FLOOR - 11, isSitting: false, eyes: 'happy', motion: 'squat' },
+}
+
+function poseOf(a: Activity, variant: string): Pose {
   switch (a) {
     case 'rest':
-      return { x: 7, y: 37, isSitting: true, mood: 'idle', eyes: 'open', motion: 'br' }
+      return { x: 7, y: 37, isSitting: true, mood: 'idle', eyes: 'open', motion: 'br', ...REST_POSES[variant] }
     case 'sleep':
       return { x: 7, y: 37, isSitting: true, mood: 'sleeping', eyes: 'blink', motion: 'br slow' }
     case 'sad':
@@ -404,7 +414,7 @@ export function roomSvg(s: RoomScene): string {
   const layers: Layer[] = []
   const add = (cls: string, g: Grid, extra: Partial<Layer> = {}) => layers.push({ cls, g, ...extra })
   const back = blank()
-  const pose = poseOf(s.activity)
+  const pose = poseOf(s.activity, s.variant)
 
   // 窓の外 ----
   const overcast = s.weather !== 'clear'
@@ -484,9 +494,12 @@ export function roomSvg(s: RoomScene): string {
     heroLayers.push({ cls: '', g: hatLayer })
   }
   if (s.activity === 'research') heroLayers.push(...book(hx, hy, body))
+  if (s.activity === 'rest') heroLayers.push(...heldProps(s.variant, hx, hy, body))
   // 座っているときは机・ソファのうしろ、立っているときは家具の前（床の上）に描く
   const heroGroup: Layer = { cls: `hero ${pose.motion}`, g: blank(), nested: heroLayers }
   if (pose.isSitting) layers.push(heroGroup)
+  // 音楽：ソファの座面の右に小さなラジオ（座面の前のふちにかくれる高さ）
+  if (s.activity === 'rest' && s.variant === 'music') add('', radio())
 
   // 机（座っている Clawd の前）
   const desk = blank()
@@ -514,6 +527,13 @@ export function roomSvg(s: RoomScene): string {
 
   // しきもの
   if (s.items.includes('rug')) add('', rug())
+  // 体操のヨガマット（立っている Clawd の足もと）
+  if (s.activity === 'rest' && s.variant === 'stretch') {
+    const mat = blank()
+    rect(mat, pose.x - 3, FLOOR - 1, 24, 1, 0x6fb7a8)
+    rect(mat, pose.x - 3, FLOOR - 1, 1, 1, 0x4f8f84)
+    add('', mat)
+  }
 
   // 立っている Clawd（机・ソファ・しきものの前）
   if (!pose.isSitting) layers.push(heroGroup)
@@ -801,6 +821,77 @@ function sign(hx: number, hy: number, lift = 0): Grid {
   return g
 }
 
+// ---- くつろぐの小物（#57） ----
+// p 画面のわく・s 光る画面・S 画面のすじ・g ゲーム機・G 画面・r y ボタン・m マグ・M マグのもよう・n 音符・b ラジオ・B スピーカー
+const stampRest = stampWith({
+  p: 0x2a2c3a,
+  s: 0x8fe7ff,
+  S: 0x4fb8d8,
+  g: 0x4a4c5e,
+  G: 0x9fe08a,
+  H: 0x5fae5f,
+  r: 0xff6b6b,
+  y: 0xffd166,
+  m: 0xf5f0e6,
+  M: 0x6ec6ff,
+  n: 0xffe9a8,
+  b: 0xc65a4f,
+  B: 0x3a2a2a,
+  w: C.white,
+})
+const PHONE = ['ppp', 'pss', 'psp', 'pss', 'ppp']
+const PHONE_SCROLL_A = ['...', '.S.', '...', '..S', '...']
+const PHONE_SCROLL_B = ['...', '..S', '...', '.S.', '...']
+const GAME = ['.gggggg.', 'gggGGggg', 'gpgGGgyg', '.gggggr.']
+const GAME_BLINK = ['........', '...HH...', '...HH...', '........']
+const MUG = ['mmm..', 'mMmmm', 'mmm.m', 'mmmm.']
+const NOTE = ['.n', '.n', 'nn']
+const RADIO = ['.bbbb.', 'bBBbBb', 'bBBbbb', 'bbbbbb']
+
+// 手にもつ小物。体と一緒に呼吸・ゆれするよう、Clawd の層に入れる。位置は体の幅から決める（ねこは細い）
+function heldProps(variant: string, hx: number, hy: number, body: Sprite): Layer[] {
+  const mid = hx + Math.floor(body.w / 2)
+  // 右手にもつ小物の左上。目にかからないところ（Clawd は目の右下、ねこは目が低いので体の右はし）
+  const hand = body.w >= 18 ? { x: hx + 13, y: hy + 4 } : { x: hx + body.w - 3, y: hy + 5 }
+  const g = blank()
+  switch (variant) {
+    case 'phone': {
+      stampRest(g, PHONE, hand.x, hand.y)
+      const a = blank()
+      const b = blank()
+      stampRest(a, PHONE_SCROLL_A, hand.x, hand.y)
+      stampRest(b, PHONE_SCROLL_B, hand.x, hand.y)
+      return [{ cls: '', g }, { cls: 'fa slow', g: a }, { cls: 'fb slow', g: b }]
+    }
+    case 'game': {
+      // ゲーム機は、体のまんなかより 3 ドット右（まんなかだと、顔の下に貼りついて見えた）
+      stampRest(g, GAME, mid - 1, hy + 4)
+      const blinkScreen = blank()
+      stampRest(blinkScreen, GAME_BLINK, mid - 1, hy + 4)
+      return [{ cls: '', g }, { cls: 'fa', g: blinkScreen }]
+    }
+    case 'mug': {
+      stampRest(g, MUG, hand.x, hand.y)
+      // 湯気が 2 すじ、ずらして上がる
+      const steam = [0, 1].map(i => {
+        const sg = blank()
+        dot(sg, hand.x + i, hand.y - 2 - i, 0xe8e4ee)
+        dot(sg, hand.x + i, hand.y - 3 - i, 0xe8e4ee)
+        return { cls: 'smoke', g: sg, style: `animation-delay:-${i * 2}s` }
+      })
+      return [{ cls: '', g }, ...steam]
+    }
+    default:
+      return []
+  }
+}
+
+function radio(): Grid {
+  const g = blank()
+  stampRest(g, RADIO, 24, 41)
+  return g
+}
+
 // 本と虫めがねの色。w 紙・s 綴じ目と紙のかげ・l 字の行・c 表紙・m 虫めがねのわく・j レンズ・h 柄
 const stampBook = stampWith({ w: 0xf5f0e6, s: 0xc9bfae, l: 0x9a9cad, c: 0x8a5a44, m: 0xb0b6c8, j: 0x8ad8ff, h: 0x6b4a3a, W: C.white })
 
@@ -909,8 +1000,17 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
       add('float', heart)
       break
     }
+    case 'rest': {
+      if (s.variant !== 'music') break
+      // ラジオから音符が浮かんで消える
+      ;[0, 1, 2].forEach(i => {
+        const n = blank()
+        stampRest(n, NOTE, 25 + i * 2, 37 - (i % 2) * 2)
+        add('zz', n, { style: `animation-delay:${(i * 1.1).toFixed(1)}s` })
+      })
+      break
+    }
     case 'wait':
-    case 'rest':
     case 'write':
     case 'research':
       break
@@ -1037,6 +1137,9 @@ const STYLE = [
   '@keyframes come{0%{transform:translateX(-60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
   '@keyframes comer{0%{transform:translateX(60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
   '.sway.slow{animation-duration:7s}',
+  // くつろぐの絵の動き（#57）：ゲームの小刻みなゆれ・音楽のリズム・体操ののびちぢみ
+  '.jig{animation:bob .55s steps(1,end) infinite}.groove{animation:bob .7s steps(1,end) infinite}',
+  '.squat{transform-box:fill-box;transform-origin:50% 100%;animation:squat 1.4s steps(1,end) infinite}@keyframes squat{0%{transform:scaleY(1)}50%{transform:scaleY(.86)}}',
   // 道を通るねこ：80 秒のうち 24 秒で、窓の左はしの外から右はしの外まで歩く（窓の幅の枠を、自分の幅の割合で動かす）
   '.stroll{transform-box:fill-box;animation:stroll 80s linear infinite;animation-delay:-50s}',
   '@keyframes stroll{0%{transform:translateX(0)}30%{transform:translateX(104%)}100%{transform:translateX(104%)}}',
