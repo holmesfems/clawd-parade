@@ -89,7 +89,7 @@ test('表情からしごとを決める。おわった・エラー・とめら�
 
 test('しごとは 10 秒は続ける。おへんじ待ち・おわった・エラーなど知らせたいことと、待ち・ねむるから出るときはすぐ', () => {
   // 絵が 1 つずつの表で、しごとの続け方だけを確かめる
-  const one = Object.fromEntries(Object.entries(VARIANTS).map(([k, v]) => [k, v.slice(0, 1)])) as VariantTable
+  const one = Object.fromEntries(Object.entries(VARIANTS).map(([k, v]) => [k, v.slice(0, 1)])) as unknown as VariantTable
   const hold = (prev: Parameters<typeof holdActivity>[0], next: Activity, now: number) => holdActivity(prev, next, now, null, one)
   const held = (kind: Activity, since: number) => ({ kind, since, variant: VARIANTS[kind][0]!, variantSince: since })
   const start = hold(null, 'rest', 0)
@@ -114,7 +114,7 @@ test('しごとのバリエーション：ツールの意味で決まる絵は�
   // ツールに結びついた絵（web・folders）は、ほかのツールのときには選ばない
   for (let t = 0; t < 40_000; t += 1_000) expect(['book', 'flask']).toContain(variantOf('research', 'Read', null, t, table))
   // 絵が無ければ、ツールに結びつけていても使わない
-  expect(variantOf('research', 'WebSearch', null, 0)).toBe('book')
+  expect(variantOf('research', 'WebSearch', null, 0, { ...VARIANTS, research: ['book'] })).toBe('book')
   // avoid の絵は選ばない
   for (let t = 0; t < 40_000; t += 1_000) expect(variantOf('rest', null, 'sofa', t, table)).not.toBe('sofa')
 
@@ -188,14 +188,14 @@ test('まばたきは目を閉じた体をまるごと重ね、ぼうしはそ�
 })
 
 test('しらべるは、見開きの本をめくり、虫めがねで探す（「?」は出さない）。止まった絵では開いた本だけ', () => {
-  const svg = roomSvg({ ...BASE, activity: 'research' })
+  const svg = roomSvg({ ...BASE, activity: 'research', variant: 'book' })
   for (const cls of ['pf pf1', 'pf pf2', 'pf pf3', 'seek']) expect(svg).toContain(`class="${cls}"`)
   // めくる紙は、見えない（opacity:0）ところから出す。動きを減らす設定では開いた本だけが残る
   expect(svg).toContain('.pf{opacity:0;')
   expect(svg).not.toContain('.pf{opacity:1')
   // 「?」は出さない（ふわふわ浮く「?」の層があった）
   expect(svg).not.toContain('class="float"')
-  expect(roomSvg({ ...BASE, activity: 'research', character: 'neko' })).toContain('class="seek"')
+  expect(roomSvg({ ...BASE, activity: 'research', variant: 'book', character: 'neko' })).toContain('class="seek"')
 })
 
 test('おうちの外：空・地面・道・おうち・庭を描く。歩いて来る仲間は道の上、残りはおへやの中。アプリで止まる書き方は使わない', () => {
@@ -237,6 +237,24 @@ test('くつろぐの絵（#57）：スマホ・ゲーム・マグ・音楽・�
   expect(roomSvg({ ...BASE, variant: 'music' }).match(/class="zz"/g)).toHaveLength(3)
   expect(roomSvg({ ...BASE, variant: 'stretch' })).toContain('class="hero squat"')
   expect(roomSvg({ ...BASE, variant: 'game' })).toContain('class="hero jig"')
+})
+
+test('しらべるの絵（#58）：web 検索は WebSearch・WebFetch、フォルダ探しは Grep・Glob・LS のとき。ほかは本か実験', () => {
+  expect(VARIANTS.research).toEqual(['book', 'web', 'folders', 'flask'])
+  expect(variantOf('research', 'WebFetch', null, 0)).toBe('web')
+  expect(variantOf('research', 'Grep', null, 0)).toBe('folders')
+  for (let t = 0; t < 30_000; t += 1_000) expect(['book', 'flask']).toContain(variantOf('research', 'Read', null, t))
+  const research = { ...BASE, activity: 'research' as const }
+  for (const character of ['clawd', 'neko'] as const) {
+    expect(new Set(VARIANTS.research.map(variant => roomSvg({ ...research, character, variant }))).size).toBe(4)
+  }
+  // 虫めがねは本のときは Clawd の層（seek）、フォルダ探しのときは床を順に見る（scan）
+  expect(roomSvg({ ...research, variant: 'book' })).toContain('class="seek"')
+  expect(roomSvg({ ...research, variant: 'folders' })).toContain('class="scan"')
+  expect(roomSvg({ ...research, variant: 'web' })).not.toContain('class="seek"')
+  // フォルダ探しのとき、仲間はフォルダの上ではねない
+  const hops = roomSvg({ ...research, variant: 'folders', friends: 3 }).match(/class="hop"/g)?.length ?? 0
+  expect(hops).toBeLessThan(3)
 })
 
 test('外のにぎやかさ：鳥（昼の晴れ・くもり）・遠くの丘・煙 3 つ・道を通るねこ（雨と雪はお休み）・庭の季節の生きもの', () => {
@@ -290,7 +308,7 @@ test('/parade debug act で、しごとと絵を選んで背景に描き（保�
   expect(VARIANTS.rest).toContain(sceneOf(calls.at(-1))!.variant)
   expect((await runParade($, 'debug act research')).text).toBe('背景を「しらべる（book）」で描くよ（/parade debug act off でもどる）')
   expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'research', variant: 'book' })
-  expect((await runParade($, 'debug act research nope')).text).toBe('しらべるの絵は book だよ')
+  expect((await runParade($, 'debug act research nope')).text).toBe(`しらべるの絵は ${VARIANTS.research.join('・')} だよ`)
   expect((await runParade($, 'debug act')).text).toContain('しごとを選んでね')
   expect((await runParade($, 'debug act rest stretch')).text).toBe('背景を「くつろぐ（stretch）」で描くよ（/parade debug act off でもどる）')
   expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'rest', variant: 'stretch' })

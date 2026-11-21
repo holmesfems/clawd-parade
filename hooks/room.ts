@@ -98,7 +98,7 @@ export const VARIANTS: VariantTable = {
   rest: ['sofa', 'phone', 'game', 'mug', 'music', 'stretch'],
   sleep: ['sofa'],
   think: ['desk'],
-  research: ['book'],
+  research: ['book', 'web', 'folders', 'flask'],
   write: ['type'],
   run: ['gears'],
   fight: ['bug'],
@@ -387,6 +387,10 @@ function poseOf(a: Activity, variant: string): Pose {
     case 'run':
       return { x: DESK_X, y: DESK_TOP, isSitting: true, mood: 'working', eyes: 'open', motion: 'bob' }
     case 'research':
+      // web 検索・実験は机で、フォルダ探しは床（フォルダは右の机の下）、本はいつもどおり立って読む（#58）
+      if (variant === 'web') return { x: DESK_X, y: DESK_TOP, isSitting: true, mood: 'working', eyes: 'open', motion: 'bob' }
+      if (variant === 'flask') return { x: DESK_X, y: DESK_TOP, isSitting: true, mood: 'working', eyes: 'down', motion: 'bob' }
+      if (variant === 'folders') return { x: 20, y: FLOOR - 11, isSitting: false, mood: 'working', eyes: 'down', motion: 'bob' }
       return { x: 38, y: FLOOR - 11, isSitting: false, mood: 'working', eyes: 'down', motion: 'bob' }
     case 'fight':
       return { x: 44, y: FLOOR - 11, isSitting: false, mood: 'error', eyes: 'sad', motion: 'ty' }
@@ -466,7 +470,7 @@ export function roomSvg(s: RoomScene): string {
   rect(monitor, 37, 24 + DESK_DROP, 13, 10, SCREEN)
   rect(monitor, 42, 35 + DESK_DROP, 3, 1, METAL)
   add('', monitor)
-  screen(s.activity, add)
+  screen(s.activity, s.variant, add)
 
   // Clawd（とぼうし）。まばたきは、違うマスだけを重ねてときどき見せる
   const hx = pose.x
@@ -493,7 +497,7 @@ export function roomSvg(s: RoomScene): string {
     drawHat(hatLayer, s.hat, s.character === 'clawd', hx, hy)
     heroLayers.push({ cls: '', g: hatLayer })
   }
-  if (s.activity === 'research') heroLayers.push(...book(hx, hy, body))
+  if (s.activity === 'research' && s.variant === 'book') heroLayers.push(...book(hx, hy, body))
   if (s.activity === 'rest') heroLayers.push(...heldProps(s.variant, hx, hy, body))
   // 座っているときは机・ソファのうしろ、立っているときは家具の前（床の上）に描く
   const heroGroup: Layer = { cls: `hero ${pose.motion}`, g: blank(), nested: heroLayers }
@@ -766,8 +770,25 @@ function holidayProps(s: RoomScene, add: (cls: string, g: Grid) => void) {
 
 // ---- モニターの中 ----
 
-function screen(a: Activity, add: (cls: string, g: Grid, extra?: Partial<Layer>) => void) {
-  if (a === 'write') {
+function screen(a: Activity, variant: string, add: (cls: string, g: Grid, extra?: Partial<Layer>) => void) {
+  if (a === 'research' && variant === 'web') {
+    // 検索バー（白・左に小さな虫めがね）と、結果の行が 1 行ずつ出てくる（#58）
+    const bar = blank()
+    rect(bar, 38, 25 + DESK_DROP, 11, 2, 0xf5f0e6)
+    dot(bar, 39, 25 + DESK_DROP, 0x8ab4ff)
+    rect(bar, 41, 26 + DESK_DROP, 5, 1, 0x9a9cad)
+    add('', bar)
+    for (let i = 0; i < 3; i++) {
+      const line = blank()
+      rect(line, 38, 29 + DESK_DROP + i * 2, 4 + Math.floor(hash(i + 9) * 6), 1, i === 0 ? 0x8ab4ff : 0x6f8fc8)
+      add('ln', line, { style: `animation-delay:${i * 0.5}s` })
+    }
+  } else if (a === 'research' && variant === 'flask') {
+    // 実験のグラフ：波の線が光る
+    const wave = blank()
+    ;[2, 1, 1, 2, 3, 3, 2, 1, 2, 3, 2].forEach((dy, i) => dot(wave, 38 + i, 27 + DESK_DROP + dy, 0x7ee081))
+    add('tw', wave)
+  } else if (a === 'write') {
     // コードの行が 1 行ずつ出てくる
     for (let i = 0; i < 6; i++) {
       const line = blank()
@@ -1010,10 +1031,79 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
       })
       break
     }
+    case 'research':
+      researchProps(s.variant, add)
+      break
     case 'wait':
     case 'write':
-    case 'research':
       break
+  }
+}
+
+// ---- しらべるの絵の小物（#58） ----
+const stampLab = stampWith({
+  o: 0x4f8fc6,
+  g: 0x6fae6a,
+  s: 0x8a6450,
+  y: 0xe8c45a,
+  Y: 0xc9a33d,
+  f: 0xcfe8f0,
+  L: 0x7ee081,
+  r: 0xff6b6b,
+  b: 0x6ec6ff,
+  w: 0x6b4a3a,
+})
+const GLOBE = ['.oo.', 'oooo', 'oooo', '.oo.', '.ss.', 'ssss']
+const GLOBE_LAND_A = ['.g..', 'gg..', '..g.', '....']
+const GLOBE_LAND_B = ['..g.', '.gg.', '...g', '....']
+const FOLDER = ['yy...', 'yyyyy', 'yYyyy', 'yyyyy']
+const FLASK = ['..f..', '..f..', '.fLf.', 'fLLLf', 'fLLLf', '.fff.']
+const RACK = ['r.b.L', 'r.b.L', 'wwwww']
+// フォルダを並べる床の場所（左はし）
+const FOLDER_XS = [41, 48, 55]
+
+function researchProps(variant: string, add: (cls: string, g: Grid, extra?: Partial<Layer>) => void) {
+  const deskTop = 36 + DESK_DROP
+  switch (variant) {
+    case 'web': {
+      // 机の右はしで、地球儀がまわる
+      const globe = blank()
+      stampLab(globe, GLOBE, 67, deskTop - 6)
+      add('', globe)
+      const a = blank()
+      const b = blank()
+      stampLab(a, GLOBE_LAND_A, 67, deskTop - 6)
+      stampLab(b, GLOBE_LAND_B, 67, deskTop - 6)
+      add('fa slow', a)
+      add('fb slow', b)
+      break
+    }
+    case 'folders': {
+      // 床のフォルダを、虫めがねが左から順に見ていく
+      const folders = blank()
+      for (const x of FOLDER_XS) stampLab(folders, FOLDER, x, FLOOR - 4)
+      add('', folders)
+      const lens = blank()
+      stampBook(lens, LENS, FOLDER_XS[0]! - 1, FLOOR - 11)
+      add('scan', lens)
+      break
+    }
+    case 'flask': {
+      // 机の上のフラスコから泡が上がり、モニターの前に試験管立て
+      const lab = blank()
+      stampLab(lab, FLASK, 63, deskTop - 6)
+      stampLab(lab, RACK, 37, deskTop - 3)
+      add('', lab)
+      ;[0, 1, 2].forEach(i => {
+        const bubble = blank()
+        dot(bubble, 65, deskTop - 7 - i, 0xb8f5c8)
+        add('zz', bubble, { style: `animation-delay:${(i * 1.1).toFixed(1)}s` })
+      })
+      break
+    }
+    default: {
+      // 本：虫めがねは book() が Clawd の層に描く
+    }
   }
 }
 
@@ -1022,7 +1112,11 @@ function friends(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, extra?: P
   const n = Math.min(3, s.friends) - s.arriving
   if (n <= 0) return
   // 床で、Clawd とバグにかさならない場所
-  const taken = [...(!pose.isSitting ? [{ from: pose.x - 2, to: pose.x + 20 }] : []), ...(s.activity === 'fight' ? [{ from: 22, to: 39 }] : [])]
+  const taken = [
+    ...(!pose.isSitting ? [{ from: pose.x - 2, to: pose.x + 20 }] : []),
+    ...(s.activity === 'fight' ? [{ from: 22, to: 39 }] : []),
+    ...(s.activity === 'research' && s.variant === 'folders' ? [{ from: FOLDER_XS[0]! - 2, to: FOLDER_XS.at(-1)! + 6 }] : []),
+  ]
   const slots = [37, 49, 61, 12, 24].filter(x => taken.every(t => x + 11 < t.from || x > t.to))
   slots.slice(0, n).forEach((fx, i) => {
     const g = blank()
@@ -1137,6 +1231,8 @@ const STYLE = [
   '@keyframes come{0%{transform:translateX(-60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
   '@keyframes comer{0%{transform:translateX(60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
   '.sway.slow{animation-duration:7s}',
+  // フォルダ探しの虫めがね：3 つのフォルダを 1 秒ずつ見る（#58）
+  '.scan{animation:scan 3s steps(1,end) infinite}@keyframes scan{0%{transform:translateX(0)}33%{transform:translateX(7px)}66%{transform:translateX(14px)}}',
   // くつろぐの絵の動き（#57）：ゲームの小刻みなゆれ・音楽のリズム・体操ののびちぢみ
   '.jig{animation:bob .55s steps(1,end) infinite}.groove{animation:bob .7s steps(1,end) infinite}',
   '.squat{transform-box:fill-box;transform-origin:50% 100%;animation:squat 1.4s steps(1,end) infinite}@keyframes squat{0%{transform:scaleY(1)}50%{transform:scaleY(.86)}}',
