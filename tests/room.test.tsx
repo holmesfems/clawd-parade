@@ -282,6 +282,20 @@ test('かく・うごかす・かんがえるの絵（#58）：組み立て・�
   expect(roomSvg({ ...BASE, activity: 'run', variant: 'gears' })).toContain('class="spin rev"')
 })
 
+test('同じ絵の中の小さな変化（#60）：考えごとの電球・スマホの ♡・ゲームの星・うごかすのチェックが、長いくり返しの終わりにだけ出る', () => {
+  // 電球が光るあいだは「…」を消し（hush）、「あっ！」の顔を重ねる（電球と顔で blip が 2 つ）
+  const think = roomSvg({ ...BASE, activity: 'think', variant: 'desk' })
+  expect(think.match(/class="blip"/g)).toHaveLength(2)
+  expect(think).toContain('class="hush"')
+  expect(roomSvg({ ...BASE, activity: 'think', variant: 'board' })).toContain('class="blip"')
+  expect(roomSvg({ ...BASE, activity: 'rest', variant: 'phone' })).toContain('class="pop"')
+  expect(roomSvg({ ...BASE, activity: 'rest', variant: 'game' })).toContain('class="blip" style="animation-duration:9s"')
+  expect(roomSvg({ ...BASE, activity: 'run', variant: 'panel' })).toContain('class="blip" style="animation-duration:10s"')
+  // ふだんの絵には出ない。止まった絵では見えない（なくても意味が分かる飾りだけ）
+  expect(roomSvg({ ...BASE, activity: 'rest', variant: 'sofa' })).not.toMatch(/class="(blip|pop)"/)
+  expect(roomSvg(BASE)).toContain('.blip{opacity:0;')
+})
+
 test('外のにぎやかさ：鳥（昼の晴れ・くもり）・遠くの丘・煙 3 つ・道を通るねこ（雨と雪はお休み）・庭の季節の生きもの', () => {
   const day = roomSvg({ ...BASE, time: 'day' })
   expect(day.match(/<g class="cloud" fill="#3a3f55"/g)).toHaveLength(2)
