@@ -405,12 +405,15 @@ function poseOf(a: Activity, variant: string): Pose {
 }
 
 // Clawd（ねこ）のスプライト。座っているときは足を描かない
-function hero(s: RoomScene, pose: Pose, eyes: Pose['eyes']): Sprite {
+// isSurprised は「あっ！」の顔（目を丸くして、口を少し開ける）。かんがえるで電球が光るとき（#60）
+function hero(s: RoomScene, pose: Pose, eyes: Pose['eyes'], isSurprised = false): Sprite {
   if (s.character === 'clawd') {
     const sp = clawd(pose.mood, eyes, 0, 0)
+    // 開けた口（2×2）。Clawd の口の場所（よこ 8〜9・たて 5〜6）
+    if (isSurprised) for (const [x, y] of [[8, 5], [9, 5], [8, 6], [9, 6]] as const) sp.px[y]![x] = C.eye
     return pose.isSitting ? cropped(sp, 8) : sp
   }
-  const mouth = pose.mood === 'done' ? 'smile' : pose.mood === 'error' || pose.mood === 'aborted' ? 'frown' : pose.mood === 'question' ? 'open' : 'smile'
+  const mouth = isSurprised ? 'open' : pose.mood === 'done' ? 'smile' : pose.mood === 'error' || pose.mood === 'aborted' ? 'frown' : pose.mood === 'question' ? 'open' : 'smile'
   const sp = leader(eyes, mouth, 0, null)
   return pose.isSitting ? cropped(sp, sp.h - 2) : sp
 }
@@ -495,6 +498,12 @@ export function roomSvg(s: RoomScene): string {
     const blinkLayer = blank()
     blit(blinkLayer, hero(s, pose, 'blink'), hx, hy)
     heroLayers.push({ cls: 'blink', g: blinkLayer })
+  }
+  // かんがえる：電球が光るあいだだけ「あっ！」の顔を重ねる（電球と同じ .blip のくり返し）（#60）
+  if (s.activity === 'think') {
+    const surprised = blank()
+    blit(surprised, hero(s, pose, 'wide', true), hx, hy)
+    heroLayers.push({ cls: 'blip', g: surprised })
   }
   // 札は、ぼうしがあるときはぼうしの上まで上げる（#52）
   if (s.activity === 'wait') heroLayers.push({ cls: '', g: sign(hx, hy, s.hat ? HAT_ROOM : 0) })
@@ -889,14 +898,20 @@ function heldProps(variant: string, hx: number, hy: number, body: Sprite): Layer
       const b = blank()
       stampRest(a, PHONE_SCROLL_A, hand.x, hand.y)
       stampRest(b, PHONE_SCROLL_B, hand.x, hand.y)
-      return [{ cls: '', g }, { cls: 'fa slow', g: a }, { cls: 'fb slow', g: b }]
+      // 15 秒に 1 回、画面から ♡ がぽんと出る（#60）
+      const heart = blank()
+      put(heart, 'small', hand.x, hand.y - 4, C.heart)
+      return [{ cls: '', g }, { cls: 'fa slow', g: a }, { cls: 'fb slow', g: b }, { cls: 'pop', g: heart }]
     }
     case 'game': {
       // ゲーム機は、体のまんなかより 3 ドット右（まんなかだと、顔の下に貼りついて見えた）
       stampRest(g, GAME, mid - 1, hy + 4)
       const blinkScreen = blank()
       stampRest(blinkScreen, GAME_BLINK, mid - 1, hy + 4)
-      return [{ cls: '', g }, { cls: 'fa', g: blinkScreen }]
+      // ときどき、頭の上にきらっと星（うまくいった！）（#60）
+      const star = blank()
+      put(star, 'spark', hx + body.w - 3, hy - 4, C.spark)
+      return [{ cls: '', g }, { cls: 'fa', g: blinkScreen }, { cls: 'blip', g: star, style: 'animation-duration:9s' }]
     }
     case 'mug': {
       stampRest(g, MUG, hand.x, hand.y)
@@ -978,12 +993,17 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
       break
     }
     case 'think': {
-      // 考えごとの「…」が、ひとつずつ光る
-      ;[0, 1, 2].forEach(i => {
+      // 考えごとの「…」が、ひとつずつ光る。電球が光るあいだは消す（hush）
+      const dots = [0, 1, 2].map(i => {
         const d = blank()
         rect(d, cx - 2 + i * 3, top - (s.hat ? 9 : 4), 2, 2, C.white)
-        add('ln', d, { style: `animation-delay:${i * 0.5}s;animation-duration:2s` })
+        return { cls: 'ln', g: d, style: `animation-delay:${i * 0.5}s;animation-duration:2s` }
       })
+      add('hush', blank(), { nested: dots })
+      // 12 秒に 1 回、頭の上で電球がピカッ（ひらめいた！）。そのあいだ Clawd は「あっ！」の顔（#60）
+      const bulb = blank()
+      stampWork(bulb, BULB, cx - 1, top - (s.hat ? 10 : 5))
+      add('blip', bulb)
       break
     }
     case 'run': {
@@ -1007,6 +1027,10 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
         rect(lamp, 69, 34 + DESK_DROP, 2, 1, 0x7ee081)
         add('tw quick', lamp)
       } else if (s.variant === 'panel') controlPanel(add)
+      // 10 秒に 1 回、モニターに緑のチェック（うまく動いた）（#60）
+      const check = blank()
+      stampWork(check, CHECK, 45, 25 + DESK_DROP)
+      add('blip', check, { style: 'animation-duration:10s' })
       break
     }
     case 'fight': {
@@ -1081,6 +1105,9 @@ const stampWork = stampWith({
   l: 0x6f8fc8,
   e: 0xe07a6f,
 })
+// ひらめきの電球と、うまく動いたチェック（#60）
+const BULB = ['.O.', 'OOO', 'OOO', '.s.']
+const CHECK = ['...g', '..g.', 'g.g.', '.g..']
 const BLOCKS = ['..y..', '.rrb.', '.rrbb', 'bbrrb']
 const WRENCH = ['s.s', 'sss', '.s.', '.s.']
 const STOVE = ['kkkkkkkk', 'kSSSSSSk', 'kkkkkkkk', 'k......k', 'k......k']
@@ -1386,6 +1413,10 @@ const STYLE = [
   '@keyframes comer{0%{transform:translateX(60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
   '.sway.slow{animation-duration:7s}',
   '.spin.rev{animation-direction:reverse}',
+  // 同じ絵の中の小さな変化（#60）：blip は長いくり返しの終わりにだけ少し見え、pop は上へ浮かんで消える
+  '.blip{opacity:0;animation:blip 12s steps(1,end) infinite}@keyframes blip{0%{opacity:0}88%{opacity:1}97%{opacity:0}}',
+  '.hush{animation:hush 12s steps(1,end) infinite}@keyframes hush{0%{opacity:1}88%{opacity:0}97%{opacity:1}}',
+  '.pop{opacity:0;animation:pop 15s linear infinite}@keyframes pop{0%{opacity:0;transform:translate(0,0)}90%{opacity:0;transform:translate(0,0)}92%{opacity:1}100%{opacity:0;transform:translate(1px,-6px)}}',
   // ホワイトボード：6 秒で図を 1 つずつ書き足し（wb1〜wb4）、88% で消す。マーカーは書くところへ動く
   '.wb{opacity:0;animation:6s steps(1,end) infinite}.wb1{animation-name:wb1}.wb2{animation-name:wb2}.wb3{animation-name:wb3}.wb4{animation-name:wb4}',
   '@keyframes wb1{0%{opacity:0}8%{opacity:1}88%{opacity:0}}@keyframes wb2{0%{opacity:0}28%{opacity:1}88%{opacity:0}}',
