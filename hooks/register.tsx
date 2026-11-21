@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, DiaryKind, RoomCrew, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
+import type { Character, DiaryKind, RoomCrew, RoomForce, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
 import { bandView } from './band'
 import { dayOf, record, tidyDiary } from './diary'
 import type { Deal, Situation } from './game'
@@ -34,7 +34,8 @@ import {
 } from './game'
 import { messageOf } from './message'
 import { HOLIDAY_NAMES, SEASON_NAMES, calendarOf, parseMonthDay, timeOfDay } from './palette'
-import { ACTIVITY_NAMES, ROOM_ITEMS, RULER_SCENE, activityOf, crewOf, holdActivity, parseScene, roomSvg, rulerSvg, sceneName } from './room'
+import { ACTIVITY_NAMES, ROOM_ITEMS, RULER_SCENE, VARIANTS, activityOf, crewOf, holdActivity, parseScene, roomSvg, rulerSvg, sceneName } from './room'
+import type { Activity } from './room'
 import type { RoomScene, Side } from './room'
 import { isMarching } from './scene'
 import { WEATHER_NAMES, WEATHER_WORDS, weatherAt } from './weather'
@@ -92,6 +93,8 @@ const holding = atom({ plugin: 'clawd-parade', key: 'holding' } as const, null a
 const backdrop = atom({ plugin: 'clawd-parade', key: 'backdrop' } as const, false)
 const backdropSide = atom({ plugin: 'clawd-parade', key: 'backdropSide' } as const, 'right' as Side)
 const roomHeld = atom({ plugin: 'clawd-parade', key: 'roomHeld' } as const, null as RoomHeld | null)
+// /parade debug act で選んだ、見てみたいしごとと絵（#56。絵を確かめるため）。このセッションだけで、保存しない
+const roomForce = atom({ plugin: 'clawd-parade', key: 'roomForce' } as const, null as RoomForce | null)
 const roomCrew = atom({ plugin: 'clawd-parade', key: 'roomCrew' } as const, { count: 0, arriving: 0, since: 0 } as RoomCrew)
 const roomScene = atom({ plugin: 'clawd-parade', key: 'roomScene' } as const, null as string | null)
 
@@ -258,7 +261,7 @@ const giveTreat = ($: EngineInterface, id: TreatId) => buy($, `🎁 ${giftOf(id)
 
 // いまの state から、背景に描く場面を作る。絵を決めるものは全部ここに入れる（背景のフックは名前しか見ない）
 async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
-  const [m, list, w, who, g, held, pinned, forced, side, prev, prevCrew] = await Promise.all([
+  const [m, list, w, who, g, held, pinned, forced, side, prev, prevCrew, force] = await Promise.all([
     read($, mood),
     read($, friends),
     read($, work),
@@ -270,6 +273,7 @@ async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
     read($, backdropSide),
     read($, roomHeld),
     read($, roomCrew),
+    read($, roomForce),
   ])
   const clock = new Date(now)
   const hour = clock.getHours()
@@ -277,13 +281,15 @@ async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
   const weather = forced ?? weatherAt(clock.getFullYear(), date.month, date.day, hour)
   const { season, holiday } = calendarOf(date.month, date.day)
   const look = lookOf(g, now, held, holiday)
-  const kept = holdActivity(prev, activityOf(m, w.isRunning ? w.tool : null, now), now)
+  const tool = w.isRunning ? w.tool : null
+  const kept = holdActivity(prev, activityOf(m, tool, now), now, tool)
   if (kept !== prev) await update($, roomHeld, () => kept)
   // 来た仲間は、しばらく庭の道を歩いてから中に入る
   const crew = crewOf(prevCrew, list.filter(f => f.doneAt === null).length, now)
   if (crew !== prevCrew) await update($, roomCrew, () => crew)
   return {
-    activity: kept.kind,
+    activity: force?.kind ?? kept.kind,
+    variant: force?.variant ?? kept.variant,
     friends: crew.count,
     arriving: crew.arriving,
     time: timeOfDay(hour),
@@ -469,6 +475,25 @@ export const register: Register = on => {
 
         return { text: hadWeather ? '日付と天気を今日にもどしたよ' : '日付を今日にもどしたよ' }
       }
+      // /parade debug act research web：しごとと絵を選んで背景に描く。/parade debug act off でもどす（#56）
+      if (when === 'act' || when.startsWith('act ')) {
+        const [kindWord, variantWord] = when.slice('act'.length).trim().split(/\s+/)
+        const list = (Object.keys(VARIANTS) as Activity[]).map(k => `${k}（${VARIANTS[k].join('・')}）`).join(' / ')
+        if (kindWord === 'off') {
+          await update($, roomForce, () => null)
+          await refreshRoom($)
+
+          return { text: '背景のしごとを、Claude のようすにもどしたよ' }
+        }
+        const kind = kindWord && Object.hasOwn(VARIANTS, kindWord) ? (kindWord as Activity) : null
+        if (!kind) return { text: `しごとを選んでね（例: /parade debug act rest sofa）。${list}。もどすときは /parade debug act off` }
+        const variant = variantWord ?? VARIANTS[kind][0]!
+        if (!VARIANTS[kind].includes(variant)) return { text: `${ACTIVITY_NAMES[kind]}の絵は ${VARIANTS[kind].join('・')} だよ` }
+        await update($, roomForce, () => ({ kind, variant }))
+        await refreshRoom($)
+
+        return { text: `背景を「${ACTIVITY_NAMES[kind]}（${variant}）」で描くよ（/parade debug act off でもどる）` }
+      }
       const forced = WEATHER_WORDS[when]
       if (forced) {
         await update($, weatherOverride, () => forced)
@@ -491,7 +516,7 @@ export const register: Register = on => {
 
       return { text: picked === 'clawd' ? 'Clawd がやってきた！' : 'ねこたちがやってきた！' }
     }
-    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade theme（left・right） / /parade clawd / /parade cat / /parade debug / /parade debug 12/25 / /parade debug rain' }
+    if (arg !== '') return { text: '使い方: /parade（表示切り替え） / /parade shop / /parade theme（left・right） / /parade clawd / /parade cat / /parade debug / /parade debug 12/25 / /parade debug rain / /parade debug act' }
 
     const hidden = await update($, isHidden, v => !v)
 

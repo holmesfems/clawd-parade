@@ -4,12 +4,14 @@ import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { HOLD_MS, ROOM_ITEMS, STAY_MS, WALK_MS, activityOf, crewOf, holdActivity, parseScene, roomSvg, sceneName, toolActivity } from '../hooks/room'
+import { HOLD_MS, REST_TURN_MS, ROOM_ITEMS, STAY_MS, VARIANTS, WALK_MS, activityOf, crewOf, holdActivity, parseScene, roomSvg, sceneName, toolActivity, variantOf } from '../hooks/room'
+import type { VariantTable } from '../hooks/room'
 import type { Activity, RoomScene } from '../hooks/room'
 import { boot, mountBand, mountShop, runParade, startSession, veteran } from './helpers'
 
 const BASE: RoomScene = {
   activity: 'rest',
+  variant: 'sofa',
   friends: 0,
   arriving: 0,
   time: 'night',
@@ -41,7 +43,7 @@ const ACTIVITIES: Activity[] = ['rest', 'sleep', 'think', 'research', 'write', '
 
 test('場面の名前は 64 文字までの英数字と - で、名前から同じ場面にもどせる', () => {
   for (const activity of ACTIVITIES) {
-    for (const scene of [{ ...BASE, activity }, { ...FULL, activity }]) {
+    for (const scene of [{ ...BASE, activity, variant: VARIANTS[activity][0]! }, { ...FULL, activity, variant: VARIANTS[activity][0]! }]) {
       const name = sceneName(scene)
       expect(name).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
       expect(parseScene(name)).toEqual(scene)
@@ -49,6 +51,11 @@ test('場面の名前は 64 文字までの英数字と - で、名前から同�
   }
   expect(parseScene('lagoon')).toBeNull()
   expect(parseScene('r1-zz0-ncax-cx-0-0-R')).toBeNull()
+  // 1.14.0 までの名前（r1）と、無い絵の番号は読まない
+  expect(parseScene('r1-re0-dcax-cx-0-0-R')).toBeNull()
+  expect(parseScene('r2-rez0-dcax-cx-0-0-R')).toBeNull()
+  // 絵の番号は、しごとの名前のすぐあとの 1 文字
+  expect(sceneName(BASE).startsWith('r2-re00-')).toBe(true)
 })
 
 // ---- しごと ----
@@ -81,16 +88,46 @@ test('表情からしごとを決める。おわった・エラー・とめら�
 })
 
 test('しごとは 10 秒は続ける。おへんじ待ち・おわった・エラーなど知らせたいことと、待ち・ねむるから出るときはすぐ', () => {
+  const held = (kind: Activity, since: number) => ({ kind, since, variant: VARIANTS[kind][0]!, variantSince: since })
   const start = holdActivity(null, 'rest', 0)
-  expect(start).toEqual({ kind: 'rest', since: 0 })
+  expect(start).toEqual(held('rest', 0))
   expect(holdActivity(start, 'research', 3_000)).toBe(start)
-  expect(holdActivity(start, 'research', HOLD_MS)).toEqual({ kind: 'research', since: HOLD_MS })
-  const research = { kind: 'research' as const, since: 0 }
+  expect(holdActivity(start, 'research', HOLD_MS)).toEqual(held('research', HOLD_MS))
+  const research = held('research', 0)
   expect(holdActivity(research, 'write', 2_000)).toBe(research)
-  expect(holdActivity(research, 'wait', 2_000)).toEqual({ kind: 'wait', since: 2_000 })
-  expect(holdActivity(research, 'done', 2_000)).toEqual({ kind: 'done', since: 2_000 })
-  expect(holdActivity({ kind: 'wait', since: 0 }, 'run', 1_000)).toEqual({ kind: 'run', since: 1_000 })
-  expect(holdActivity({ kind: 'sleep', since: 0 }, 'rest', 1_000)).toEqual({ kind: 'rest', since: 1_000 })
+  expect(holdActivity(research, 'wait', 2_000)).toEqual(held('wait', 2_000))
+  expect(holdActivity(research, 'done', 2_000)).toEqual(held('done', 2_000))
+  expect(holdActivity(held('wait', 0), 'run', 1_000)).toEqual(held('run', 1_000))
+  expect(holdActivity(held('sleep', 0), 'rest', 1_000)).toEqual(held('rest', 1_000))
+  // 1.14.0 までの値（variant が無い）は、いつもの絵として読む
+  expect(holdActivity({ kind: 'write', since: 0 }, 'write', 1_000)).toEqual(held('write', 0))
+})
+
+test('しごとのバリエーション：ツールの意味で決まる絵は固定、それ以外はほかの絵から選ぶ。くつろぐは 60 秒ごとに変わる', () => {
+  // 絵を足したつもりの表で確かめる（いまの VARIANTS は、どのしごとも絵が 1 つ）
+  const table: VariantTable = { ...VARIANTS, rest: ['sofa', 'phone', 'game', 'mug'], research: ['book', 'web', 'folders', 'flask'] }
+  expect(variantOf('research', 'WebSearch', null, 0, table)).toBe('web')
+  expect(variantOf('research', 'Glob', null, 0, table)).toBe('folders')
+  // ツールに結びついた絵（web・folders）は、ほかのツールのときには選ばない
+  for (let t = 0; t < 40_000; t += 1_000) expect(['book', 'flask']).toContain(variantOf('research', 'Read', null, t, table))
+  // 絵が無ければ、ツールに結びつけていても使わない
+  expect(variantOf('research', 'WebSearch', null, 0)).toBe('book')
+  // avoid の絵は選ばない
+  for (let t = 0; t < 40_000; t += 1_000) expect(variantOf('rest', null, 'sofa', t, table)).not.toBe('sofa')
+
+  // 同じしごとのまま、ツールの意味で決まる絵が変わったら（HOLD_MS たってから）変える
+  const reading = holdActivity(null, 'research', 0, 'Read', table)
+  expect(holdActivity(reading, 'research', 3_000, 'WebFetch', table)).toBe(reading)
+  const web = holdActivity(reading, 'research', HOLD_MS, 'WebFetch', table)
+  expect(web.variant).toBe('web')
+  expect(web.since).toBe(0)
+  // くつろぐは 60 秒ごとに、前と違う絵へ。寝るときはすぐ
+  const rest = holdActivity(null, 'rest', 0, null, table)
+  expect(holdActivity(rest, 'rest', REST_TURN_MS - 1, null, table)).toBe(rest)
+  const turned = holdActivity(rest, 'rest', REST_TURN_MS, null, table)
+  expect(turned.variant).not.toBe(rest.variant)
+  expect(turned.variantSince).toBe(REST_TURN_MS)
+  expect(holdActivity(turned, 'sleep', REST_TURN_MS + 1, null, table).kind).toBe('sleep')
 })
 
 test('来た仲間は、しばらく庭の道を歩いてから中に入る。すぐ用事が終わっても、中でひと息つくまではいる', () => {
@@ -229,6 +266,20 @@ const sceneOf = (call: { backdrop?: { scene: string } } | undefined) => (call?.b
 
 const mountBackdrop = ($: Engine, scene: string, plugin = 'clawd-parade') =>
   $.ui.mount({ plugin: 'clawd-parade', surface: 'desktop', component: 'Backdrop', requestId: 'backdrop', props: { scene, plugin, glass: { blur: 8, opacity: 0.5 } } })
+
+test('/parade debug act で、しごとと絵を選んで背景に描き（保存しない）、off で Claude のようすにもどす（#56）', async ($, on) => {
+  const calls = themes(on)
+  boot(on, { store: veteran() })
+  await startSession($, 'desktop')
+  await runParade($, 'theme')
+  expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'rest', variant: 'sofa' })
+  expect((await runParade($, 'debug act research')).text).toBe('背景を「しらべる（book）」で描くよ（/parade debug act off でもどる）')
+  expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'research', variant: 'book' })
+  expect((await runParade($, 'debug act research nope')).text).toBe('しらべるの絵は book だよ')
+  expect((await runParade($, 'debug act')).text).toContain('しごとを選んでね')
+  expect((await runParade($, 'debug act off')).text).toBe('背景のしごとを、Claude のようすにもどしたよ')
+  expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'rest', variant: 'sofa' })
+})
 
 test('/parade theme で背景をおへやにし、帯はセリフとなでるボタンだけ。left・right で置く側。もう一度でしまう', async ($, on) => {
   const calls = themes(on)

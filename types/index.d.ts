@@ -75,8 +75,11 @@ export type CosmeticId = Hat | 'shootingStars' | 'aurora' | RoomItemId
 
 // 背景のおへやで Clawd がしていること（Claude のようすから決める）
 export type RoomActivity = 'rest' | 'sleep' | 'think' | 'research' | 'write' | 'run' | 'fight' | 'wait' | 'done' | 'sad'
-// いまのしごとと、いつからか（しごとは少なくとも 10 秒続ける）
-export type RoomHeld = { kind: RoomActivity; since: number }
+// いまのしごとと、いつからか（しごとは少なくとも 10 秒続ける）。variant はそのしごとのどの絵か（#56）と、いつからその絵か。
+// 1.14.0 までに入った値には variant が無い（読んだときに、そのしごとのいつもの絵にする）
+export type RoomHeld = { kind: RoomActivity; since: number; variant?: string; variantSince?: number }
+// /parade debug act で選んだ、見てみたいしごとと絵。このセッションだけで、保存しない
+export type RoomForce = { kind: RoomActivity; variant: string }
 // 背景のおへやに来ている仲間の数と、そのうち庭の道を歩いて来ているところの数（since は歩きはじめた時刻）
 export type RoomCrew = { count: number; arriving: number; since: number }
 
@@ -254,6 +257,7 @@ declare module 'claude-code' {
       backdropSide: 'right' | 'left'
       // 背景のおへやの、いまのしごと
       roomHeld: RoomHeld | null
+      roomForce: RoomForce | null
       roomCrew: RoomCrew
       // いま背景に出している場面の名前（同じなら $.theme.set を呼ばない）
       roomScene: string | null

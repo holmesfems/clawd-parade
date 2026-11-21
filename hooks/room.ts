@@ -88,16 +88,71 @@ export const HOLD_MS = 10_000
 // 知らせたいこと（おへんじ待ち・おわった・エラーなど）には、すぐ切りかえる
 const URGENT: Activity[] = ['wait', 'done', 'fight', 'sad', 'sleep']
 
-export type Held = RoomHeld
+// しごとと、その絵。holdActivity が返すものは、いつも variant と variantSince がある
+export type Held = Required<RoomHeld>
 
-export function holdActivity(prev: Held | null, next: Activity, now: number): Held {
-  if (prev === null) return { kind: next, since: now }
-  if (prev.kind === next) return prev
-  // おへんじ待ち・ねむるから出るときも、すぐ（待たせたまま 10 秒そのままにしない）
-  if (URGENT.includes(next) || prev.kind === 'wait' || prev.kind === 'sleep' || now - prev.since >= HOLD_MS) {
-    return { kind: next, since: now }
+// ---- しごとのバリエーション（#56） ----
+// しごとごとの絵の名前。最初のものが、いつもの絵。足すときは後ろに足す（場面の名前に並びの番号を入れるので、並びを変えない）
+export type VariantTable = Record<Activity, readonly string[]>
+export const VARIANTS: VariantTable = {
+  rest: ['sofa'],
+  sleep: ['sofa'],
+  think: ['desk'],
+  research: ['book'],
+  write: ['type'],
+  run: ['gears'],
+  fight: ['bug'],
+  wait: ['sign'],
+  done: ['hop'],
+  sad: ['sofa'],
+}
+// ツールの意味で決まる絵。その名前が VARIANTS にあるときだけ使う（無ければ、ほかの絵から選ぶ）
+export const TOOL_VARIANTS: Partial<Record<Activity, readonly { tools: RegExp; variant: string }[]>> = {
+  research: [
+    { tools: /^(WebSearch|WebFetch)$/, variant: 'web' },
+    { tools: /^(Grep|Glob|LS)$/, variant: 'folders' },
+  ],
+}
+// くつろぐは、寝るまでのあいだ、この間ごとに絵を変える
+export const REST_TURN_MS = 60_000
+
+const fixedVariant = (kind: Activity, tool: string | null, table: VariantTable) =>
+  tool === null ? undefined : TOOL_VARIANTS[kind]?.find(t => t.tools.test(tool) && table[kind].includes(t.variant))?.variant
+
+// そのしごとの絵を選ぶ。ツールの意味で決まるならそれ、決まらなければツールに結びついていない絵から、avoid 以外を選ぶ。
+// 選ぶのは時刻から決まる乱数（同じ時刻なら同じ絵）
+export function variantOf(kind: Activity, tool: string | null, avoid: string | null, now: number, table: VariantTable = VARIANTS): string {
+  const names = table[kind]
+  const fixed = fixedVariant(kind, tool, table)
+  if (fixed) return fixed
+  const bound = new Set((TOOL_VARIANTS[kind] ?? []).map(t => t.variant))
+  const free = names.filter(n => !bound.has(n))
+  const pool = free.length > 1 && avoid !== null ? free.filter(n => n !== avoid) : free
+  return pool[Math.floor(hash(Math.floor(now / 1000) + 77) * pool.length)] ?? names[0]!
+}
+
+// しごとを続けるか変えるかと、その絵。tool はいま使っているツール（ツールの意味で絵を決めるため）
+export function holdActivity(prev: RoomHeld | null, next: Activity, now: number, tool: string | null = null, table: VariantTable = VARIANTS): Held {
+  const start = (avoid: string | null): Held => ({ kind: next, since: now, variant: variantOf(next, tool, avoid, now, table), variantSince: now })
+  if (prev === null) return start(null)
+  // 古い版の値（variant が無い・もう無い絵）は、そのしごとのいつもの絵にする
+  const current = prev.variant !== undefined && table[prev.kind].includes(prev.variant) ? prev.variant : table[prev.kind][0]!
+  const held: Held = current === prev.variant && prev.variantSince !== undefined ? (prev as Held) : { kind: prev.kind, since: prev.since, variant: current, variantSince: prev.variantSince ?? prev.since }
+  if (held.kind === next) {
+    // 同じしごとのまま：ツールの意味で決まる絵が変わったら、絵を少なくとも HOLD_MS 見せてから変える
+    if (now - held.variantSince < HOLD_MS) return held
+    const fixed = fixedVariant(next, tool, table)
+    if (fixed !== undefined && fixed !== held.variant) return { ...held, variant: fixed, variantSince: now }
+    // くつろぐは、REST_TURN_MS ごとに別の絵へ
+    if (next === 'rest' && now - held.variantSince >= REST_TURN_MS) {
+      const turned = variantOf(next, tool, held.variant, now, table)
+      return turned === held.variant ? held : { ...held, variant: turned, variantSince: now }
+    }
+    return held
   }
-  return prev
+  // おへんじ待ち・ねむるから出るときも、すぐ（待たせたまま 10 秒そのままにしない）
+  if (URGENT.includes(next) || held.kind === 'wait' || held.kind === 'sleep' || now - held.since >= HOLD_MS) return start(null)
+  return held
 }
 
 // 来た仲間は、庭の道を歩いておうちに入る。歩いているあいだ（WALK_MS）は「歩いている場面」、入ったら「中ではねる場面」に変える
@@ -137,6 +192,8 @@ export type Side = 'right' | 'left'
 
 export type RoomScene = {
   activity: Activity
+  // そのしごとのどの絵か（VARIANTS の名前）
+  variant: string
   // 来ている仲間（3 匹まで描く）
   friends: number
   // そのうち、庭の道を歩いて来ているところの数（残りは、おへやの床ではねる）
@@ -185,8 +242,8 @@ export function sceneName(s: RoomScene): string {
   const items = ROOM_ITEMS.reduce<number>((n, id, i) => (s.items.includes(id) ? n | (1 << i) : n), 0)
   const sky = SKY_FLAGS.reduce<number>((n, key, i) => (s.sky[key] ? n | (1 << (i + 2)) : n), s.sky.stars)
   return [
-    'r1',
-    `${ACT_CODES[s.activity]}${Math.max(0, Math.min(3, s.friends))}${s.arriving > 0 ? Math.min(3, s.arriving) : ''}`,
+    'r2',
+    `${ACT_CODES[s.activity]}${Math.max(0, VARIANTS[s.activity].indexOf(s.variant)).toString(36)}${Math.max(0, Math.min(3, s.friends))}${s.arriving > 0 ? Math.min(3, s.arriving) : ''}`,
     `${TIME_CODES[s.time]}${WEATHER_CODES[s.weather]}${SEASON_CODES[s.season]}${HOLIDAY_CODES[s.holiday ?? 'none']}`,
     `${s.character === 'clawd' ? 'c' : 'n'}${HAT_CODES[s.hat ?? 'none']}`,
     items.toString(36),
@@ -197,10 +254,12 @@ export function sceneName(s: RoomScene): string {
 
 // 名前から場面にもどす。読めない名前は null
 export function parseScene(name: string): RoomScene | null {
-  const m = /^r1-([a-z]{2})([0-3])([1-3])?-([a-z])([a-z])([a-z])([a-z])-([cn])([a-z])-([0-9a-z]+)-([0-9a-z]+)-([RL])$/.exec(name)
+  const m = /^r2-([a-z]{2})([0-9a-z])([0-3])([1-3])?-([a-z])([a-z])([a-z])([a-z])-([cn])([a-z])-([0-9a-z]+)-([0-9a-z]+)-([RL])$/.exec(name)
   if (!m) return null
-  const [, act, friends, arriving, time, weather, season, holiday, char, hat, items, sky, side] = m
+  const [, act, variantCode, friends, arriving, time, weather, season, holiday, char, hat, items, sky, side] = m
   const activity = ACT_OF[act!]
+  const variant = activity ? VARIANTS[activity][parseInt(variantCode!, 36)] : undefined
+  if (!variant) return null
   const t = TIME_OF[time!]
   const w = WEATHER_OF[weather!]
   const se = SEASON_OF[season!]
@@ -211,6 +270,7 @@ export function parseScene(name: string): RoomScene | null {
   const skyBits = parseInt(sky!, 36)
   return {
     activity,
+    variant,
     friends: Number(friends),
     arriving: Math.min(Number(friends), Number(arriving ?? 0)),
     time: t,
