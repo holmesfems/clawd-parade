@@ -52,9 +52,21 @@ test('仲間が増えて、終わると表情とセリフが変わる', async ($
   expect(await textOf(done, /ほめて/)).toBeDefined()
   expect(await done.find({ key: 'parade' })).toBeUndefined()
   await done.unmount()
+})
 
-  // 3 分で寝る（おわってから 3 秒たっているので、ここから 3 分でちょうど寝たあと）。
-  // おわったあとは毎コマ描き直すので、1 コマずつ進む時計を長く進めると、このテストだけで数秒かかった
+// 3 分で寝るのは別のテストにする：時計を 3 分進めると、1 コマ（200ms）ずつ 900 コマ動かすので、それだけで 1〜3 秒かかる。
+// 上のテストに入れていたときは、CI が混んでいると 5 秒の枠を超えて落ちた
+test('おわってから 3 分たつと、寝る', async ($, on) => {
+  const { clock } = boot(on, { store: veteran() })
+  await startSession($, 'terminal')
+  await $.turn.start({ text: 'つぎ', turnId: 't1' })
+  await completeTurn($, { turnId: 't1', answer: 'できました！' })
+  await clock.advance(3_000)
+  const done = await mountBand($, 'terminal', 50, 4)
+  expect(await textOf(done, /ほめて/)).toBeDefined()
+  await done.unmount()
+
+  // おわってから 3 秒たっているので、ここから 3 分でちょうど寝たあと
   await clock.advance(3 * 60 * 1000)
   const sleepy = await mountBand($, 'terminal')
   expect(await textOf(sleepy, /すやすや/)).toBeDefined()
