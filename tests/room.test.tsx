@@ -88,17 +88,20 @@ test('表情からしごとを決める。おわった・エラー・とめら�
 })
 
 test('しごとは 10 秒は続ける。おへんじ待ち・おわった・エラーなど知らせたいことと、待ち・ねむるから出るときはすぐ', () => {
+  // 絵が 1 つずつの表で、しごとの続け方だけを確かめる
+  const one = Object.fromEntries(Object.entries(VARIANTS).map(([k, v]) => [k, v.slice(0, 1)])) as VariantTable
+  const hold = (prev: Parameters<typeof holdActivity>[0], next: Activity, now: number) => holdActivity(prev, next, now, null, one)
   const held = (kind: Activity, since: number) => ({ kind, since, variant: VARIANTS[kind][0]!, variantSince: since })
-  const start = holdActivity(null, 'rest', 0)
+  const start = hold(null, 'rest', 0)
   expect(start).toEqual(held('rest', 0))
-  expect(holdActivity(start, 'research', 3_000)).toBe(start)
-  expect(holdActivity(start, 'research', HOLD_MS)).toEqual(held('research', HOLD_MS))
+  expect(hold(start, 'research', 3_000)).toBe(start)
+  expect(hold(start, 'research', HOLD_MS)).toEqual(held('research', HOLD_MS))
   const research = held('research', 0)
-  expect(holdActivity(research, 'write', 2_000)).toBe(research)
-  expect(holdActivity(research, 'wait', 2_000)).toEqual(held('wait', 2_000))
-  expect(holdActivity(research, 'done', 2_000)).toEqual(held('done', 2_000))
-  expect(holdActivity(held('wait', 0), 'run', 1_000)).toEqual(held('run', 1_000))
-  expect(holdActivity(held('sleep', 0), 'rest', 1_000)).toEqual(held('rest', 1_000))
+  expect(hold(research, 'write', 2_000)).toBe(research)
+  expect(hold(research, 'wait', 2_000)).toEqual(held('wait', 2_000))
+  expect(hold(research, 'done', 2_000)).toEqual(held('done', 2_000))
+  expect(hold(held('wait', 0), 'run', 1_000)).toEqual(held('run', 1_000))
+  expect(hold(held('sleep', 0), 'rest', 1_000)).toEqual(held('rest', 1_000))
   // 1.14.0 までの値（variant が無い）は、いつもの絵として読む
   expect(holdActivity({ kind: 'write', since: 0 }, 'write', 1_000)).toEqual(held('write', 0))
 })
@@ -224,6 +227,18 @@ test('おうちの外：空・地面・道・おうち・庭を描く。歩い�
   }
 })
 
+test('くつろぐの絵（#57）：スマホ・ゲーム・マグ・音楽・体操。どれも違う絵で、場面の名前から同じ絵にもどせる。Clawd とねこの両方', () => {
+  expect(VARIANTS.rest).toEqual(['sofa', 'phone', 'game', 'mug', 'music', 'stretch'])
+  for (const character of ['clawd', 'neko'] as const) {
+    const pictures = new Set(VARIANTS.rest.map(variant => roomSvg({ ...BASE, character, variant })))
+    expect(pictures.size).toBe(VARIANTS.rest.length)
+  }
+  for (const variant of VARIANTS.rest) expect(parseScene(sceneName({ ...FULL, variant }))).toEqual({ ...FULL, variant })
+  expect(roomSvg({ ...BASE, variant: 'music' }).match(/class="zz"/g)).toHaveLength(3)
+  expect(roomSvg({ ...BASE, variant: 'stretch' })).toContain('class="hero squat"')
+  expect(roomSvg({ ...BASE, variant: 'game' })).toContain('class="hero jig"')
+})
+
 test('外のにぎやかさ：鳥（昼の晴れ・くもり）・遠くの丘・煙 3 つ・道を通るねこ（雨と雪はお休み）・庭の季節の生きもの', () => {
   const day = roomSvg({ ...BASE, time: 'day' })
   expect(day.match(/<g class="cloud" fill="#3a3f55"/g)).toHaveLength(2)
@@ -272,13 +287,15 @@ test('/parade debug act で、しごとと絵を選んで背景に描き（保�
   boot(on, { store: veteran() })
   await startSession($, 'desktop')
   await runParade($, 'theme')
-  expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'rest', variant: 'sofa' })
+  expect(VARIANTS.rest).toContain(sceneOf(calls.at(-1))!.variant)
   expect((await runParade($, 'debug act research')).text).toBe('背景を「しらべる（book）」で描くよ（/parade debug act off でもどる）')
   expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'research', variant: 'book' })
   expect((await runParade($, 'debug act research nope')).text).toBe('しらべるの絵は book だよ')
   expect((await runParade($, 'debug act')).text).toContain('しごとを選んでね')
+  expect((await runParade($, 'debug act rest stretch')).text).toBe('背景を「くつろぐ（stretch）」で描くよ（/parade debug act off でもどる）')
+  expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'rest', variant: 'stretch' })
   expect((await runParade($, 'debug act off')).text).toBe('背景のしごとを、Claude のようすにもどしたよ')
-  expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'rest', variant: 'sofa' })
+  expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'rest' })
 })
 
 test('/parade theme で背景をおへやにし、帯はセリフとなでるボタンだけ。left・right で置く側。もう一度でしまう', async ($, on) => {
