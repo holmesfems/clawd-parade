@@ -31,6 +31,10 @@ export function boot(on: On, { now = 1_000, store = {} }: { now?: number; store?
     afterSet.run?.(e.key, held.get(e.key))
     return { value: undefined }
   })
+  on('store.delete', async (_$, e) => {
+    held.delete(e.key)
+    return { value: undefined }
+  })
   const toasts: string[] = []
   on('ui.toast', async (_$, e) => {
     toasts.push(e.text)

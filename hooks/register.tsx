@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, DiaryKind, PlaceId, RoomCrew, RoomForce, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
+import type { Character, DiaryKind, LiveWeather, PlaceId, Region, RegionSearch, RoomCrew, RoomForce, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
 import { bandView } from './band'
 import { dayOf, record, tidyDiary } from './diary'
 import type { Deal, Situation } from './game'
@@ -41,6 +41,7 @@ import type { RoomScene, Side } from './room'
 import { isMarching } from './scene'
 import { WEATHER_NAMES, WEATHER_WORDS, weatherAt } from './weather'
 import { SHOP, shopView } from './shop'
+import { LIVE_EVERY_MS, forecastUrl, isSamePlace, liveOf, liveWeatherOf, parseCurrent, parseSearch, regionOf, searchUrl } from './region'
 
 const CHARACTER_KEY = 'character'
 const CHARACTERS: Record<string, Character> = { clawd: 'clawd', neko: 'neko', cat: 'neko', ねこ: 'neko', 猫: 'neko' }
@@ -87,6 +88,10 @@ const touchDebug = atom({ plugin: 'clawd-parade', key: 'touchDebug' } as const, 
 const dateOverride = atom({ plugin: 'clawd-parade', key: 'dateOverride' } as const, null as { month: number; day: number } | null)
 // /parade debug rain で選んだ天気（#42。天気の絵を確かめるため）。このセッションだけで、保存しない
 const weatherOverride = atom({ plugin: 'clawd-parade', key: 'weatherOverride' } as const, null as Weather | null)
+// ショップで選んだ天気の地域と、いちばん新しく取れたその地域のほんとうの天気。どちらも store に残す（地域を選んでいなければ、日付から決まる天気）
+const weatherRegion = atom({ plugin: 'clawd-parade', key: 'weatherRegion' } as const, null as Region | null)
+const liveWeather = atom({ plugin: 'clawd-parade', key: 'liveWeather' } as const, null as LiveWeather | null)
+const regionSearch = atom({ plugin: 'clawd-parade', key: 'regionSearch' } as const, { query: '', status: 'idle', results: [] } as RegionSearch)
 // 前回 store から読んだ（store に書いた）ゲームとなでた回数。次に保存するときは、ここからの差分を足し込む
 const synced = atom({ plugin: 'clawd-parade', key: 'synced' } as const, { game: newGame(0, 0), pets: 0 } as Synced)
 const holding = atom({ plugin: 'clawd-parade', key: 'holding' } as const, null as Holding)
@@ -111,6 +116,9 @@ const SAVE_EVERY_MS = 5000
 const THEME_KEY = 'theme'
 const THEME_SIDE_KEY = 'themeSide'
 const THEME_WORDS = ['theme', 'テーマ', '背景', 'はいけい']
+// 天気の地域と、いちばん新しく取れたほんとうの天気（セッションどうしで分け合う）
+const REGION_KEY = 'weatherRegion'
+const LIVE_KEY = 'liveWeather'
 // 背景を描く面は、会話のパネルを少しすりガラスにする。おへやは暗めなので、画面は暗い色にそろえてもらう
 const GLASS = { blur: 8, opacity: 0.5 }
 
@@ -260,6 +268,97 @@ async function buy($: EngineInterface, label: string, deal: Deal) {
 // 帯に出した贈り物を贈る（帯のボタンと、広いデスクトップの札から）
 const giveTreat = ($: EngineInterface, id: TreatId) => buy($, `🎁 ${giftOf(id).name} をあげたよ！`, (one, when) => giveGift(one, id, when))
 
+// ---- 天気（#42）と天気の地域 ----------------------------------------------------
+
+// いまの天気。/parade debug rain で選んだ天気、地域を選んでいればそのほんとうの天気（/parade debug 12/25 で日付を選んでいる間は使わない）、
+// どちらでもなければ日付と時刻から決まるつくりものの天気（年は今年）
+async function weatherNow($: EngineInterface, now: number, pinned: { month: number; day: number } | null, forced: Weather | null): Promise<Weather> {
+  if (forced) return forced
+  if (pinned === null) {
+    const live = liveWeatherOf(await read($, weatherRegion), await read($, liveWeather), now)
+    if (live) return live
+  }
+  const clock = new Date(now)
+  const date = pinned ?? { month: clock.getMonth() + 1, day: clock.getDate() }
+  return weatherAt(clock.getFullYear(), date.month, date.day, clock.getHours())
+}
+
+// 前に天気を取りに行った時刻と、取りに行っている間か（読み込み直しでは 0 から。すぐ取りに行く）
+let liveTriedAt = 0
+let isFetchingLive = false
+
+// 地域を選んでいれば、15 分ごとにその地域のほんとうの天気を取る。ほかのセッションが取ったばかりなら、それを使う（store の liveWeather）。
+// 地域も、ほかのセッションで選び直したかもしれないので、そのときに store から読み直す。
+// 取れなかったときは前の天気のまま（2 時間たつと、つくりものの天気にもどる）。force は地域を選んだばかりのとき
+async function refreshLive($: EngineInterface, now: number, force = false) {
+  if (isFetchingLive || (!force && now - liveTriedAt < LIVE_EVERY_MS)) return
+  isFetchingLive = true
+  liveTriedAt = now
+  try {
+    const region = regionOf(await $.store.get(REGION_KEY))
+    const mine = await read($, weatherRegion)
+    const isSame = region === null ? mine === null : mine !== null && isSamePlace(mine, region) && mine.label === region.label
+    if (!isSame) await update($, weatherRegion, () => region)
+    if (region === null) return
+    const shared = liveOf(await $.store.get(LIVE_KEY))
+    const isShared = shared !== null && isSamePlace(shared, region)
+    if (isShared && !force && now - shared.at < LIVE_EVERY_MS) {
+      await update($, liveWeather, () => shared)
+      return
+    }
+    const weather = await $.http
+      .fetch(forecastUrl(region))
+      .then(res => (res.ok ? parseCurrent(res.text) : null))
+      .catch(() => null)
+    if (weather === null) {
+      // 取れなかった。ほかのセッションが取れていれば、それを使う
+      if (isShared) await update($, liveWeather, l => (l === null || !isSamePlace(l, region) || l.at < shared.at ? shared : l))
+      return
+    }
+    // 取っている間に地域を選び直していたら、捨てる
+    const still = await read($, weatherRegion)
+    if (still === null || !isSamePlace(still, region)) return
+    const live: LiveWeather = { lat: region.lat, lon: region.lon, weather, at: now }
+    await update($, liveWeather, () => live)
+    await $.store.set(LIVE_KEY, live)
+  } finally {
+    isFetchingLive = false
+  }
+}
+
+// ショップの地名検索。答えが来る前に別の地名で探しはじめていたら、前の答えは捨てる
+const searching = (query: string, status: RegionSearch['status'], results: Region[] = []): RegionSearch => ({ query, status, results })
+
+async function searchRegion($: EngineInterface, text: string) {
+  const query = text.trim()
+  if (query === '') return
+  await update($, regionSearch, () => searching(query, 'searching'))
+  const results = await $.http
+    .fetch(searchUrl(query))
+    .then(res => (res.ok ? parseSearch(res.text) : null))
+    .catch(() => null)
+  await update($, regionSearch, s =>
+    s.query !== query ? s : results === null ? searching(query, 'error') : searching(query, 'done', results),
+  )
+}
+
+// 候補から地域を選ぶ。すぐにその地域の天気を取りに行く
+async function pickRegion($: EngineInterface, region: Region) {
+  await update($, weatherRegion, () => region)
+  await update($, regionSearch, () => searching('', 'idle'))
+  await $.store.set(REGION_KEY, region)
+  await $.ui.toast(`天気を ${region.label} のほんとうの天気にしたよ！`)
+  await refreshLive($, await $.clock.now(), true)
+}
+
+// 地域をクリアして、日付から決まる天気にもどす
+async function clearRegion($: EngineInterface) {
+  await update($, weatherRegion, () => null)
+  await update($, liveWeather, () => null)
+  await $.store.delete(REGION_KEY)
+  await $.ui.toast('天気の地域をクリアしたよ（日付から決まる天気にもどる）')
+}
+
 // ---- 背景のおへや（/parade theme） --------------------------------------------
 
 // いまの state から、背景に描く場面を作る。絵を決めるものは全部ここに入れる（背景のフックは名前しか見ない）
@@ -282,7 +381,7 @@ async function roomOf($: EngineInterface, now: number): Promise<RoomScene> {
   const clock = new Date(now)
   const hour = clock.getHours()
   const date = pinned ?? { month: clock.getMonth() + 1, day: clock.getDate() }
-  const weather = forced ?? weatherAt(clock.getFullYear(), date.month, date.day, hour)
+  const weather = await weatherNow($, now, pinned, forced)
   const { season, holiday } = calendarOf(date.month, date.day)
   const look = lookOf(g, now, held, holiday)
   const tool = w.isRunning ? w.tool : null
@@ -348,6 +447,8 @@ async function step($: EngineInterface) {
     ])
     const now = await $.clock.now()
 
+    // 天気の地域を選んでいれば、ほんとうの天気を 15 分ごとに取る（答えは待たない）
+    if (beat % ACCRUE_EVERY === 0) void refreshLive($, now).catch(() => undefined)
     // 背景のおへやは 1 秒ごとに見る（場面が変わったときだけ描き直してもらう）
     if (beat % ACCRUE_EVERY === 0) await refreshRoom($)
 
@@ -400,6 +501,14 @@ export const register: Register = on => {
       await update($, synced, s => ({ ...s, game: fill(s.game) }))
     }
     savedAt = now
+    // 天気の地域（と、いちばん新しく取れた天気）を読む。取りに行くのは、はじめのコマから
+    const region = regionOf(await $.store.get(REGION_KEY))
+    await update($, weatherRegion, () => region)
+    const shared = liveOf(await $.store.get(LIVE_KEY))
+    if (region !== null && shared !== null && isSamePlace(region, shared)) {
+      await update($, liveWeather, l => (l === null || l.at < shared.at ? shared : l))
+    }
+    liveTriedAt = 0
     // テーマは --resume で戻らず、読み込み直しでも消えるので、入れていればセッションの始めに毎回描いてもらう
     await update($, roomScene, () => null)
     if ((await $.store.get(THEME_KEY)) === true) {
@@ -659,11 +768,12 @@ export const register: Register = on => {
     ])
     // フックの中の Date は使う人のタイムゾーンで動く（claude plugin test の中は UTC）。
     // tick.at は始めのコマまで 0 なので、時計から読む。季節と行事（#41）も、同じ時計の月と日から決める
-    const clock = new Date(await $.clock.now())
+    const now = await $.clock.now()
+    const clock = new Date(now)
     const hour = clock.getHours()
     const date = pinned ?? { month: clock.getMonth() + 1, day: clock.getDate() }
-    // 天気（#42）も同じ日付と時刻から決める（ほんとうの天気ではない）。見たい日を選んでいれば、その日の天気（年は今年）
-    const weather = forced ?? weatherAt(clock.getFullYear(), date.month, date.day, hour)
+    // 天気（#42）も同じ時計から決める。天気の地域を選んでいれば、その地域のほんとうの天気。見たい日を選んでいれば、その日のつくりものの天気
+    const weather = await weatherNow($, now, pinned, forced)
     // 帯は 1 つの枠をプラグインで分け合う。下のプラグイン（AK Studio の帯など）が描いたものは消さず、上に並べる
     const ui = $.ui.resolve(e)
     const below = await next(e)
@@ -713,10 +823,29 @@ export const register: Register = on => {
 
   // なでなでショップ（/parade shop で開くパネル）
   on('ui.render', { component: 'Pane', requestId: SHOP }, async ($, e) => {
-    const [g, w, list, p, who] = await Promise.all([read($, game), read($, work), read($, friends), read($, pets), read($, character)])
+    const [g, w, list, p, who, region, live, search] = await Promise.all([
+      read($, game),
+      read($, work),
+      read($, friends),
+      read($, pets),
+      read($, character),
+      read($, weatherRegion),
+      read($, liveWeather),
+      read($, regionSearch),
+    ])
     // 日記のきょうも、時計の今の日付（/parade debug 12/25 の日付ではない）
-    const today = dayOf(await $.clock.now())
+    const now = await $.clock.now()
+    const today = dayOf(now)
+    const current = liveWeatherOf(region, live, now)
     return shopView($.ui.resolve(e), {
+      weather: {
+        region,
+        live: current === null || live === null ? null : { weather: current, at: live.at },
+        search,
+        onSearch: text => void searchRegion($, text),
+        onPick: one => () => pickRegion($, one),
+        onClear: () => clearRegion($),
+      },
       today,
       game: g,
       at: situationOf(w, list),
