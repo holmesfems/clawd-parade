@@ -511,7 +511,26 @@ function drawWindowView(back: Grid, s: RoomScene, add: (cls: string, g: Grid, ex
     s.weather === 'snow' ? { n: 12, c: 0xffffff, len: 1, cls: 'snow' } :
     s.season === 'spring' ? { n: 5, c: 0xffb3d1, len: 1, cls: 'petal' } :
     s.season === 'autumn' ? { n: 5, c: 0xe8894f, len: 1, cls: 'petal' } : null
-  if (fall) {
+  if (fall && s.weather === 'rain') {
+    // 雨は外と同じ向きに少し斜め（下が左）の 3 ドットのすじを、遠い層（うすく遅い）と近い層（明るく速い）の 2 つで（#50）
+    ;[
+      { n: 8, c: mix(fall.c, skyOf(s), 0.5), cls: 'rainw far' },
+      { n: 7, c: fall.c, cls: 'rainw' },
+    ].forEach((layer, k) => {
+      const f = blank()
+      for (let i = 0; i < layer.n; i++) {
+        const fx = x + Math.floor(hash(i * 11 + 2 + k * 97) * (w + RAIN_SLIDE))
+        const fy = y + Math.floor(hash(i * 23 + 7 + k * 97) * h)
+        // 窓の高さだけ上・RAIN_SLIDE だけ右にもう 1 つ描き、ななめに落としてくり返す
+        for (const [ox, oy] of [[0, 0], [RAIN_SLIDE, -h]] as const) {
+          dot(f, fx + ox, fy + oy, layer.c)
+          dot(f, fx + ox, fy + oy + 1, layer.c)
+          dot(f, fx + ox - 1, fy + oy + 2, layer.c)
+        }
+      }
+      add(layer.cls, f, { clip })
+    })
+  } else if (fall) {
     const f = blank()
     for (let i = 0; i < fall.n; i++) {
       const fx = x + Math.floor(hash(i * 11 + 2) * w)
@@ -891,6 +910,22 @@ export function rulerSvg(): string {
 
 // ---- SVG にまとめる ----
 
+// 窓の中の雨が、窓の高さを落ちるあいだに左へずれるドット数
+const RAIN_SLIDE = 4
+
+// ---- 雨・雪の層（#50。描くのは fallSvg） ----
+type FallLayer = { id: string; w: number; h: number; n: number; len: number; width: number; opacity: number; dur: number; skew: number; color: string }
+const RAIN_LAYERS: FallLayer[] = [
+  { id: 'rain0', w: 137, h: 140, n: 7, len: 12, width: 1, opacity: 0.3, dur: 2.3, skew: -10, color: '#9fc4ff' },
+  { id: 'rain1', w: 193, h: 180, n: 8, len: 20, width: 1.5, opacity: 0.5, dur: 1.4, skew: -12, color: '#9fc4ff' },
+  { id: 'rain2', w: 269, h: 240, n: 6, len: 28, width: 2, opacity: 0.7, dur: 0.85, skew: -13, color: '#b8d4ff' },
+]
+// 雪は傾けない。つぶは四角（len が大きさ）
+const SNOW_LAYERS: FallLayer[] = [
+  { id: 'snow0', w: 157, h: 150, n: 6, len: 3, width: 3, opacity: 0.65, dur: 13, skew: 0, color: '#ffffff' },
+  { id: 'snow1', w: 211, h: 200, n: 5, len: 4, width: 4, opacity: 0.95, dur: 8.5, skew: 0, color: '#ffffff' },
+]
+
 const STYLE = [
   '.br,.sway,.spin,.prog{transform-box:fill-box}',
   '.br{transform-origin:50% 100%;animation:br 3.2s ease-in-out infinite}',
@@ -915,6 +950,7 @@ const STYLE = [
   '@keyframes ln{0%{opacity:0}15%{opacity:1}85%{opacity:1}100%{opacity:0}}',
   '.drift{animation:drift 60s linear infinite}',
   `@keyframes drift{from{transform:translateX(0)}to{transform:translateX(${SKY_BOX.w}px)}}`,
+  `.rainw{animation:rainw .7s linear infinite}.rainw.far{animation-duration:1.3s}@keyframes rainw{to{transform:translate(-${RAIN_SLIDE}px,${SKY_BOX.h}px)}}`,
   `.rain{animation:fall .7s linear infinite}.snow{animation:fall 6s linear infinite}.petal{animation:fall 9s linear infinite}`,
   `@keyframes fall{from{transform:translateY(0)}to{transform:translateY(${SKY_BOX.h}px)}}`,
   `.confetti{animation:conf 5s linear infinite}@keyframes conf{from{transform:translateY(0)}to{transform:translateY(${H}px)}}`,
@@ -944,7 +980,8 @@ const STYLE = [
   // 雲の動きに vw の単位は使わない：@keyframes に vw があると、アプリの背景では CSS のアニメーションが全部止まる（docs/backdrop-investigation.md）。
   // かわりに、窓 2 つぶんの幅の枠（.cloud）を、自分の幅の半分（＝窓の幅）だけ動かす
   '.cloud{transform-box:fill-box;animation:cloud 240s linear infinite}@keyframes cloud{to{transform:translateX(50%)}}',
-  '.pour{animation:pour .6s linear infinite}.flurry{animation:pour 7s linear infinite}@keyframes pour{to{transform:translateY(96px)}}',
+  // 雨・雪の層は、層ごとにもようの高さだけ落としてくり返す（何秒かは層ごとに style で決める）
+  ...[...RAIN_LAYERS, ...SNOW_LAYERS].map(l => `@keyframes ${l.id}{to{transform:translateY(${l.h}px)}}`),
   '.smoke{animation:smoke 4s linear infinite}@keyframes smoke{0%{opacity:0;transform:translate(0,2px)}30%{opacity:1}100%{opacity:0;transform:translate(2px,-6px)}}',
   // 動きを減らす設定では、止まった絵にする（どのしごとも、止まった絵で分かる）
   // コードの行・考えごとの「…」・Zzz は、見えない（opacity:0）ところからアニメで出すので、止めたときは見せておく（#53）
@@ -1168,12 +1205,47 @@ function skySvg(s: RoomScene): string {
     const rings = colors.map((c, i) => `<circle r="${300 - i * 12}" fill="none" stroke="${c}" stroke-width="12" opacity=".8"/>`).join('')
     parts.push(`<svg x="${s.side === 'left' ? 72 : 28}%" y="${FLOOR_AT}%" overflow="visible">${rings}</svg>`)
   }
-  // 雨・雪：小さなもようを空にしいて、もようの高さ（96px）だけ落としてくり返す
-  if (s.weather === 'rain' || s.weather === 'snow') {
-    const isRain = s.weather === 'rain'
-    parts.push(`<rect class="${isRain ? 'pour' : 'flurry'}" y="-96" width="100%" fill="url(#${isRain ? 'rn' : 'sn'})" style="height:calc(${FLOOR_AT}% + 96px)"/>`)
-  }
+  if (s.weather === 'rain' || s.weather === 'snow') parts.push(fallSvg(s.weather === 'rain' ? RAIN_LAYERS : SNOW_LAYERS))
   return parts.join('')
+}
+
+// ---- 雨・雪（#50） ----
+// 遠い層ほど細く・うすく・遅く、近い層ほど太く・濃く・速い。層ごとに、もようの大きさと落ちる速さを整数の比にしない
+// （同じもようが格子に見えないように）。1 枚のもようの中のつぶは、位置・長さ・濃さをばらつかせる。
+// 雨は、もようを敷いた rect を skewX で傾けた g に入れる。傾いた枠の中で縦に落とすだけで、線の向きと落ちる向きがそろう
+function fallSvg(layers: FallLayer[]): string {
+  return layers
+    .map((l, k) => {
+      const id = l.id
+      let drops = ''
+      for (let i = 0; i < l.n; i++) {
+        const seed = (k + 1) * 1000 + i * 37
+        const x = (hash(seed) * l.w).toFixed(1)
+        const y = Math.floor(hash(seed + 11) * l.h)
+        const len = l.skew === 0 ? l.len : Math.round(l.len * (0.8 + hash(seed + 23) * 0.4))
+        const o = (0.6 + hash(seed + 31) * 0.4).toFixed(2)
+        // もようの下のはしからはみ出るつぶは、上のはしにも描く（つなぎ目で切れないように）
+        for (const yy of y + len > l.h ? [y, y - l.h] : [y])
+          drops += `<rect x="${x}" y="${yy}" width="${l.width}" height="${len}" opacity="${o}"/>`
+      }
+      const pattern = `<defs><pattern id="${id}" width="${l.w}" height="${l.h}" patternUnits="userSpaceOnUse"><g fill="${l.color}">${drops}</g></pattern></defs>`
+      // 傾けると下のほうが左へずれるので、横は広めに敷く
+      const sheet = `<rect class="${id}" x="-20%" y="-${l.h}" width="160%" fill="url(#${id})" opacity="${l.opacity}" style="height:calc(${FLOOR_AT}% + ${l.h}px);animation:${id} ${l.dur}s linear infinite"/>`
+      return pattern + (l.skew === 0 ? sheet : `<g transform="skewX(${l.skew})">${sheet}</g>`)
+    })
+    .join('')
+}
+
+// 地面にはねる雨のしぶき。2×1 の小さなはねを、ばらばらの場所で交互に点滅させる
+function splashSvg(s: RoomScene): string {
+  if (s.weather !== 'rain') return ''
+  let out = ''
+  for (let i = 0; i < 14; i++) {
+    const x = (hash(i * 53 + 7) * 100).toFixed(1)
+    const y = 4 + Math.floor(hash(i * 29 + 3) * 70)
+    out += `<g class="${i % 2 ? 'fa' : 'fb'}" style="animation-duration:${(0.5 + hash(i * 17) * 0.5).toFixed(2)}s"><rect x="${x}%" y="${y}" width="6" height="3" fill="#cfe2ff" opacity=".7"/></g>`
+  }
+  return `<svg y="${FLOOR_AT}%" overflow="visible">${out}</svg>`
 }
 
 // 庭の道を歩いて来る仲間。道の上（px）を、窓の外から入口まで歩く。絵は 1 ドット 5px
@@ -1237,7 +1309,6 @@ function frameSvg(s: RoomScene, layers: Layer[]): string {
   const garden = `<g transform="translate(0 ${-GARDEN_UP})">${gardenLayers(s).map(layerSvg).join('')}</g>`
   const ground = shade(s.weather === 'snow' ? SNOW_GROUND : GRASS[s.season], t)
   const path = shade(s.weather === 'snow' ? 0xc4ccd6 : 0xcdb98f, t)
-  const drop = (x: number, y: number, w: number, h: number, fill: string) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`
   const sleepy = s.activity === 'sleep' ? `<rect class="dim" width="100%" height="100%" fill="#05040a"/>` : ''
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">` +
@@ -1246,8 +1317,6 @@ function frameSvg(s: RoomScene, layers: Layer[]): string {
     `<linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${hex(skyTop(s))}"/><stop offset=".84" stop-color="${hex(skyOf(s))}"/></linearGradient>` +
     // かべ紙は、おへやのドットの大きさで数える（おうちの中だけに使う）
     `<pattern id="wp" width="6" height="6" patternUnits="userSpaceOnUse"><rect x="3" y="3" width=".4" height=".4" fill="${hex(mix(WALL[t], 0xffffff, 0.06))}"/></pattern>` +
-    `<pattern id="rn" width="96" height="96" patternUnits="userSpaceOnUse">${drop(10, 6, 2, 10, '#9fc4ff')}${drop(58, 30, 2, 10, '#9fc4ff')}${drop(34, 62, 2, 10, '#9fc4ff')}${drop(82, 78, 2, 10, '#9fc4ff')}</pattern>` +
-    `<pattern id="sn" width="96" height="96" patternUnits="userSpaceOnUse">${drop(12, 10, 4, 4, '#fff')}${drop(60, 40, 3, 3, '#fff')}${drop(36, 70, 4, 4, '#fff')}${drop(84, 86, 3, 3, '#fff')}</pattern>` +
     `<radialGradient id="lg"><stop offset="0" stop-color="#ffd98a" stop-opacity=".9"/><stop offset="1" stop-color="#ffd98a" stop-opacity="0"/></radialGradient>` +
     `</defs>` +
     // 空
@@ -1258,6 +1327,7 @@ function frameSvg(s: RoomScene, layers: Layer[]): string {
     `<rect y="${FLOOR_AT}%" width="100%" height="5" fill="${hex(mix(ground, 0xffffff, 0.18))}"/>` +
     // 道：おうちの土台の下を、横にのびる
     `<svg y="${FLOOR_AT}%" overflow="visible"><rect y="40" width="100%" height="30" fill="${hex(path)}"/><rect y="40" width="100%" height="3" fill="${hex(mix(path, 0xffffff, 0.2))}"/><rect y="67" width="100%" height="3" fill="${hex(darken(path, 0.8))}"/></svg>` +
+    splashSvg(s) +
     (s.side === 'left' ? atRight(garden) + atLeft(room) : atLeft(garden) + atRight(room)) +
     walkersSvg(s) +
     sleepy +
