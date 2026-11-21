@@ -187,6 +187,19 @@ test('おうちの外：空・地面・道・おうち・庭を描く。歩い�
   }
 })
 
+test('外のにぎやかさ：鳥（昼の晴れ・くもり）・遠くの丘・煙 3 つ・道を通るねこ（雨と雪はお休み）・庭の季節の生きもの', () => {
+  const day = roomSvg({ ...BASE, time: 'day' })
+  expect(day.match(/<g class="cloud" fill="#3a3f55"/g)).toHaveLength(2)
+  expect(roomSvg({ ...BASE, time: 'night' })).not.toContain('fill="#3a3f55"')
+  expect(roomSvg({ ...BASE, time: 'day', weather: 'rain' })).not.toContain('fill="#3a3f55"')
+  expect(day).toContain('preserveAspectRatio="none"')
+  expect(day.match(/class="smoke"/g)).toHaveLength(3)
+  expect(day).toContain('class="stroll"')
+  expect(roomSvg({ ...BASE, weather: 'snow' })).not.toContain('class="stroll"')
+  expect(roomSvg({ ...BASE, time: 'day', season: 'spring' })).toContain('class="flit"')
+  expect(roomSvg({ ...BASE, season: 'autumn' }).match(/class="leaf"/g)).toHaveLength(3)
+})
+
 test('おへやのもの・夢のプレゼント・天気が絵に出る', () => {
   const plain = roomSvg(BASE)
   for (const id of ROOM_ITEMS) expect(roomSvg({ ...BASE, items: [id] })).not.toBe(plain)
