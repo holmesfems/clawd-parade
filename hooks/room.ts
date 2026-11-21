@@ -977,6 +977,12 @@ const STYLE = [
   '@keyframes come{0%{transform:translateX(-60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
   '@keyframes comer{0%{transform:translateX(60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
   '.sway.slow{animation-duration:7s}',
+  // 道を通るねこ：80 秒のうち 24 秒で、窓の左はしの外から右はしの外まで歩く（窓の幅の枠を、自分の幅の割合で動かす）
+  '.stroll{transform-box:fill-box;animation:stroll 80s linear infinite;animation-delay:-50s}',
+  '@keyframes stroll{0%{transform:translateX(0)}30%{transform:translateX(104%)}100%{transform:translateX(104%)}}',
+  // 庭の落ち葉・ちょうちょ（#55）
+  '.leaf{opacity:0;animation:leaf 7s linear infinite}@keyframes leaf{0%{opacity:0;transform:translate(0,0)}10%{opacity:1}85%{opacity:1}100%{opacity:0;transform:translate(5px,22px)}}',
+  '.flit{animation:flit 5s ease-in-out infinite alternate}@keyframes flit{0%{transform:translate(0,0)}35%{transform:translate(4px,-3px)}70%{transform:translate(9px,-1px)}100%{transform:translate(12px,-4px)}}',
   // 雲の動きに vw の単位は使わない：@keyframes に vw があると、アプリの背景では CSS のアニメーションが全部止まる（docs/backdrop-investigation.md）。
   // かわりに、窓 2 つぶんの幅の枠（.cloud）を、自分の幅の半分（＝窓の幅）だけ動かす
   '.cloud{transform-box:fill-box;animation:cloud 240s linear infinite}@keyframes cloud{to{transform:translateX(50%)}}',
@@ -1035,12 +1041,16 @@ function houseSvg(s: RoomScene): string {
   const roof = Array.from({ length: 9 }, (_, i) =>
     box(isRight ? wallX - 4 + i : inX - 2, -10 - i, inW + 9 - i, 1, shade(i % 3 === 2 ? ROOF_D : ROOF, t)),
   ).join('')
-  const chimneyX = isRight ? 96 : -30
+  // えんとつは、おへやの絵の幅の中（右のパネル・左のサイドバーのうしろにかくれないところ）。左に置くときは左右反転
+  const chimneyX = isRight ? 52 : W - 52 - 6
   return (
     // えんとつと、けむり
     box(chimneyX, -27, 6, 12, shade(0x9a6a5c, t)) +
     box(chimneyX - 1, -28, 8, 2, shade(0x6b4a3a, t)) +
-    `<g class="smoke">${box(chimneyX + 2, -32, 2, 2, 0xd8d4e0, ' opacity=".7"')}${box(chimneyX + 3, -36, 3, 2, 0xd8d4e0, ' opacity=".5"')}</g>` +
+    // けむりは 3 つ、ずらして出し、続いて上がって見えるように（#55）
+    [0, 1.3, 2.6]
+      .map(d => `<g class="smoke" style="animation-delay:-${d}s">${box(chimneyX + 2, -32, 2, 2, 0xd8d4e0, ' opacity=".7"')}${box(chimneyX + 3, -36, 3, 2, 0xd8d4e0, ' opacity=".5"')}</g>`)
+      .join('') +
     roof +
     // 中のかべ・かべ紙・はり
     box(inX, -9, inW, H + 9, WALL[t]) +
@@ -1146,6 +1156,39 @@ function gardenLayers(s: RoomScene): Layer[] {
     if (s.season !== 'autumn') fill(low, fx, 52, 1, 1, shade(0x4f9b57, t))
   }
   out.push({ cls: '', g: low })
+
+  // 庭の季節の生きもの（#55）：春の晴れた昼はちょうちょ、夏の晴れた夜は木のまわりのほたる、秋は木から落ちる葉
+  const isClear = s.weather === 'clear'
+  if (s.season === 'spring' && isClear && !isNight(t)) {
+    const wings = (open: boolean) => {
+      const g = grid()
+      if (open) {
+        fill(g, 32, 44, 1, 1, 0xffe066)
+        fill(g, 34, 44, 1, 1, 0xffe066)
+        fill(g, 32, 45, 1, 1, 0xffd0e6)
+        fill(g, 34, 45, 1, 1, 0xffd0e6)
+      } else {
+        fill(g, 33, 43, 1, 2, 0xffe066)
+      }
+      fill(g, 33, 45, 1, 1, 0x3a2a2a)
+      return g
+    }
+    out.push({ cls: 'flit', g: blank(), nested: [{ cls: 'fa', g: wings(true) }, { cls: 'fb', g: wings(false) }] })
+  }
+  if (s.season === 'summer' && isClear && isNight(t)) {
+    ;[0, 1, 2, 3, 4].forEach(i => {
+      const g = grid()
+      fill(g, 6 + Math.floor(hash(i * 7 + 2) * 26), 14 + Math.floor(hash(i * 11 + 5) * 30), 1, 1, 0xd8ff7a)
+      out.push({ cls: 'tw', g, style: `animation-delay:-${(i * 0.7).toFixed(1)}s` })
+    })
+  }
+  if (s.season === 'autumn' && !isSnowy && s.weather !== 'rain') {
+    ;[0, 1, 2].forEach(i => {
+      const g = grid()
+      fill(g, 9 + i * 7, 24 + (i % 2) * 4, 1, 1, shade(leafColors.autumn[i]!, t))
+      out.push({ cls: 'leaf', g, style: `animation-delay:-${(i * 2.4).toFixed(1)}s` })
+    })
+  }
   return out
 }
 
@@ -1205,6 +1248,7 @@ function skySvg(s: RoomScene): string {
     const rings = colors.map((c, i) => `<circle r="${300 - i * 12}" fill="none" stroke="${c}" stroke-width="12" opacity=".8"/>`).join('')
     parts.push(`<svg x="${s.side === 'left' ? 72 : 28}%" y="${FLOOR_AT}%" overflow="visible">${rings}</svg>`)
   }
+  parts.push(birdsSvg(s))
   if (s.weather === 'rain' || s.weather === 'snow') parts.push(fallSvg(s.weather === 'rain' ? RAIN_LAYERS : SNOW_LAYERS))
   return parts.join('')
 }
@@ -1234,6 +1278,71 @@ function fallSvg(layers: FallLayer[]): string {
       return pattern + (l.skew === 0 ? sheet : `<g transform="skewX(${l.skew})">${sheet}</g>`)
     })
     .join('')
+}
+
+// ---- 外のにぎやかさ（#55） ----
+
+// 鳥：V の字の鳥を 3 羽の群れで、羽ばたき 2 コマ。朝・昼・夕方の、晴れとくもりの日だけ。
+// 雲と同じく、横に長い枠ごと自分の幅の割合で動かす（vw は使わない）。枠は窓の 3 つぶんで、窓の 1.5 倍ぶん右へ流れる
+const BIRD_UP = [[0, 0], [4, 0], [1, 1], [3, 1], [2, 2]]
+const BIRD_DOWN = [[0, 1], [1, 1], [3, 1], [4, 1], [2, 2]]
+function birdsSvg(s: RoomScene): string {
+  if (isNight(s.time) || s.weather === 'rain' || s.weather === 'snow') return ''
+  const color = s.time === 'evening' ? '#2a2033' : '#3a3f55'
+  const px = 4
+  const bird = (dots: number[][]) => dots.map(([x, y]) => `<rect x="${x! * px}" y="${y! * px}" width="${px}" height="${px}"/>`).join('')
+  // 群れの形（先頭と、うしろの 2 羽）
+  const flock = [[0, 0], [-22, -10], [-26, 12]]
+  return [
+    { y: 14, dur: 70, delay: 8 },
+    { y: 27, dur: 95, delay: 52 },
+  ]
+    .map(({ y, dur, delay }, k) => {
+      const birds = flock
+        .map(([dx, dy], i) => {
+          const at = `x="${dx}" y="${dy}"`
+          // 羽ばたきは鳥ごとに少しずらす
+          const d = `animation-duration:${(0.5 + k * 0.08 + i * 0.05).toFixed(2)}s`
+          return `<svg ${at} overflow="visible"><g class="fa" style="${d}">${bird(BIRD_UP)}</g><g class="fb" style="${d}">${bird(BIRD_DOWN)}</g></svg>`
+        })
+        .join('')
+      return (
+        `<g class="cloud" fill="${color}" style="animation-duration:${dur}s;animation-delay:-${delay}s">` +
+        `<rect x="-150%" width="300%" height="1" fill="none"/><svg x="-15%" y="${y}%" overflow="visible">${birds}</svg></g>`
+      )
+    })
+    .join('')
+}
+
+// 遠くの丘と木立：地平線の上に、うすい色の段々のシルエットを 2 重に。窓の幅に引きのばす
+function hillsSvg(s: RoomScene): string {
+  const base = s.weather === 'snow' ? 0xdfe7ee : GRASS[s.season]
+  const layer = (seed: number, top: number, haze: number) => {
+    let d = 'M0 20'
+    for (let i = 0; i < 50; i++) {
+      const h = top + Math.sin(i / 4 + seed) * 2.2 + Math.sin(i / 9 + seed * 2) * 2.5 + hash(seed * 100 + i) * 0.8
+      d += `V${(20 - h).toFixed(1)}H${(i + 1) * 2}`
+    }
+    return `<path d="${d}V20Z" fill="${hex(shade(mix(base, skyOf(s), haze), s.time))}"/>`
+  }
+  return `<svg y="${FLOOR_AT - 9}%" width="100%" height="9%" viewBox="0 0 100 20" preserveAspectRatio="none">${layer(1, 12, 0.6)}${layer(5, 6, 0.35)}</svg>`
+}
+
+// 道を通るねこ：80 秒に 1 回、うすい色の小さなねこが道をとことこ横切る。雨と雪の日は出ない
+function strollerSvg(s: RoomScene): string {
+  if (s.weather === 'rain' || s.weather === 'snow') return ''
+  const dotPx = 4
+  const frames = [0, 1].map(step => {
+    const sp = kitten(0xb8b0c8, step, false)
+    const g: Grid = Array.from({ length: sp.h }, () => Array<Px>(sp.w).fill(null))
+    blit(g, sp, 0, 0)
+    return { w: sp.w, h: sp.h, paths: pathsOf(g) }
+  })
+  const { w, h } = frames[0]!
+  const sprite =
+    `<svg x="${-(w * dotPx) - 8}" y="${66 - h * dotPx}" width="${w * dotPx}" height="${h * dotPx}" viewBox="0 0 ${w} ${h}" overflow="visible" opacity=".75">` +
+    `<g class="fa quick">${frames[0]!.paths}</g><g class="fb quick">${frames[1]!.paths}</g></svg>`
+  return `<svg y="${FLOOR_AT}%" overflow="visible"><g class="stroll"><rect width="100%" height="1" fill="none"/>${sprite}</g></svg>`
 }
 
 // 地面にはねる雨のしぶき。2×1 の小さなはねを、ばらばらの場所で交互に点滅させる
@@ -1322,6 +1431,7 @@ function frameSvg(s: RoomScene, layers: Layer[]): string {
     // 空
     `<rect width="100%" height="100%" fill="url(#sk)"/>` +
     skySvg(s) +
+    hillsSvg(s) +
     // 地面（床の高さから下）
     `<rect y="${FLOOR_AT}%" width="100%" height="${100 - FLOOR_AT}%" fill="${hex(ground)}"/>` +
     `<rect y="${FLOOR_AT}%" width="100%" height="5" fill="${hex(mix(ground, 0xffffff, 0.18))}"/>` +
@@ -1330,6 +1440,7 @@ function frameSvg(s: RoomScene, layers: Layer[]): string {
     splashSvg(s) +
     (s.side === 'left' ? atRight(garden) + atLeft(room) : atLeft(garden) + atRight(room)) +
     walkersSvg(s) +
+    strollerSvg(s) +
     sleepy +
     `</svg>`
   )
