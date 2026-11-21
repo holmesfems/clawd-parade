@@ -27,6 +27,28 @@ Claude Code の入力欄の上で、Clawd が行進する mod です。Claude �
   - ターミナル：半角ブロックのドット絵。マウスでなでる、仲間をクリックでぎゅっ
   - デスクトップ：SVG の空を帯いっぱいに広げ、セリフは空の右側に。絵を直接クリック・ドラッグでなでる
 
+## おうちのテーマ（デスクトップの背景）
+
+![おうちのテーマ：いなかの春・街の夜・海辺の夕方・山のクリスマス](docs/theme.png)
+
+デスクトップアプリ（Code タブ）で `/parade theme` と打つと、アプリの背景いっぱいに Clawd のおうちが出ます。かべを切って中が見えるおうちで、Claude が働いているようすに合わせて、Clawd がおへやの中でいろいろなことをします。もう一度打つとしまいます。
+
+- **Claude のようすで、Clawd のしごとが変わる**
+  - かんがえる：机で「…」。ホワイトボードに箱と矢印の図をかいては消すこともある。ときどき頭の上で電球がピカッ
+  - しらべる：本をめくる。web 検索（WebSearch・WebFetch）のときはモニターの検索結果と回る地球儀、フォルダ探し（Grep・Glob・LS）のときは床のフォルダを虫めがねで順に見る。フラスコで実験することも
+  - かく：キーボードを打ってモニターにコードの行。ブロックを組み立てたり、コンロで料理したりもする
+  - うごかす：進むバーと、かみ合って回る歯車。計器パネルのランプが光ることも
+  - バグとたたかう（エラーのあと）・おへんじ待ち（札を持ってはねる）・おわった！（ばんざいと紙ふぶき）・しょんぼり（とめられたとき）
+  - ひまなときはソファでくつろぐ。スマホ・ゲーム・マグカップ・音楽・体操が 60 秒ごとに変わり、3 分たつと寝る（部屋が暗くなって Zzz）
+- **サブエージェントが来ると**、仲間が庭の道を歩いておうちに入ってきて、おへやの床ではねる
+- **窓の外は、時間帯・天気・季節**（帯と同じ時計と天気）。朝やけ・青空・夕やけ・夜空、雲・斜めの雨・雪、春の桜・夏の緑・秋の紅葉・冬の枝。鳥の群れが空を横切り、えんとつから煙が上がり、ときどきねこが道を通る。行事の日は庭にツリーやかぼちゃが出る
+- **ショップの「ひっこし」**で、おうちのまわりを街（5 万 ♡：ビルの窓あかり・街灯・バス停）・海辺（10 万 ♡：きらめく海・灯台・ヤシの木）・山（20 万 ♡：雪山・もみの木・たき火）に変えられる。買った立地といなかのあいだは、押すたびに引っこせる
+- **ショップの「おへやのもの」**（ランプ・観葉植物・ラグ・星のポスター・ガーランド・金魚ばち）を買うと、おへやに飾れる。きせかえのぼうしもかぶり、夢のプレゼント（オーロラ・流れ星・贈った星・月への旅・虹・望遠鏡・図書館）は窓の外の空やおへやに出る
+- 動きは背景の SVG の中の CSS で、描き直さずにずっと動きます。描き直すのは、しごと・仲間・時間帯・天気などが変わったときだけ（しごとは少なくとも 10 秒続ける）。OS の「動きを減らす」設定では止まった絵になります
+- おへやは、ふだんは右のパネルの左どなりに置きます。`/parade theme left` で左のサイドバーの右どなりに、`/parade theme right` で右に戻せます
+- 入れたままにすると、次のセッションの始めにも出ます。背景を出しているあいだ、デスクトップの帯はセリフと「なでる」ボタンだけになります（端末の帯は変わりません）
+- テーマはセッションに 1 つなので、ほかのプラグインのテーマとは同時に使えません。`/parade theme` でしまうと、ほかのプラグインのテーマも外れます
+
 ## なでなでゲーム
 
 - なでると ♡ が貯まる。手を止めずになで続けるとコンボ、30 コンボで **フィーバー**（8 秒間 ♡×3、Clawd が金色に光ってハートの雨）
@@ -71,11 +93,13 @@ Claude Code の入力欄の上で、Clawd が行進する mod です。Claude �
 | --- | --- |
 | `/parade` | パレードの表示／非表示 |
 | `/parade shop` | なでなでショップを開く |
-| `/parade theme` ・ `left` ・ `right` | デスクトップのアプリの背景を Clawd のおへやにする（もう一度でしまう）。Claude のようすで、Clawd がソファでくつろいだり、本を調べたり、机でキーボードを打ったり、バグとたたかったりする。窓の外は時間帯・天気・季節の景色。`left`・`right` でおへやを置く側を決める。入れたままにすると次のセッションでも出る。テーマはセッションに 1 つなので、しまうとほかのプラグインのテーマも外れる |
+| `/parade theme` ・ `left` ・ `right` | デスクトップのアプリの背景を Clawd のおうちにする（もう一度でしまう）。`left`・`right` でおへやを置く側を決める。くわしくは「おうちのテーマ」 |
 | `/parade clawd` ・ `/parade cat` | キャラ切り替え |
 | `/parade debug` | なでなでの当たり判定をピンクの枠で表示（もう一度打つと消える） |
 | `/parade debug 12/25` ・ `/parade debug today` | その日（月/日）の季節と行事で描いてみる（このセッションだけ・保存しない）。`today` で今日にもどる |
 | `/parade debug rain` ・ `snow` ・ `cloudy` ・ `clear` | その天気で描いてみる（`雨`・`雪`・`くもり`・`晴れ` でも。このセッションだけ・保存しない）。`/parade debug today` で日付といっしょに今日にもどる |
+| `/parade debug act <しごと> [絵]` ・ `act off` | 背景のおうちで、そのしごと（と絵）を描いてみる（例：`/parade debug act research web`。保存しない） |
+| `/parade debug place <立地>` ・ `place off` | 買わずに、その立地（`city`・`sea`・`mountain` など）で背景を描いてみる（保存しない） |
 
 ## 開発
 
@@ -112,6 +136,7 @@ claude plugin enable clawd-parade@clawd-parade
 | `hooks/decor.ts` | 飾り（ぼうし、贈り物、夢のプレゼント、太陽・流れ星などの空、ハート、贈り物の札） |
 | `hooks/season.ts` | 季節と行事の飾り（花びら・ほたる・入道雲・落ち葉・雪、行事の地面の飾りと満月） |
 | `hooks/weather.ts` | 天気（日付から決まる晴れ・くもり・雨・雪と、雲・雨つぶ・雪・水たまりの描き方） |
+| `hooks/room.ts` | デスクトップの背景のおうち（しごとの決め方、場面の名前、おうち・庭・空の SVG） |
 | `hooks/encode.ts` | 絵から端末セル・Text の並び・SVG への変換 |
 | `hooks/parade-view.tsx` | ターミナルでなでるための Client |
 | `hooks/touch-pad.tsx` | デスクトップで SVG に重ねる、見えない手ざわり層の Client |
@@ -141,7 +166,7 @@ CI は、`hooks/`・`types/` を変えた PR で version が上がっている�
 
 ## English
 
-A Claude Code mod: Clawd marches above the prompt while Claude works, a friend joins for each subagent, and Clawd's face reacts to how the turn ended. Pet Clawd (click or drag) to earn ♡, chain combos into fevers, and spend ♡ in `/parade shop` on upgrades, cosmetics (hats, shooting stars, an aurora) and gifts for Clawd, from a cookie to dream gifts (a little house, a library, a trip to the moon, a world without bugs, a flying ship, a bronze statue of Clawd) that stay in the scene, and stars you can give again and again: each one multiplies all ♡ income and lights up the sky. The more you give, the closer you get: Clawd gains new lines, talks in its sleep, and waves at you. A work diary in the shop counts, per day, how long Claude worked, turns, tool calls, subagents and pets, with a 7-day bar chart and day streaks (only numbers are stored; no prompts, file names or tool arguments, and nothing leaves the mod). Works in the terminal and in the desktop app's Code tab. Install it from a terminal session:
+A Claude Code mod: Clawd marches above the prompt while Claude works, a friend joins for each subagent, and Clawd's face reacts to how the turn ended. Pet Clawd (click or drag) to earn ♡, chain combos into fevers, and spend ♡ in `/parade shop` on upgrades, cosmetics (hats, shooting stars, an aurora) and gifts for Clawd, from a cookie to dream gifts (a little house, a library, a trip to the moon, a world without bugs, a flying ship, a bronze statue of Clawd) that stay in the scene, and stars you can give again and again: each one multiplies all ♡ income and lights up the sky. The more you give, the closer you get: Clawd gains new lines, talks in its sleep, and waves at you. A work diary in the shop counts, per day, how long Claude worked, turns, tool calls, subagents and pets, with a 7-day bar chart and day streaks (only numbers are stored; no prompts, file names or tool arguments, and nothing leaves the mod). In the desktop app, `/parade theme` turns the whole app background into Clawd's little house: Clawd thinks at a whiteboard, searches the web, writes code, cooks, fights bugs, plays games or naps on the sofa depending on what Claude is doing, subagents walk in from the garden, the sky follows the time of day, weather and season, and the shop lets you move the house to the city, the seaside or the mountains and decorate the room. Works in the terminal and in the desktop app's Code tab. Install it from a terminal session:
 
 ```
 /plugin install clawd-parade --marketplace holmesfems/clawd-parade
