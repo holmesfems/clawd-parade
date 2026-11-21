@@ -184,7 +184,7 @@ test('まばたきは目を閉じた体をまるごと重ね、ぼうしはそ�
   expect(crowned).not.toBe(plain)
   expect(crowned.lastIndexOf('fill="#ffd166"')).toBeGreaterThan(crowned.indexOf('fill="#f5f0e6"'))
   // #53
-  expect(plain).toContain('.ln,.zz{opacity:1}')
+  expect(plain).toContain('.ln,.zz,.wb{opacity:1}')
 })
 
 test('しらべるは、見開きの本をめくり、虫めがねで探す（「?」は出さない）。止まった絵では開いた本だけ', () => {
@@ -255,6 +255,31 @@ test('しらべるの絵（#58）：web 検索は WebSearch・WebFetch、フォ�
   // フォルダ探しのとき、仲間はフォルダの上ではねない
   const hops = roomSvg({ ...research, variant: 'folders', friends: 3 }).match(/class="hop"/g)?.length ?? 0
   expect(hops).toBeLessThan(3)
+})
+
+test('かく・うごかす・かんがえるの絵（#58）：組み立て・料理、計器パネル・歯車 2 つ、ホワイトボード。どれも違う絵で、Clawd とねこの両方', () => {
+  expect(VARIANTS.write).toEqual(['type', 'build', 'cook'])
+  expect(VARIANTS.run).toEqual(['gears', 'panel'])
+  expect(VARIANTS.think).toEqual(['desk', 'board'])
+  for (const activity of ['write', 'run', 'think'] as const) {
+    for (const character of ['clawd', 'neko'] as const) {
+      const pictures = new Set(VARIANTS[activity].map(variant => roomSvg({ ...BASE, activity, variant, character })))
+      expect(pictures.size).toBe(VARIANTS[activity].length)
+    }
+    for (const variant of VARIANTS[activity]) expect(parseScene(sceneName({ ...FULL, activity, variant }))).toEqual({ ...FULL, activity, variant })
+  }
+  // キーボードを打つ手（fa quick・fb quick）とコードの行は、タイピングのときだけ
+  const type = roomSvg({ ...BASE, activity: 'write', variant: 'type' })
+  const build = roomSvg({ ...BASE, activity: 'write', variant: 'build' })
+  expect(type.match(/class="ln"/g)?.length).toBeGreaterThan(0)
+  expect(build).not.toContain('class="ln"')
+  // ホワイトボードは、モニターのかわりに机の上。図を 4 つ、1 つずつ書く
+  const board = roomSvg({ ...BASE, activity: 'think', variant: 'board' })
+  for (const i of [1, 2, 3, 4]) expect(board).toContain(`class="wb wb${i}"`)
+  expect(board).toContain('class="pen"')
+  expect(board).toContain('.ln,.zz,.wb{opacity:1}')
+  // 歯車 2 つは逆に回る
+  expect(roomSvg({ ...BASE, activity: 'run', variant: 'gears' })).toContain('class="spin rev"')
 })
 
 test('外のにぎやかさ：鳥（昼の晴れ・くもり）・遠くの丘・煙 3 つ・道を通るねこ（雨と雪はお休み）・庭の季節の生きもの', () => {

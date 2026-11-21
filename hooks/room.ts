@@ -97,10 +97,10 @@ export type VariantTable = Record<Activity, readonly string[]>
 export const VARIANTS: VariantTable = {
   rest: ['sofa', 'phone', 'game', 'mug', 'music', 'stretch'],
   sleep: ['sofa'],
-  think: ['desk'],
+  think: ['desk', 'board'],
   research: ['book', 'web', 'folders', 'flask'],
-  write: ['type'],
-  run: ['gears'],
+  write: ['type', 'build', 'cook'],
+  run: ['gears', 'panel'],
   fight: ['bug'],
   wait: ['sign'],
   done: ['hop'],
@@ -383,6 +383,9 @@ function poseOf(a: Activity, variant: string): Pose {
     case 'think':
       return { x: DESK_X, y: DESK_TOP, isSitting: true, mood: 'working', eyes: 'open', motion: 'bob' }
     case 'write':
+      // 組み立ては机の上で手もとを見る。料理はソファの前に立って、右のコンロの鍋を見る（#58）
+      if (variant === 'build') return { x: DESK_X, y: DESK_TOP, isSitting: true, mood: 'working', eyes: 'down', motion: 'bob' }
+      if (variant === 'cook') return { x: 2, y: FLOOR - 11, isSitting: false, mood: 'working', eyes: 'down', motion: 'bob' }
       return { x: DESK_X, y: DESK_TOP, isSitting: true, mood: 'working', eyes: 'open', motion: 'ty' }
     case 'run':
       return { x: DESK_X, y: DESK_TOP, isSitting: true, mood: 'working', eyes: 'open', motion: 'bob' }
@@ -464,13 +467,17 @@ export function roomSvg(s: RoomScene): string {
   rect(sofaBack, 3, 40, 26, 4, SOFA)
   add('', sofaBack)
 
-  // 机の上のモニター
-  const monitor = blank()
-  rect(monitor, 36, 23 + DESK_DROP, 15, 12, METAL)
-  rect(monitor, 37, 24 + DESK_DROP, 13, 10, SCREEN)
-  rect(monitor, 42, 35 + DESK_DROP, 3, 1, METAL)
-  add('', monitor)
-  screen(s.activity, s.variant, add)
+  // 机の上のモニター。ホワイトボードで考えるときは、モニターのかわりに机の上の小さなホワイトボード（#58）
+  if (s.activity === 'think' && s.variant === 'board') {
+    whiteboard(add)
+  } else {
+    const monitor = blank()
+    rect(monitor, 36, 23 + DESK_DROP, 15, 12, METAL)
+    rect(monitor, 37, 24 + DESK_DROP, 13, 10, SCREEN)
+    rect(monitor, 42, 35 + DESK_DROP, 3, 1, METAL)
+    add('', monitor)
+    screen(s.activity, s.variant, add)
+  }
 
   // Clawd（とぼうし）。まばたきは、違うマスだけを重ねてときどき見せる
   const hx = pose.x
@@ -517,7 +524,7 @@ export function roomSvg(s: RoomScene): string {
   rect(desk, 52, 35 + DESK_DROP, 15, 1, 0xcfd0db)
   for (let x = 53; x < 66; x += 2) dot(desk, x, 35 + DESK_DROP, 0x9a9cad)
   add('', desk)
-  if (s.activity === 'write') keys(add)
+  if (s.activity === 'write' && s.variant === 'type') keys(add)
 
   // ソファの座面とひじかけ（座っている Clawd の前）
   const sofa = blank()
@@ -788,7 +795,7 @@ function screen(a: Activity, variant: string, add: (cls: string, g: Grid, extra?
     const wave = blank()
     ;[2, 1, 1, 2, 3, 3, 2, 1, 2, 3, 2].forEach((dy, i) => dot(wave, 38 + i, 27 + DESK_DROP + dy, 0x7ee081))
     add('tw', wave)
-  } else if (a === 'write') {
+  } else if (a === 'write' && variant === 'type') {
     // コードの行が 1 行ずつ出てくる
     for (let i = 0; i < 6; i++) {
       const line = blank()
@@ -985,6 +992,21 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
       for (const [dx, dy] of [[0, -2], [2, 0], [0, 2], [-2, 0], [-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [1, 0], [0, 1], [-1, 0]] as const) dot(gear, 46 + dx, 20 + DESK_DROP + dy, 0xb0b6c8)
       dot(gear, 46, 20 + DESK_DROP, METAL)
       add('spin', gear)
+      if (s.variant === 'gears') {
+        // 小さな歯車がかみ合って、逆に回る。机の右はしで稼働ランプが点滅（#58）
+        const small = blank()
+        for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]] as const) dot(small, 49 + dx, 22 + DESK_DROP + dy, 0x9aa0b4)
+        dot(small, 49, 22 + DESK_DROP, METAL)
+        add('spin rev', small)
+        // 稼働ランプ：机の右はしの小さな黒い台に、緑のあかりが点滅する（赤だとエラーに見え、台が無いと浮いた四角に見えた）
+        const base = blank()
+        rect(base, 68, 33 + DESK_DROP, 4, 3, METAL)
+        rect(base, 68, 33 + DESK_DROP, 4, 1, 0x4a4c5e)
+        add('', base)
+        const lamp = blank()
+        rect(lamp, 69, 34 + DESK_DROP, 2, 1, 0x7ee081)
+        add('tw quick', lamp)
+      } else if (s.variant === 'panel') controlPanel(add)
       break
     }
     case 'fight': {
@@ -1034,10 +1056,141 @@ function activityProps(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, ext
     case 'research':
       researchProps(s.variant, add)
       break
-    case 'wait':
     case 'write':
+      writeProps(s.variant, add)
+      break
+    case 'wait':
       break
   }
+}
+
+// ---- かく・うごかす・かんがえるの絵の小物（#58） ----
+const stampWork = stampWith({
+  r: 0xe0464b,
+  b: 0x4f8fc6,
+  y: 0xffd166,
+  g: 0x7ee081,
+  s: 0xb0b6c8,
+  S: 0x7a8094,
+  k: 0x2a2c3a,
+  p: 0x6b6f80,
+  o: 0xff8f3a,
+  O: 0xffd166,
+  m: 0x8a6450,
+  w: 0xf5f0e6,
+  l: 0x6f8fc8,
+  e: 0xe07a6f,
+})
+const BLOCKS = ['..y..', '.rrb.', '.rrbb', 'bbrrb']
+const WRENCH = ['s.s', 'sss', '.s.', '.s.']
+const STOVE = ['kkkkkkkk', 'kSSSSSSk', 'kkkkkkkk', 'k......k', 'k......k']
+const POT = ['.pppppp.', 'pppppppp', 'pppppppp', '.pppppp.']
+const PANEL = ['kkkkk', 'kr.gk', 'kykSk', 'kkkkk', '.k.k.']
+// ホワイトボードのわくと白い面（中身は、whiteboard が 1 つずつ書いては消す）
+const BOARD = [
+  'mmmmmmmmmmmmmmm',
+  'mwwwwwwwwwwwwwm',
+  'mwwwwwwwwwwwwwm',
+  'mwwwwwwwwwwwwwm',
+  'mwwwwwwwwwwwwwm',
+  'mwwwwwwwwwwwwwm',
+  'mwwwwwwwwwwwwwm',
+  'mwwwwwwwwwwwwwm',
+  'mwwwwwwwwwwwwwm',
+  'mmmmmmmmmmmmmmm',
+  '.m...........m.',
+  '.m...........m.',
+]
+// 書く順の 4 つ：青い箱 → 矢印 → 赤い箱 → 下の箱へつなぐ線と箱
+const BOARD_STEPS = [
+  ['bbb', 'b.b', 'bbb'],
+  ['lllll', '....l'],
+  ['rrr', 'r.r', 'rrr'],
+  ['l.....', 'l..bbb', 'llllb.b', '...bbb'],
+]
+const BOARD_STEP_AT = [
+  [2, 2],
+  [5, 3],
+  [10, 2],
+  [3, 5],
+]
+
+// かく：組み立て（机の上のブロックとレンチ・火花）と料理（ソファの前のコンロと鍋・湯気・はねる具）
+function writeProps(variant: string, add: (cls: string, g: Grid, extra?: Partial<Layer>) => void) {
+  const deskTop = 36 + DESK_DROP
+  if (variant === 'build') {
+    const g = blank()
+    stampWork(g, BLOCKS, 54, deskTop - 4)
+    add('', g)
+    const wrench = blank()
+    stampWork(wrench, WRENCH, 62, deskTop - 4)
+    add('hop', wrench)
+    const spark = blank()
+    put(spark, 'spark', 60, deskTop - 7, C.spark)
+    add('fa quick', spark)
+  } else if (variant === 'cook') {
+    const stove = blank()
+    stampWork(stove, STOVE, 22, FLOOR - 5)
+    stampWork(stove, POT, 22, FLOOR - 9)
+    add('', stove)
+    // 火：コンロの上で赤と黄が交互に
+    const fireA = blank()
+    const fireB = blank()
+    for (const x of [24, 27]) {
+      dot(fireA, x, FLOOR - 5, 0xff6b3a)
+      dot(fireB, x + 1, FLOOR - 5, 0xffd166)
+    }
+    add('fa quick', fireA)
+    add('fb quick', fireB)
+    // 鍋の中で具がはねる・湯気が上がる
+    const bits = blank()
+    dot(bits, 24, FLOOR - 10, 0xe07a6f)
+    dot(bits, 27, FLOOR - 10, 0x7ee081)
+    add('hop', bits)
+    ;[0, 1].forEach(i => {
+      const steam = blank()
+      dot(steam, 24 + i * 3, FLOOR - 12, 0xe8e4ee)
+      dot(steam, 24 + i * 3, FLOOR - 13, 0xe8e4ee)
+      add('smoke', steam, { style: `animation-delay:-${i * 2}s` })
+    })
+  }
+}
+
+// うごかす：机の右はしの計器パネル。赤・黄・緑のランプが順に光る
+function controlPanel(add: (cls: string, g: Grid, extra?: Partial<Layer>) => void) {
+  const deskTop = 36 + DESK_DROP
+  const g = blank()
+  stampWork(g, PANEL, 66, deskTop - 5)
+  add('', g)
+  ;[
+    [67, 0xff6b6b],
+    [69, 0x7ee081],
+  ].forEach(([x, c], i) => {
+    const lamp = blank()
+    dot(lamp, x!, deskTop - 4, c!)
+    add('tw quick', lamp, { style: `animation-delay:-${i * 0.25}s` })
+  })
+}
+
+// かんがえる：かべのホワイトボード（箱と矢印の図）。矢印の 1 本が光る
+function whiteboard(add: (cls: string, g: Grid, extra?: Partial<Layer>) => void) {
+  // モニターの場所に、足つきの小さなホワイトボードを立てる
+  const bx = 36
+  const by = 24 + DESK_DROP
+  const g = blank()
+  stampWork(g, BOARD, bx, by)
+  add('', g)
+  // 6 秒で、図を 1 つずつ書き足し、書きおわると消して、またはじめから（止まった絵では、書きおわった図）
+  BOARD_STEPS.forEach((rows, i) => {
+    const step = blank()
+    stampWork(step, rows, bx + BOARD_STEP_AT[i]![0]!, by + BOARD_STEP_AT[i]![1]!)
+    add(`wb wb${i + 1}`, step)
+  })
+  // マーカー：いま書いているところへ動き、消すときは右へさっと動く
+  const pen = blank()
+  rect(pen, bx + 4, by + 1, 1, 2, 0x2a2c3a)
+  dot(pen, bx + 4, by + 3, 0xe07a6f)
+  add('pen', pen)
 }
 
 // ---- しらべるの絵の小物（#58） ----
@@ -1116,6 +1269,7 @@ function friends(s: RoomScene, pose: Pose, add: (cls: string, g: Grid, extra?: P
     ...(!pose.isSitting ? [{ from: pose.x - 2, to: pose.x + 20 }] : []),
     ...(s.activity === 'fight' ? [{ from: 22, to: 39 }] : []),
     ...(s.activity === 'research' && s.variant === 'folders' ? [{ from: FOLDER_XS[0]! - 2, to: FOLDER_XS.at(-1)! + 6 }] : []),
+    ...(s.activity === 'write' && s.variant === 'cook' ? [{ from: 20, to: 31 }] : []),
   ]
   const slots = [37, 49, 61, 12, 24].filter(x => taken.every(t => x + 11 < t.from || x > t.to))
   slots.slice(0, n).forEach((fx, i) => {
@@ -1231,6 +1385,13 @@ const STYLE = [
   '@keyframes come{0%{transform:translateX(-60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
   '@keyframes comer{0%{transform:translateX(60%)}92%{transform:translateX(0);opacity:1}100%{transform:translateX(0);opacity:0}}',
   '.sway.slow{animation-duration:7s}',
+  '.spin.rev{animation-direction:reverse}',
+  // ホワイトボード：6 秒で図を 1 つずつ書き足し（wb1〜wb4）、88% で消す。マーカーは書くところへ動く
+  '.wb{opacity:0;animation:6s steps(1,end) infinite}.wb1{animation-name:wb1}.wb2{animation-name:wb2}.wb3{animation-name:wb3}.wb4{animation-name:wb4}',
+  '@keyframes wb1{0%{opacity:0}8%{opacity:1}88%{opacity:0}}@keyframes wb2{0%{opacity:0}28%{opacity:1}88%{opacity:0}}',
+  '@keyframes wb3{0%{opacity:0}48%{opacity:1}88%{opacity:0}}@keyframes wb4{0%{opacity:0}68%{opacity:1}88%{opacity:0}}',
+  '.pen{animation:pen 6s steps(1,end) infinite}',
+  '@keyframes pen{0%{transform:translate(0,0)}20%{transform:translate(3px,1px)}40%{transform:translate(7px,0)}60%{transform:translate(1px,4px)}80%{transform:translate(5px,5px)}88%{transform:translate(9px,3px)}94%{transform:translate(-2px,3px)}}',
   // フォルダ探しの虫めがね：3 つのフォルダを 1 秒ずつ見る（#58）
   '.scan{animation:scan 3s steps(1,end) infinite}@keyframes scan{0%{transform:translateX(0)}33%{transform:translateX(7px)}66%{transform:translateX(14px)}}',
   // くつろぐの絵の動き（#57）：ゲームの小刻みなゆれ・音楽のリズム・体操ののびちぢみ
@@ -1249,8 +1410,8 @@ const STYLE = [
   ...[...RAIN_LAYERS, ...SNOW_LAYERS].map(l => `@keyframes ${l.id}{to{transform:translateY(${l.h}px)}}`),
   '.smoke{animation:smoke 4s linear infinite}@keyframes smoke{0%{opacity:0;transform:translate(0,2px)}30%{opacity:1}100%{opacity:0;transform:translate(2px,-6px)}}',
   // 動きを減らす設定では、止まった絵にする（どのしごとも、止まった絵で分かる）
-  // コードの行・考えごとの「…」・Zzz は、見えない（opacity:0）ところからアニメで出すので、止めたときは見せておく（#53）
-  '@media (prefers-reduced-motion: reduce){*{animation:none!important}.ln,.zz{opacity:1}}',
+  // コードの行・考えごとの「…」・Zzz・ホワイトボードの図は、見えない（opacity:0）ところからアニメで出すので、止めたときは見せておく（#53）
+  '@media (prefers-reduced-motion: reduce){*{animation:none!important}.ln,.zz,.wb{opacity:1}}',
 ].join('')
 
 function layerSvg(l: Layer): string {
