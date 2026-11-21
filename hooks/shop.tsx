@@ -2,9 +2,10 @@
 
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import type { Character, Game } from '../types'
+import type { Character, Game, Region, RegionSearch, Weather } from '../types'
 import type { Deal, Situation } from './game'
 import { countsText, dayCounts, diaryLine, formatDuration, streakOf, weekBars } from './diary'
+import { WEATHER_NAMES } from './weather'
 
 import {
   ACHIEVEMENTS,
@@ -50,7 +51,20 @@ import {
 
 export const SHOP = 'parade-shop'
 
+// 天気の地域の欄に渡すもの
+export type WeatherInput = {
+  // 選んでいる地域（null は選んでいない：日付から決まる天気）
+  region: Region | null
+  // いま使っている、ほんとうの天気と、それが取れた時刻（まだ取れていない・古すぎるときは null）
+  live: { weather: Weather; at: number } | null
+  search: RegionSearch
+  onSearch: (text: string) => void
+  onPick: (region: Region) => () => Promise<void>
+  onClear: () => Promise<void>
+}
+
 export type ShopInput = {
+  weather: WeatherInput
   game: Game
   at: Situation
   petsTotal: number
@@ -182,6 +196,8 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
       {move('country', 'はじめのおうち。木とポストと、土の道')}
       {COSMETICS.filter(c => c.place).map(dress)}
 
+      {weatherSection(ui, input.weather)}
+
       {header(`プレゼント · なかよし度「${affection.name}」`)}
       <Text dimColor>
         {affection.next
@@ -310,6 +326,57 @@ export function shopView(ui: Elements[RenderSurface], input: ShopInput): RenderE
       </Text>
       <Text dimColor>
         最高コンボ {g.maxCombo} · フィーバー {g.fevers} 回 · お仕事中のなでなで {formatHearts(g.workPets)} 回 · ぎゅっ {g.hugs} 回
+      </Text>
+    </Box>
+  )
+}
+
+// 時刻の「12:30」（使う人のタイムゾーン）
+const hhmm = (at: number) => {
+  const d = new Date(at)
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// 天気の地域：地名で探して、候補から選ぶ。選んでいなければ、日付から決まる天気（日ごとのおまかせ）
+function weatherSection(ui: Elements[RenderSurface], w: WeatherInput): RenderElement {
+  const { Box, Text, Button, Input, Link } = ui
+  const { region, live, search } = w
+  const now = region === null ? '日付から決まる、つくりものの天気（日ごとのおまかせ）' : region.label
+  return (
+    <Box key="weather" flexDirection="column">
+      <Box key="weather-h" paddingTop={1}>
+        <Text bold color="#ff9ec7">
+          ── 天気の地域 · いまは{now} ──
+        </Text>
+      </Box>
+      {region !== null ? (
+        <Box key="weather-now" columnGap={1}>
+          <Text dimColor wrap="truncate-end">
+            {live ? `いまは${WEATHER_NAMES[live.weather]}（${hhmm(live.at)} に見た · 15 分ごとに見る）` : 'まだ天気が取れていないので、日付から決まる天気で描いているよ'}
+          </Text>
+          <Button key="weather-clear" variant="secondary" onPress={w.onClear}>
+            クリア
+          </Button>
+        </Box>
+      ) : null}
+      <Input key="weather-search" placeholder="地名で探す（例: 横浜市・世田谷区・Paris）" submitLabel="探す" onSubmit={text => w.onSearch(text)} />
+      {search.status === 'searching' ? <Text dimColor>「{search.query}」を探しているよ…</Text> : null}
+      {search.status === 'error' ? <Text dimColor>探せなかった（ネットにつながらないみたい）。もう一度 Enter で探してね</Text> : null}
+      {search.status === 'done' && search.results.length === 0 ? (
+        <Text dimColor>「{search.query}」は見つからなかった。「市」「区」「町」まで入れてみてね（例: 那覇市）</Text>
+      ) : null}
+      {search.status === 'done'
+        ? search.results.map((r, i) => (
+            <Button key={`weather-pick-${i}`} variant="secondary" onPress={w.onPick(r)}>
+              {r.label}
+            </Button>
+          ))
+        : null}
+      <Text dimColor>
+        天気は Open-Meteo から（送るのは、探す地名と、だいたい 1km に丸めた緯度経度だけ）。{' '}
+        <Link href="https://open-meteo.com/">
+          Weather data by Open-Meteo.com
+        </Link>
       </Text>
     </Box>
   )

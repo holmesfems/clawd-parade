@@ -58,9 +58,19 @@ export type Pets = {
 
 export type Tick = { n: number; at: number }
 
-// 天気（#42）。日付から決まる、つくりものの天気（ほんとうの天気ではない。hooks/weather.ts の weatherOf）。
+// 天気（#42）。日付から決まる、つくりものの天気（hooks/weather.ts の weatherOf）か、天気の地域を選んでいればそのほんとうの天気（hooks/region.ts）。
 // 保存には入らない
 export type Weather = 'clear' | 'cloudy' | 'rain' | 'snow'
+
+// 天気の地域（ショップで地名から選ぶ。store の weatherRegion に残す）。選んでいれば、その地域のほんとうの天気を使う（hooks/region.ts）。
+// 緯度経度は小数第 2 位に丸めたもの
+export type Region = { name: string; label: string; lat: number; lon: number }
+
+// いちばん新しく取れた、ほんとうの天気。どの地域（緯度経度）のものか、いつ取れたかといっしょに、store の liveWeather でセッションどうし分け合う
+export type LiveWeather = { lat: number; lon: number; weather: Weather; at: number }
+
+// ショップの地名検索。searching は探している間、done は答えが来た（results が空なら見つからなかった）、error は探せなかった
+export type RegionSearch = { query: string; status: 'idle' | 'searching' | 'done' | 'error'; results: Region[] }
 
 // ---- なでなでゲーム ----
 
@@ -254,6 +264,12 @@ declare module 'claude-code' {
       dateOverride: { month: number; day: number } | null
       // /parade debug rain：この天気で描く（このセッションだけ。保存しない）。null は日付から決める
       weatherOverride: Weather | null
+      // ショップで選んだ天気の地域（store にも残す）。null は選んでいない（日付から決まる天気）
+      weatherRegion: Region | null
+      // いちばん新しく取れた、ほんとうの天気（store の liveWeather の写し）
+      liveWeather: LiveWeather | null
+      // ショップの地名検索のようす
+      regionSearch: RegionSearch
       synced: Synced
       holding: Holding
       // /parade theme：デスクトップの背景に Clawd のおへやを描く。store にも残し、次のセッションでも描く
