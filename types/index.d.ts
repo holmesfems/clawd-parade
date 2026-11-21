@@ -71,7 +71,10 @@ export type Hat = 'ribbon' | 'catEars' | 'santa' | 'crown'
 // おへやのもの（デスクトップの背景のおへやに出る。/parade theme）
 export type RoomItemId = 'lamp' | 'plant' | 'rug' | 'poster' | 'garland' | 'fishbowl'
 
-export type CosmeticId = Hat | 'shootingStars' | 'aurora' | RoomItemId
+// 背景のおうちのまわり（#59）。いなかは、はじめから。ほかはショップの「ひっこし」で買う
+export type PlaceId = 'country' | 'city' | 'sea' | 'mountain'
+
+export type CosmeticId = Hat | 'shootingStars' | 'aurora' | RoomItemId | Exclude<PlaceId, 'country'>
 
 // 背景のおへやで Clawd がしていること（Claude のようすから決める）
 export type RoomActivity = 'rest' | 'sleep' | 'think' | 'research' | 'write' | 'run' | 'fight' | 'wait' | 'done' | 'sad'
@@ -179,6 +182,8 @@ export type Game = {
   levels: Partial<Record<UpgradeId, number>>
   owned: CosmeticId[]
   hat: Hat | null
+  // 背景のおうちのまわり（買った立地か、いなか）
+  place: PlaceId
   // 新しい版の実績の id が入っていることもある（この版では見つからないだけ）
   achievements: AchievementId[]
   lastUnlock: { id: AchievementId; at: number } | null
@@ -258,6 +263,8 @@ declare module 'claude-code' {
       // 背景のおへやの、いまのしごと
       roomHeld: RoomHeld | null
       roomForce: RoomForce | null
+      // /parade debug place で選んだ、見てみたい立地（#59。買わずに絵を確かめるため）。このセッションだけで、保存しない
+      placeForce: PlaceId | null
       roomCrew: RoomCrew
       // いま背景に出している場面の名前（同じなら $.theme.set を呼ばない）
       roomScene: string | null

@@ -20,6 +20,7 @@ const BASE: RoomScene = {
   holiday: null,
   character: 'clawd',
   hat: null,
+  place: 'country',
   items: [],
   sky: { stars: 0, aurora: false, shootingStars: false, moonTrip: false, noBugs: false, telescope: false, library: false },
   side: 'right',
@@ -33,6 +34,7 @@ const FULL: RoomScene = {
   holiday: 'christmas',
   character: 'neko',
   hat: 'crown',
+  place: 'sea',
   items: [...ROOM_ITEMS],
   sky: { stars: 2, aurora: true, shootingStars: true, moonTrip: true, noBugs: true, telescope: true, library: true },
   side: 'left',
@@ -51,11 +53,15 @@ test('場面の名前は 64 文字までの英数字と - で、名前から同�
   }
   expect(parseScene('lagoon')).toBeNull()
   expect(parseScene('r1-zz0-ncax-cx-0-0-R')).toBeNull()
-  // 1.14.0 までの名前（r1）と、無い絵の番号は読まない
+  // 古い版の名前（r1・r2）と、無い絵の番号・立地は読まない
   expect(parseScene('r1-re0-dcax-cx-0-0-R')).toBeNull()
-  expect(parseScene('r2-rez0-dcax-cx-0-0-R')).toBeNull()
-  // 絵の番号は、しごとの名前のすぐあとの 1 文字
-  expect(sceneName(BASE).startsWith('r2-re00-')).toBe(true)
+  expect(parseScene('r2-re00-dcax-cx-0-0-R')).toBeNull()
+  expect(parseScene('r3-rez0-dcax-cxc-0-0-R')).toBeNull()
+  expect(parseScene('r3-re00-dcax-cxz-0-0-R')).toBeNull()
+  // 絵の番号は、しごとの名前のすぐあとの 1 文字。立地は、キャラ・ぼうしのあとの 1 文字
+  expect(sceneName(BASE).startsWith('r3-re00-')).toBe(true)
+  expect(sceneName(BASE)).toContain('-cxc-')
+  for (const place of ['country', 'city', 'sea', 'mountain'] as const) expect(parseScene(sceneName({ ...FULL, place }))).toEqual({ ...FULL, place })
 })
 
 // ---- しごと ----
@@ -168,7 +174,7 @@ test('おへやの絵：同じ場面なら同じ SVG。しごとごとに違う�
   expect(roomSvg({ ...BASE, side: 'left' })).toContain('preserveAspectRatio="xMinYMax meet"')
   for (const activity of ACTIVITIES) {
     for (const time of ['morning', 'day', 'evening', 'night', 'lateNight'] as const) {
-      expect(roomSvg({ ...FULL, activity, time }).length).toBeLessThan(60_000)
+      for (const place of ['country', 'city', 'sea', 'mountain'] as const) expect(roomSvg({ ...FULL, activity, time, place }).length).toBeLessThan(60_000)
     }
   }
 })
@@ -309,6 +315,23 @@ test('外のにぎやかさ：鳥（昼の晴れ・くもり）・遠くの丘�
   expect(roomSvg({ ...BASE, season: 'autumn' }).match(/class="leaf"/g)).toHaveLength(3)
 })
 
+test('立地（#59）：街・海辺・山は、遠くのけしき・庭・地面と道が変わる。いなかはこれまでどおり', () => {
+  const pictures = new Set((['country', 'city', 'sea', 'mountain'] as const).map(place => roomSvg({ ...BASE, place })))
+  expect(pictures.size).toBe(4)
+  expect(roomSvg({ ...BASE, place: 'country' })).toBe(roomSvg(BASE))
+  // 街は窓のもよう・道の点線、海辺は板の道・白いカモメ、いなかの木は街・海辺・山には出ない
+  const city = roomSvg({ ...BASE, place: 'city', time: 'day' })
+  expect(city).toContain('url(#bw0)')
+  expect(city).toContain('url(#dash)')
+  const sea = roomSvg({ ...BASE, place: 'sea', time: 'day' })
+  expect(sea).toContain('url(#plank)')
+  expect(sea).toContain('fill="#f2f2f2"')
+  // 季節の庭の生きものは、いなかだけ
+  expect(roomSvg({ ...BASE, place: 'mountain', season: 'autumn' })).not.toContain('class="leaf"')
+  // 雪の日は、どこも地面が白い（道の点線・板の継ぎ目は出さない）
+  expect(roomSvg({ ...BASE, place: 'city', weather: 'snow' })).not.toContain('url(#dash)"')
+})
+
 test('おへやのもの・夢のプレゼント・天気が絵に出る', () => {
   const plain = roomSvg(BASE)
   for (const id of ROOM_ITEMS) expect(roomSvg({ ...BASE, items: [id] })).not.toBe(plain)
@@ -353,6 +376,21 @@ test('/parade debug act で、しごとと絵を選んで背景に描き（保�
   expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'rest', variant: 'stretch' })
   expect((await runParade($, 'debug act off')).text).toBe('背景のしごとを、Claude のようすにもどしたよ')
   expect(sceneOf(calls.at(-1))).toMatchObject({ activity: 'rest' })
+})
+
+test('/parade debug place で、買わずにその立地で背景を描き（保存しない）、off でもどす（#59）', async ($, on) => {
+  const calls = themes(on)
+  const { held } = boot(on, { store: veteran() })
+  await startSession($, 'desktop')
+  await runParade($, 'theme')
+  expect(sceneOf(calls.at(-1))).toMatchObject({ place: 'country' })
+  expect((await runParade($, 'debug place sea')).text).toBe('背景を「海辺」で描くよ（買ってはいないよ。/parade debug place off でもどる）')
+  expect(sceneOf(calls.at(-1))).toMatchObject({ place: 'sea' })
+  expect((await runParade($, 'debug place moon')).text).toContain('立地を選んでね')
+  expect((await runParade($, 'debug place off')).text).toBe('背景のおうちのまわりを、住んでいるところにもどしたよ')
+  expect(sceneOf(calls.at(-1))).toMatchObject({ place: 'country' })
+  // 保存のゲームは、いなかのまま（見るだけで、買ってもいない）
+  expect(JSON.stringify(held.get('game') ?? {})).not.toContain('"place":"sea"')
 })
 
 test('/parade theme で背景をおへやにし、帯はセリフとなでるボタンだけ。left・right で置く側。もう一度でしまう', async ($, on) => {
