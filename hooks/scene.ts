@@ -52,6 +52,9 @@ export type SceneInput = {
   // 背景なし（#75）：空・地面・天気・季節・夢の飾りを描かず、みんなと気持ちの小物だけ。
   // 足が絵のいちばん下の行にくるよう、地面の行も持たない（テーマ表示中のデスクトップの帯で、カードの底に立たせる）
   bare?: boolean
+  // Clawd の頭に乗っている仲間（下から順。#76）。乗っていると Clawd は「> <」とふんばり、体が少しつぶれる。
+  // 乗っている仲間のぶんの空は headroom で足しておく（PERCHED_DOTS ずつ）
+  perched?: Friend[]
 }
 
 // ---- 並び（描画と当たり判定で同じものを使う） ------------------------
@@ -102,6 +105,9 @@ export function frameOf(surface: 'terminal' | 'desktop', cells: number): Frame {
 // 背景なしの絵（bare）の幅（ドット）。仲間 friends 匹とリーダーと、右の気持ちの小物の場所がちょうど入る。
 // layout はこの幅でちょうど friends 匹を並べる
 export const PERCH_MAX_FRIENDS = 4
+// 頭に乗れる仲間の数と、ひとり乗るごとに上に足す空のドット数（ミニ Clawd・子ねこの背の高さ）
+export const PERCHED_MAX = 2
+export const PERCHED_DOTS = 7
 export function perchColumns(friends: number, character: Character): number {
   const isClawd = character === 'clawd'
   const friendW = isClawd ? 11 : 10
@@ -229,6 +235,7 @@ export function drawScene({
   petted = null,
   hopping = [],
   bare = false,
+  perched = [],
 }: SceneInput): Grid {
   const isClawd = character === 'clawd'
   const W = Math.max(20, columns)
@@ -352,7 +359,11 @@ export function drawScene({
   const wave = waveOf(look, mood, pose !== null, marching, tick)
   // 雪の日は、ひまなときにときどき、うれしそうに目を細める（#42）
   const isSnowGlad = weather === 'snow' && mood === 'idle' && !marching && tick % SNOW_GLAD_EVERY < SNOW_GLAD_TICKS
-  const { eyes, mouth } = pose || wave !== null || isSnowGlad ? { eyes: 'happy' as const, mouth: 'smile' as const } : face(mood, tick)
+  const isLoaded = perched.length > 0
+  const { eyes, mouth } =
+    pose || wave !== null || isSnowGlad ? { eyes: 'happy' as const, mouth: 'smile' as const } :
+    isLoaded ? { eyes: 'squeeze' as const, mouth: 'flat' as const } :
+    face(mood, tick)
   const bob =
     pose ? 0 :
     mood === 'sleeping' ? (Math.floor(tick / 3) % 2) :
@@ -362,13 +373,18 @@ export function drawScene({
   // 歩く Clawd は足を伸ばして上下する。跳ねる・寝息のときは体ごと持ち上げる
   const reach = isClawd && step && mood !== 'done' ? bob : 0
   const s = isClawd
-    ? clawd(feel, eyes, step, tick, reach, wave)
+    ? clawd(feel, eyes, step, tick, reach, wave, isLoaded && !pose)
     : leader(eyes, mouth, step ? tick : 0, feel === 'error' ? tick : null, wave)
   const leaderX = spots.leader.x + (pose ? Math.max(-2, Math.min(2, pose.sway)) : 0)
   const top = ground - s.h - (bob - reach)
   if (look.fever) glow(g, s, leaderX, top, tick % 2 ? C.spark : C.feverGlow)
   blit(g, s, leaderX, top)
-  if (look.hat) drawHat(g, look.hat, isClawd, leaderX, top)
+  // 頭に乗っている仲間。ぼうしは仲間の下になるので、乗っている間はかぶらない。なでられているとき（pose）はみんなにっこり
+  perched.forEach((f, i) => {
+    const m = isClawd ? miniClawd(coatOf(f.type), 0, pose !== null) : kitten(coatOf(f.type), 0, pose !== null)
+    blit(g, m, leaderX + Math.floor((s.w - m.w) / 2), top - m.h * (i + 1))
+  })
+  if (look.hat && !isLoaded) drawHat(g, look.hat, isClawd, leaderX, top)
   // もらった贈り物を顔の横にかかえて、ハートを飛ばす
   if (gift !== null) {
     const icon = GIFT_ICONS[gift]

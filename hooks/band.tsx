@@ -3,13 +3,13 @@
 
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import type { Character, Friend, Game, Holding, Mood, MoodKind, Pets, Tick, TreatId, Weather, Work } from '../types'
+import type { Character, Friend, Game, Holding, Mood, MoodKind, Perched, Pets, Tick, TreatId, Weather, Work } from '../types'
 import { ACHIEVEMENTS, HOOK_FRAME_MS, affectionsOf, clockText, formatHearts, formatRate, giftOf, heldGift, isDream, isFever, isHappy, isPetted, liveCombo, lookOf, perSecond, situationOf, treatOf } from './game'
 import type { ViewProps } from './parade-view'
 import { QUICK_GIFT_DOTS, putHeart, putQuickGift, quickGiftSpot } from './decor'
 import { encodeCells, toSvg } from './encode'
 import { NIGHT, PALETTES, calendarOf, coatOf, hex, timeOfDay } from './palette'
-import { PERCH_MAX_FRIENDS, SCENE_ROWS, drawScene, frameOf, layout, perchColumns } from './scene'
+import { PERCHED_DOTS, PERCHED_MAX, PERCH_MAX_FRIENDS, SCENE_ROWS, drawScene, frameOf, layout, perchColumns } from './scene'
 import { clawdText, kaomoji } from './sprites'
 import type { AffectionName } from './game'
 import type { Calendar, Holiday, Season, TimeOfDay } from './palette'
@@ -34,6 +34,18 @@ const MIN_SCENE_CELLS = 40
 const PERCH_DOTS_PER_CELL = 2
 // 背景なしの絵の手ざわり層の高さ（行）。絵は 17 ドット（およそ 8.5 マスの幅ぶん）で、3 行あれば足まで届く
 const PERCH_ROWS = 3
+// 頭に乗った仲間が降りるまでの時間（#76）
+export const PERCHED_STAY_MS = 20_000
+
+// いま頭に乗っている仲間（下から順）。帰った仲間と、乗ってから PERCHED_STAY_MS たった仲間は降りている
+export function perchedOf(perched: Perched, list: Friend[], now: number): Friend[] {
+  const byId = new Map(list.map(f => [f.id, f]))
+  return perched
+    .filter(p => now - p.at < PERCHED_STAY_MS)
+    .map(p => byId.get(p.id))
+    .filter((f): f is Friend => f !== undefined)
+    .slice(-PERCHED_MAX)
+}
 
 const LINES: Record<MoodKind, string[]> = {
   idle: ['よろしくね！なんでも言ってね'],
@@ -271,8 +283,8 @@ function giftButtonOf(g: Game): BandText['gift'] {
 
 // デスクトップの SVG。さわったぶんのハート・傾き・仲間のジャンプと、帯に出した贈り物の札を足して描く。
 // 札を描くときは、frame.paradeColumns をもう QUICK_GIFT_DOTS 引いておく（札はそのすぐ右）
-// bare は背景なし（テーマ表示中の帯）。空を塗らず、地面の行も持たない
-export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null, bare = false) {
+// bare は背景なし（テーマ表示中の帯）。空を塗らず、地面の行も持たない。perched は頭に乗っている仲間
+export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null, bare = false, perched: Friend[] = []) {
   const petted = isPetted(p, now)
   const age = Math.floor((now - p.from) / HOOK_FRAME_MS)
   const isStroked = petted && p.kind === 'pet'
@@ -291,6 +303,7 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number,
     petted: isStroked ? { sway } : null,
     hopping: hugged,
     bare,
+    perched,
   })
   if (isStroked) {
     // なでている間は 2 コマごとにハートを出し、両脇から昇らせる
@@ -316,6 +329,8 @@ export type BandInput = BandState & {
   // デスクトップの背景におへやを描いている間（/parade theme）。デスクトップの帯は夜空を出さず、
   // 背景なしの小さな Clawd と仲間をカードの底に立たせて、セリフをその右に並べる（#75）
   isCompact?: boolean
+  // テーマ表示中の帯で、Clawd の頭に乗っている仲間（#76）
+  perched?: Perched
   onPet: () => void
   onGift: (id: TreatId) => void
 }
@@ -485,19 +500,25 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
 
   // テーマ表示中のデスクトップ：夜空のかわりに、背景なしの Clawd と仲間を左に置き、そのまま絵をなでる
   if (isDesktop && input.isCompact && cols >= MIN_SCENE_CELLS && 'Svg' in ui && 'Client' in ui) {
-    const columns = perchColumns(list.length, who)
-    const perch: Frame = { isWide: false, columns, paradeColumns: columns, headroom: frame.headroom, wordsCells: 0 }
+    // 仲間を押すと Clawd の頭に乗る（#76）。乗っている仲間は地面の列から外し、乗ったぶん上に空を足す
+    const onHead = perchedOf(input.perched ?? [], list, t.at)
+    const ground = list.filter(f => !onHead.includes(f))
+    const columns = perchColumns(ground.length, who)
+    const perch: Frame = { isWide: false, columns, paradeColumns: columns, headroom: frame.headroom + PERCHED_DOTS * onHead.length, wordsCells: 0 }
     const cells = Math.ceil(columns / PERCH_DOTS_PER_CELL)
-    const svg = desktopSvg({ ...sceneProps, columns }, perch, petted, t.at, null, true)
-    const shown = Math.min(list.length, PERCH_MAX_FRIENDS)
-    const alt = `${who === 'clawd' ? 'Clawd' : 'ねこ'}${shown ? `となかま ${shown} 匹` : ''}（さわるとなでる）`
-    const touchProps: TouchProps = { columns, paradeColumns: columns, rows: PERCH_ROWS, friends: list, character: who, isDebug, gift: null }
+    const svg = desktopSvg({ ...sceneProps, columns, friends: ground }, perch, petted, t.at, null, true, onHead)
+    const shown = Math.min(ground.length, PERCH_MAX_FRIENDS)
+    const alt =
+      `${who === 'clawd' ? 'Clawd' : 'ねこ'}${shown ? `となかま ${shown} 匹` : ''}` +
+      `${onHead.length ? `（頭の上に ${onHead.length} 匹）` : ''}（さわるとなでる）`
+    // 頭の上の仲間は Clawd と同じ列なので、さわると Clawd をなでる
+    const touchProps: TouchProps = { columns, paradeColumns: columns, rows: PERCH_ROWS + onHead.length, friends: ground, character: who, isDebug, gift: null }
     return (
       <Box flexDirection="row" alignItems="flex-end" columnGap={1}>
         <Box key="perch" width={cells} overflow="hidden" flexShrink={0}>
           <ui.Svg source={svg.source} alt={alt} />
-          <Box key="touch-layer" position="absolute" top={0} left={0} width={cells} height={PERCH_ROWS}>
-            <ui.Client key="touch" module="./touch-pad.tsx" props={touchProps} width={cells} height={PERCH_ROWS} />
+          <Box key="touch-layer" position="absolute" top={0} left={0} width={cells} height={touchProps.rows}>
+            <ui.Client key="touch" module="./touch-pad.tsx" props={touchProps} width={cells} height={touchProps.rows} />
           </Box>
         </Box>
         <Box key="side" flexDirection="column" flexShrink={1}>
