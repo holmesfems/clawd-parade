@@ -9,7 +9,7 @@ import type { ViewProps } from './parade-view'
 import { QUICK_GIFT_DOTS, putHeart, putQuickGift, quickGiftSpot } from './decor'
 import { encodeCells, toSvg } from './encode'
 import { NIGHT, PALETTES, calendarOf, coatOf, hex, timeOfDay } from './palette'
-import { SCENE_ROWS, drawScene, frameOf, layout } from './scene'
+import { PERCH_MAX_FRIENDS, SCENE_ROWS, drawScene, frameOf, layout, perchColumns } from './scene'
 import { clawdText, kaomoji } from './sprites'
 import type { AffectionName } from './game'
 import type { Calendar, Holiday, Season, TimeOfDay } from './palette'
@@ -30,6 +30,10 @@ const TOUCH_ROWS = 7
 const HOOK_HOP_FRAMES = 6
 // 絵が出せる帯の幅（マス）
 const MIN_SCENE_CELLS = 40
+// 背景なしの絵（テーマ表示中の帯）の 1 マスあたりのドット数。夜空の絵（1.5）より少し小さく描く
+const PERCH_DOTS_PER_CELL = 2
+// 背景なしの絵の手ざわり層の高さ（行）。絵は 17 ドット（およそ 8.5 マスの幅ぶん）で、3 行あれば足まで届く
+const PERCH_ROWS = 3
 
 const LINES: Record<MoodKind, string[]> = {
   idle: ['よろしくね！なんでも言ってね'],
@@ -267,7 +271,8 @@ function giftButtonOf(g: Game): BandText['gift'] {
 
 // デスクトップの SVG。さわったぶんのハート・傾き・仲間のジャンプと、帯に出した贈り物の札を足して描く。
 // 札を描くときは、frame.paradeColumns をもう QUICK_GIFT_DOTS 引いておく（札はそのすぐ右）
-export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null) {
+// bare は背景なし（テーマ表示中の帯）。空を塗らず、地面の行も持たない
+export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number, gift: BandText['gift'] = null, bare = false) {
   const petted = isPetted(p, now)
   const age = Math.floor((now - p.from) / HOOK_FRAME_MS)
   const isStroked = petted && p.kind === 'pet'
@@ -285,6 +290,7 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number,
     headroom: frame.headroom,
     petted: isStroked ? { sway } : null,
     hopping: hugged,
+    bare,
   })
   if (isStroked) {
     // なでている間は 2 コマごとにハートを出し、両脇から昇らせる
@@ -295,7 +301,7 @@ export function desktopSvg(scene: ViewProps, frame: Frame, p: Pets, now: number,
     }
   }
   if (gift) putQuickGift(g, quickGiftSpot(frame.paradeColumns).x, gift.id, gift.canAfford)
-  return toSvg(g, DESKTOP_MARKUP_PIXEL, palette)
+  return toSvg(g, DESKTOP_MARKUP_PIXEL, palette, bare)
 }
 
 // 帯を描くのに使うもの。onPet は、絵が出せないほど狭いデスクトップの「なでる」ボタン。
@@ -307,7 +313,8 @@ export type BandInput = BandState & {
   maxRows: number
   character: Character
   isDebug: boolean
-  // デスクトップの背景におへやを描いている間（/parade theme）。デスクトップの帯は絵を出さず、セリフと「なでる」ボタンだけにする
+  // デスクトップの背景におへやを描いている間（/parade theme）。デスクトップの帯は夜空を出さず、
+  // 背景なしの小さな Clawd と仲間をカードの底に立たせて、セリフをその右に並べる（#75）
   isCompact?: boolean
   onPet: () => void
   onGift: (id: TreatId) => void
@@ -470,6 +477,30 @@ export function bandView(ui: Elements[RenderSurface], input: BandInput): RenderE
       <Box flexDirection={isWide ? 'row' : 'column'}>
         {scene}
         <Box key="side" flexDirection="column" paddingLeft={isWide ? 1 : 0} paddingTop={isWide ? 1 : 0}>
+          {words}
+        </Box>
+      </Box>
+    )
+  }
+
+  // テーマ表示中のデスクトップ：夜空のかわりに、背景なしの Clawd と仲間を左に置き、そのまま絵をなでる
+  if (isDesktop && input.isCompact && cols >= MIN_SCENE_CELLS && 'Svg' in ui && 'Client' in ui) {
+    const columns = perchColumns(list.length, who)
+    const perch: Frame = { isWide: false, columns, paradeColumns: columns, headroom: frame.headroom, wordsCells: 0 }
+    const cells = Math.ceil(columns / PERCH_DOTS_PER_CELL)
+    const svg = desktopSvg({ ...sceneProps, columns }, perch, petted, t.at, null, true)
+    const shown = Math.min(list.length, PERCH_MAX_FRIENDS)
+    const alt = `${who === 'clawd' ? 'Clawd' : 'ねこ'}${shown ? `となかま ${shown} 匹` : ''}（さわるとなでる）`
+    const touchProps: TouchProps = { columns, paradeColumns: columns, rows: PERCH_ROWS, friends: list, character: who, isDebug, gift: null }
+    return (
+      <Box flexDirection="row" alignItems="flex-end" columnGap={1}>
+        <Box key="perch" width={cells} overflow="hidden" flexShrink={0}>
+          <ui.Svg source={svg.source} alt={alt} />
+          <Box key="touch-layer" position="absolute" top={0} left={0} width={cells} height={PERCH_ROWS}>
+            <ui.Client key="touch" module="./touch-pad.tsx" props={touchProps} width={cells} height={PERCH_ROWS} />
+          </Box>
+        </Box>
+        <Box key="side" flexDirection="column" flexShrink={1}>
           {words}
         </Box>
       </Box>

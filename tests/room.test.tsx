@@ -7,7 +7,7 @@ import type { Engine } from 'claude-code/testing'
 import { HOLD_MS, REST_TURN_MS, ROOM_ITEMS, STAY_MS, VARIANTS, WALK_MS, activityOf, crewOf, holdActivity, parseScene, roomSvg, sceneName, toolActivity, variantOf } from '../hooks/room'
 import type { VariantTable } from '../hooks/room'
 import type { Activity, RoomScene } from '../hooks/room'
-import { boot, mountBand, mountShop, runParade, startSession, veteran } from './helpers'
+import { boot, mountBand, mountShop, runParade, spawnFriend, startSession, textOf, veteran } from './helpers'
 
 const BASE: RoomScene = {
   activity: 'rest',
@@ -393,7 +393,7 @@ test('/parade debug place で、買わずにその立地で背景を描き（保
   expect(JSON.stringify(held.get('game') ?? {})).not.toContain('"place":"sea"')
 })
 
-test('/parade theme で背景をおへやにし、帯はセリフとなでるボタンだけ。left・right で置く側。もう一度でしまう', async ($, on) => {
+test('/parade theme で背景をおへやにし、帯は背景なしの Clawd とセリフだけ。left・right で置く側。もう一度でしまう', async ($, on) => {
   const calls = themes(on)
   const { held } = boot(on, { store: veteran() })
   await startSession($, 'desktop')
@@ -417,10 +417,13 @@ test('/parade theme で背景をおへやにし、帯はセリフとなでるボ
   expect(await theirs.find({ type: 'Svg' })).toBeUndefined()
   await theirs.unmount()
 
-  // デスクトップの帯は絵を出さず、なでるボタン
+  // デスクトップの帯は夜空を出さず、背景なしの Clawd をカードの底に立たせる（#75）。絵をなでるので、ボタンは出さない
   const band = await mountBand($, 'desktop')
-  expect(await band.find({ type: 'Svg' })).toBeUndefined()
-  expect(await band.find({ key: 'pet' })).toBeDefined()
+  const perch = (await band.find({ type: 'Svg' }))?.props as { source: string }
+  expect(perch.source).not.toContain('<rect')
+  expect(await band.find({ key: 'perch' })).toBeDefined()
+  expect(await band.find({ type: 'Client', key: 'touch' })).toBeDefined()
+  expect(await band.find({ key: 'pet' })).toBeUndefined()
   await band.unmount()
 
   const left = await runParade($, 'theme left')
@@ -434,6 +437,37 @@ test('/parade theme で背景をおへやにし、帯はセリフとなでるボ
   expect(held.get('theme')).toBe(false)
   const full = await mountBand($, 'desktop')
   expect(await full.find({ type: 'Svg' })).toBeDefined()
+})
+
+test('テーマ表示中の帯（#75）：背景なしの Clawd と仲間がカードの底に立ち、絵を直接なでて・ぎゅっとできる', async ($, on) => {
+  themes(on)
+  const { clock } = boot(on, { store: veteran({}, { theme: true }) })
+  await startSession($, 'desktop')
+  await $.turn.start({ text: 'しらべて', turnId: 't1' })
+  await spawnFriend($)
+  await clock.advance(400)
+
+  // 仲間 1 匹：絵は 2 + 12 + 18 + 22 = 54 ドット × 17 ドット（地面の行は持たず、足がいちばん下）。1 マス 2 ドットで 27 マス
+  const ui = await mountBand($, 'desktop')
+  const svg = (await ui.find({ type: 'Svg' }))?.props as { source: string; alt: string }
+  expect(svg.source).toContain('viewBox="0 0 54 17"')
+  expect(svg.source).not.toContain('<rect')
+  expect(svg.alt).toContain('となかま 1 匹')
+  const touch = await ui.find({ type: 'Client', key: 'touch' })
+  expect(touch?.props).toMatchObject({ width: 27, height: 3 })
+  // セリフは絵の右
+  expect(await ui.find({ key: 'side' })).toBeDefined()
+  await ui.resize({ columns: 27, rows: 3, in: 'touch' })
+
+  // 仲間はドット 2〜12（マス 1〜5）、リーダーはドット 14〜31（マス 7〜15）
+  await ui.pointer({ in: 'touch', type: 'down', x: 8, y: 2, button: 'left' })
+  await ui.pointer({ in: 'touch', type: 'up', x: 8, y: 2, button: 'left' })
+  await clock.advance(200)
+  expect(await textOf(ui, /なでなで 1 回目/)).toBeDefined()
+
+  await ui.pointer({ in: 'touch', type: 'down', x: 2, y: 1, button: 'left' })
+  await clock.advance(200)
+  expect(await textOf(ui, /なかまもよろこんでる/)).toBeDefined()
 })
 
 test('場面が変わらないあいだは描き直さない。しごとは 10 秒続けてから変え、おへんじ待ちにはすぐ変える', async ($, on) => {

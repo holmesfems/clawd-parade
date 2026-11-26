@@ -49,6 +49,9 @@ export type SceneInput = {
   petted?: { sway: number } | null
   // クリックされて跳ねている仲間の id
   hopping?: string[]
+  // 背景なし（#75）：空・地面・天気・季節・夢の飾りを描かず、みんなと気持ちの小物だけ。
+  // 足が絵のいちばん下の行にくるよう、地面の行も持たない（テーマ表示中のデスクトップの帯で、カードの底に立たせる）
+  bare?: boolean
 }
 
 // ---- 並び（描画と当たり判定で同じものを使う） ------------------------
@@ -94,6 +97,16 @@ export function frameOf(surface: 'terminal' | 'desktop', cells: number): Frame {
     headroom: DESKTOP_HEADROOM,
     wordsCells,
   }
+}
+
+// 背景なしの絵（bare）の幅（ドット）。仲間 friends 匹とリーダーと、右の気持ちの小物の場所がちょうど入る。
+// layout はこの幅でちょうど friends 匹を並べる
+export const PERCH_MAX_FRIENDS = 4
+export function perchColumns(friends: number, character: Character): number {
+  const isClawd = character === 'clawd'
+  const friendW = isClawd ? 11 : 10
+  const leaderW = isClawd ? 18 : 14
+  return 2 + Math.min(friends, PERCH_MAX_FRIENDS) * (friendW + GAP) + leaderW + 22
 }
 
 // 夢のプレゼントを飾る、行進の右にあいた庭（ドットの列）。地面の飾りは right に右寄せで並べ、入りきらないぶんは飾らない。
@@ -215,6 +228,7 @@ export function drawScene({
   character,
   petted = null,
   hopping = [],
+  bare = false,
 }: SceneInput): Grid {
   const isClawd = character === 'clawd'
   const W = Math.max(20, columns)
@@ -230,81 +244,86 @@ export function drawScene({
   const skyRows = 6 + sky
   // 天気（#42）で、太陽・ふつうの星・流れ星の見せかたと、雲を決める
   const skyLook = SKY_LOOKS[weather ?? 'clear']
-  if (look.aurora) drawAurora(g, tick)
-  // 贈った星が多いときの天の川は、太陽よりも奥
-  if (look.stars > 0) drawMilkyWay(g, look.stars, paradeW, skyRows)
-  // 雲は、買ったもの（オーロラ・天の川）の上には描かない。その前の空を取っておく
-  const bought = skyLook.clouds ? g.map(row => row.slice()) : null
-  // 太陽は空のいちばん奥。夢のプレゼント（虹・Clawd 座・月）と地面、みんなはあとから描くので、その前に出る。
-  // 雨の日は出さず、くもりと雪の日はうすく描いて雲の奥に。夢や季節の飾りの置き場所は、天気で動かないよう、出さない日も太陽をよけたまま
-  const sun = palette.sun ? sunOf(palette.sun, ground, paradeW) : null
-  const shownSun = skyLook.sun === 'none' ? null : sun
-  if (shownSun) drawSun(g, shownSun, skyLook.sun === 'dim' ? { to: palette.sky, by: SUN_DIM } : null)
-  const isBehindSun = (x: number, y: number) => shownSun !== null && (x - shownSun.cx) ** 2 + (y - shownSun.cy) ** 2 <= (shownSun.halo + 2) ** 2
-  // 雲は太陽の手前、ほかのもの（虹・星・夢の飾り・みんな）の奥。行進の幅の上の空だけに
-  const clouds = skyLook.clouds && bought ? drawClouds(g, skyLook.clouds, palette, paradeW, tick, (x, y) => bought[y]![x] === null) : null
-  const isClouded = (x: number, y: number) => clouds !== null && clouds.has(y * W + x)
-
-  // 並びを先に決めて、行進の右にあいた「庭」に夢のプレゼントを飾る
   const spots = layout(W, paradeColumns, friends, character)
-  const { yard } = spots
-  const dreams = yard ? look.dreams : []
-  if (yard && dreams.includes('noBugs')) drawRainbow(g, yard, dreams, ground)
+  if (!bare) drawBackground()
 
-  // 空の星。遠くにあるので歩いても動かさない
-  starsOf(W, skyRows).forEach(({ x, y }, i) => {
-    // 星が少ない時間帯は、決まった星だけを残す（毎コマ同じ星）。星の場所の hash（i * 2、i * 2 + 1）とは別の値で決める
-    if (palette.stars < 1 && hash(-1 - i) >= palette.stars) return
-    // 太陽の上には星を出さない。雨の日は出さず、雲のかかるところ（またたいたときの十字も入れて）にも出さない
-    if (isBehindSun(x, y)) return
-    if (skyLook.stars === 'none') return
-    if (skyLook.stars === 'clouds' && [-1, 0, 1].some(dx => [0, 1, 2].some(dy => isClouded(x + dx, y + dy)))) return
-    const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
-    put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? palette.star : palette.starDim)
-  })
-  // 季節の花びら・葉・ほたる（#41）は、星の手前で、贈った星や夢の飾り・地面・みんなより奥。行進の幅（セリフの空と札の左）だけに出す
-  const isDark = isDarkSky(palette)
-  // 雨と雪の日は、季節の降るものを止めて、かわりに雨つぶ・雪を降らせる（ふたつの降るものを重ねない）
-  if (calendar && skyLook.seasonal) drawParticles(g, calendar.season, isDark, paradeW, ground, tick)
-  if (weather) drawPrecip(g, weather, paradeW, ground, tick)
-  // 空飛ぶ船・ふたりの星と、季節の飾りの置き場所。tick では変わらないので、同じ並び・飾り・日付・空のあいだは覚えておく
-  const stars = yard && look.stars > 0 ? giftedStarSpots(paradeW, skyRows, leaderSpan(spots.leader)).slice(0, look.stars) : []
-  const room: SkyRoom | null = yard ? { yard, dreams, sky, ground, sun, crowd: crowdOf(spots), stars } : null
-  const { skySpots, plan } = placementOf(room, calendar, palette, (weather ?? 'clear') === 'clear')
-  // 夏の入道雲は、贈った星・夢の飾り・みんなの奥
-  if (plan) drawSeasonCloud(g, plan)
-  // 贈った星は、昼も含めてどの時間帯でも出す（流れ星やオーロラと同じ）。セリフの空には出さない
-  if (look.stars > 0) drawGiftedStars(g, look.stars, paradeW, skyRows, Math.floor(tick / twinkleTicks), leaderSpan(spots.leader), isBehindSun)
-  if (yard && dreams.includes('constellation')) drawConstellation(g, yard, sky, tick, palette)
-  if (yard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
-  // 空飛ぶ船・ふたりの星は、Clawd 座・月・虹・地面の飾り・みんなから 1 ドットあけた空に（贈った星の手前）
-  drawSkyDreams(g, skySpots, tick)
-  if (plan) drawSeasonSky(g, plan)
-  // 買った流れ星は、雨の日だけ出さない。くもりと雪の日は、雲のところだけかくれる
-  if (look.shootingStars && skyLook.shootingStars) drawShootingStar(g, tick, palette, isClouded)
-  if (look.fever) drawHeartRain(g, tick)
+  // 背景（空・天気・季節・夢の飾り・地面）。背景なし（bare）のときは描かない
+  function drawBackground() {
+    if (look.aurora) drawAurora(g, tick)
+    // 贈った星が多いときの天の川は、太陽よりも奥
+    if (look.stars > 0) drawMilkyWay(g, look.stars, paradeW, skyRows)
+    // 雲は、買ったもの（オーロラ・天の川）の上には描かない。その前の空を取っておく
+    const bought = skyLook.clouds ? g.map(row => row.slice()) : null
+    // 太陽は空のいちばん奥。夢のプレゼント（虹・Clawd 座・月）と地面、みんなはあとから描くので、その前に出る。
+    // 雨の日は出さず、くもりと雪の日はうすく描いて雲の奥に。夢や季節の飾りの置き場所は、天気で動かないよう、出さない日も太陽をよけたまま
+    const sun = palette.sun ? sunOf(palette.sun, ground, paradeW) : null
+    const shownSun = skyLook.sun === 'none' ? null : sun
+    if (shownSun) drawSun(g, shownSun, skyLook.sun === 'dim' ? { to: palette.sky, by: SUN_DIM } : null)
+    const isBehindSun = (x: number, y: number) => shownSun !== null && (x - shownSun.cx) ** 2 + (y - shownSun.cy) ** 2 <= (shownSun.halo + 2) ** 2
+    // 雲は太陽の手前、ほかのもの（虹・星・夢の飾り・みんな）の奥。行進の幅の上の空だけに
+    const clouds = skyLook.clouds && bought ? drawClouds(g, skyLook.clouds, palette, paradeW, tick, (x, y) => bought[y]![x] === null) : null
+    const isClouded = (x: number, y: number) => clouds !== null && clouds.has(y * W + x)
 
-  // 地面と草花（左へ流れる）。季節があれば、地面の線に落ちた花びら・葉や、うすく積もった雪をまぜる。
-  // 天気があれば、雨の水たまりや、雪の日の厚めの雪も
-  const season = calendar?.season ?? null
-  const flower = weather ? weatherFlower(weather, flowerOf(season, palette.flower)) : flowerOf(season, palette.flower)
-  for (let x = 0; x < W; x++) {
-    const at = x + scroll
-    if (at % 6 < 3) g[ground]![x] = palette.ground
-    if (season) g[ground]![x] = groundAccent(season, at, g[ground]![x] ?? null)
-    if (weather) g[ground]![x] = weatherGround(weather, at, g[ground]![x] ?? null, tick)
-    if (at % 29 === 0) {
-      g[ground - 1]![x] = palette.grass
-      g[ground]![x] = palette.grass
+    // 並びを先に決めて、行進の右にあいた「庭」に夢のプレゼントを飾る
+    const { yard } = spots
+    const dreams = yard ? look.dreams : []
+    if (yard && dreams.includes('noBugs')) drawRainbow(g, yard, dreams, ground)
+
+    // 空の星。遠くにあるので歩いても動かさない
+    starsOf(W, skyRows).forEach(({ x, y }, i) => {
+      // 星が少ない時間帯は、決まった星だけを残す（毎コマ同じ星）。星の場所の hash（i * 2、i * 2 + 1）とは別の値で決める
+      if (palette.stars < 1 && hash(-1 - i) >= palette.stars) return
+      // 太陽の上には星を出さない。雨の日は出さず、雲のかかるところ（またたいたときの十字も入れて）にも出さない
+      if (isBehindSun(x, y)) return
+      if (skyLook.stars === 'none') return
+      if (skyLook.stars === 'clouds' && [-1, 0, 1].some(dx => [0, 1, 2].some(dy => isClouded(x + dx, y + dy)))) return
+      const twinkle = (Math.floor(tick / twinkleTicks) + i * 3) % 7 === 0
+      put(g, twinkle ? 'spark' : 'tiny', x - (twinkle ? 1 : 0), y, twinkle ? palette.star : palette.starDim)
+    })
+    // 季節の花びら・葉・ほたる（#41）は、星の手前で、贈った星や夢の飾り・地面・みんなより奥。行進の幅（セリフの空と札の左）だけに出す
+    const isDark = isDarkSky(palette)
+    // 雨と雪の日は、季節の降るものを止めて、かわりに雨つぶ・雪を降らせる（ふたつの降るものを重ねない）
+    if (calendar && skyLook.seasonal) drawParticles(g, calendar.season, isDark, paradeW, ground, tick)
+    if (weather) drawPrecip(g, weather, paradeW, ground, tick)
+    // 空飛ぶ船・ふたりの星と、季節の飾りの置き場所。tick では変わらないので、同じ並び・飾り・日付・空のあいだは覚えておく
+    const stars = yard && look.stars > 0 ? giftedStarSpots(paradeW, skyRows, leaderSpan(spots.leader)).slice(0, look.stars) : []
+    const room: SkyRoom | null = yard ? { yard, dreams, sky, ground, sun, crowd: crowdOf(spots), stars } : null
+    const { skySpots, plan } = placementOf(room, calendar, palette, (weather ?? 'clear') === 'clear')
+    // 夏の入道雲は、贈った星・夢の飾り・みんなの奥
+    if (plan) drawSeasonCloud(g, plan)
+    // 贈った星は、昼も含めてどの時間帯でも出す（流れ星やオーロラと同じ）。セリフの空には出さない
+    if (look.stars > 0) drawGiftedStars(g, look.stars, paradeW, skyRows, Math.floor(tick / twinkleTicks), leaderSpan(spots.leader), isBehindSun)
+    if (yard && dreams.includes('constellation')) drawConstellation(g, yard, sky, tick, palette)
+    if (yard && dreams.includes('moonTrip')) stampDeco(g, DECOS.moon, yard.right - 7, Math.max(0, sky - 3))
+    // 空飛ぶ船・ふたりの星は、Clawd 座・月・虹・地面の飾り・みんなから 1 ドットあけた空に（贈った星の手前）
+    drawSkyDreams(g, skySpots, tick)
+    if (plan) drawSeasonSky(g, plan)
+    // 買った流れ星は、雨の日だけ出さない。くもりと雪の日は、雲のところだけかくれる
+    if (look.shootingStars && skyLook.shootingStars) drawShootingStar(g, tick, palette, isClouded)
+    if (look.fever) drawHeartRain(g, tick)
+
+    // 地面と草花（左へ流れる）。季節があれば、地面の線に落ちた花びら・葉や、うすく積もった雪をまぜる。
+    // 天気があれば、雨の水たまりや、雪の日の厚めの雪も
+    const season = calendar?.season ?? null
+    const flower = weather ? weatherFlower(weather, flowerOf(season, palette.flower)) : flowerOf(season, palette.flower)
+    for (let x = 0; x < W; x++) {
+      const at = x + scroll
+      if (at % 6 < 3) g[ground]![x] = palette.ground
+      if (season) g[ground]![x] = groundAccent(season, at, g[ground]![x] ?? null)
+      if (weather) g[ground]![x] = weatherGround(weather, at, g[ground]![x] ?? null, tick)
+      if (at % 29 === 0) {
+        g[ground - 1]![x] = palette.grass
+        g[ground]![x] = palette.grass
+      }
+      if (at % 47 === 13) {
+        g[ground - 2]![x] = flower
+        g[ground - 1]![x] = palette.grass
+      }
     }
-    if (at % 47 === 13) {
-      g[ground - 2]![x] = flower
-      g[ground - 1]![x] = palette.grass
-    }
+
+    if (yard) drawYard(g, dreams, yard, ground, tick)
+    if (plan) drawHolidayItem(g, plan, ground, tick, isDark)
   }
-
-  if (yard) drawYard(g, dreams, yard, ground, tick)
-  if (plan) drawHolidayItem(g, plan, ground, tick, isDark)
 
   // 並び：いちばん新しい仲間がリーダーのすぐ後ろ
   const byId = new Map(friends.map(f => [f.id, f]))
@@ -357,7 +376,7 @@ export function drawScene({
     stampIcon(g, icon, leaderX + s.w + 1, gy)
     put(g, tick % 4 < 2 ? 'heart' : 'small', leaderX + s.w + 2 + (tick % 3), gy - 5, C.heart)
   }
-  if (pose) return g
+  if (pose) return finish()
 
   // 気持ちを表す小物はリーダーの右上（上に足した空のぶんだけ下げる）
   const fx = leaderX + s.w + 1
@@ -402,7 +421,12 @@ export function drawScene({
       break
   }
 
-  return g
+  return finish()
+
+  // 背景なしは地面の行を落として、足を絵のいちばん下の行にそろえる
+  function finish(): Grid {
+    return bare ? g.slice(0, ground) : g
+  }
 }
 
 // ---- 置き場所を覚えておく ---------------------------------------------------
