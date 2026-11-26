@@ -58,6 +58,9 @@ export type Pets = {
 
 export type Tick = { n: number; at: number }
 
+// テーマ表示中の帯で、Clawd の頭に乗っている仲間（下から順）と、乗った時刻（#76）
+export type Perched = { id: string; at: number }[]
+
 // 天気（#42）。日付から決まる、つくりものの天気（hooks/weather.ts の weatherOf）か、天気の地域を選んでいればそのほんとうの天気（hooks/region.ts）。
 // 保存には入らない
 export type Weather = 'clear' | 'cloudy' | 'rain' | 'snow'
@@ -284,6 +287,8 @@ declare module 'claude-code' {
       roomCrew: RoomCrew
       // いま背景に出している場面の名前（同じなら $.theme.set を呼ばない）
       roomScene: string | null
+      // テーマ表示中の帯で、Clawd の頭に乗っている仲間（#76）。このセッションだけで、保存しない
+      perched: Perched
     }
   }
 }

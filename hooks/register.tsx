@@ -3,8 +3,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Character, DiaryKind, LiveWeather, PlaceId, Region, RegionSearch, RoomCrew, RoomForce, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
-import { bandView } from './band'
+import type { Character, DiaryKind, LiveWeather, PlaceId, Region, RegionSearch, RoomCrew, RoomForce, RoomHeld, Friend, Game, Holding, Mood, MoodKind, Perched, Pets, Synced, Tick, TouchKind, TreatId, Weather, Work } from '../types'
+import { PERCHED_STAY_MS, bandView } from './band'
 import { dayOf, record, tidyDiary } from './diary'
 import type { Deal, Situation } from './game'
 import {
@@ -38,7 +38,7 @@ import { HOLIDAY_NAMES, SEASON_NAMES, calendarOf, parseMonthDay, timeOfDay } fro
 import { ACTIVITY_NAMES, ROOM_ITEMS, RULER_SCENE, VARIANTS, activityOf, crewOf, holdActivity, parseScene, roomSvg, rulerSvg, sceneName } from './room'
 import type { Activity } from './room'
 import type { RoomScene, Side } from './room'
-import { isMarching } from './scene'
+import { PERCHED_MAX, isMarching } from './scene'
 import { WEATHER_NAMES, WEATHER_WORDS, weatherAt } from './weather'
 import { SHOP, shopView } from './shop'
 import { LIVE_EVERY_MS, forecastUrl, isSamePlace, liveOf, liveWeatherOf, parseCurrent, parseSearch, regionOf, searchUrl } from './region'
@@ -105,6 +105,7 @@ const roomForce = atom({ plugin: 'clawd-parade', key: 'roomForce' } as const, nu
 const placeForce = atom({ plugin: 'clawd-parade', key: 'placeForce' } as const, null as PlaceId | null)
 const roomCrew = atom({ plugin: 'clawd-parade', key: 'roomCrew' } as const, { count: 0, arriving: 0, since: 0 } as RoomCrew)
 const roomScene = atom({ plugin: 'clawd-parade', key: 'roomScene' } as const, null as string | null)
+const perched = atom({ plugin: 'clawd-parade', key: 'perched' } as const, [] as Perched)
 
 const PETS_KEY = 'pets'
 const GAME_KEY = 'game'
@@ -661,7 +662,17 @@ export const register: Register = on => {
       // 札は帯に出した贈り物。押したあとに下ろされていたら何もしない
       const { favorite } = await read($, game)
       if (favorite !== null && treatOf(favorite)) await giveTreat($, favorite)
-    } else if (message.kind === 'hug') await pet($, 'hug', message.id !== undefined ? { friend: message.id } : {})
+    } else if (message.kind === 'hug') {
+      await pet($, 'hug', message.id !== undefined ? { friend: message.id } : {})
+      // テーマ表示中の帯では、ぎゅっとした仲間が Clawd の頭に乗る（#76）。乗れるのは PERCHED_MAX 匹まで（古い順に降りる）
+      const id = message.id
+      if (id !== undefined && (await read($, backdrop))) {
+        const now = await $.clock.now()
+        await update($, perched, list =>
+          [...list.filter(p => p.id !== id && now - p.at < PERCHED_STAY_MS), { id, at: now }].slice(-PERCHED_MAX),
+        )
+      }
+    }
     else await pet($, 'pet', message.x !== undefined ? { hand: message.x } : {})
 
     return next(e)
@@ -795,6 +806,7 @@ export const register: Register = on => {
       isDebug,
       // 背景におへやを描いている間は、デスクトップの帯は夜空をやめ、背景なしの Clawd とセリフだけ
       isCompact: await read($, backdrop),
+      perched: await read($, perched),
       onPet: () => void pet($, 'pet'),
       onGift: id => void giveTreat($, id),
     })

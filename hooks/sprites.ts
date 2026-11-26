@@ -60,7 +60,8 @@ const stampFace = stampWith({ k: C.eye, w: C.white, c: C.cheek, b: C.tear })
 const stampOutlined = (s: Sprite, rows: Stamp, x: number, y: number) => stampFace(s.px, rows, x + 1, y + 1)
 
 // down は、手もとの本を見下ろす目（背景のしらべる）
-type Eyes = 'open' | 'blink' | 'happy' | 'wide' | 'sad' | 'x' | 'down'
+// squeeze は、頭に仲間が乗って「> <」とふんばる目（#76）
+type Eyes = 'open' | 'blink' | 'happy' | 'wide' | 'sad' | 'x' | 'down' | 'squeeze'
 type Mouth = 'smile' | 'open' | 'flat' | 'frown' | 'tiny'
 
 const EYES: Record<Eyes, [Stamp, Stamp]> = {
@@ -71,6 +72,8 @@ const EYES: Record<Eyes, [Stamp, Stamp]> = {
   sad: [['k..', '.kk'], ['..k', 'kk.']],
   x: [['k.k', '.k.'], ['k.k', '.k.']],
   down: [['...', '.kk'], ['...', '.kk']],
+  // ねこの目は 2 行しかなく「> <」が描けないので、ぎゅっとつぶる
+  squeeze: [['...', 'kkk'], ['...', 'kkk']],
 }
 const MOUTHS: Record<Mouth, Stamp> = {
   smile: ['k..k', '.kk.'],
@@ -177,6 +180,7 @@ const CLAWD_EYES: Record<Eyes, [Stamp, Stamp]> = {
   sad: [['....', '..kk', 'kk..'], ['....', 'kk..', '..kk']],
   x: [['k..k', '.kk.', 'k..k'], ['k..k', '.kk.', 'k..k']],
   down: [['....', '..kk', '..kk'], ['....', '..kk', '..kk']],
+  squeeze: [['kk..', '..kk', 'kk..'], ['..kk', 'kk..', '..kk']],
 }
 const CLAWD_MOUTHS: Partial<Record<MoodKind, Stamp>> = {
   done: ['k..k', '.kk.'],
@@ -186,8 +190,10 @@ const CLAWD_MOUTHS: Partial<Record<MoodKind, Stamp>> = {
 }
 const BLUSHING: MoodKind[] = ['done', 'plan', 'permission', 'waiting']
 
-export function clawd(mood: MoodKind, eyes: Eyes, step: number, tick: number, reach = 0, wave: Wave | null = null): Sprite {
-  const s = flat([...(wave === null ? CLAWD : CLAWD_WAVE[wave]), ...walkLegs(CLAWD_LEG, 3 + reach, CLAWD_LIFT[step] ?? null)], C.body)
+// squash は、頭に仲間が乗って体が 1 ドットつぶれた形（#76）
+export function clawd(mood: MoodKind, eyes: Eyes, step: number, tick: number, reach = 0, wave: Wave | null = null, squash = false): Sprite {
+  const body = wave === null ? CLAWD : CLAWD_WAVE[wave]
+  const s = flat([...(squash ? body.filter((_, y) => y !== 6) : body), ...walkLegs(CLAWD_LEG, 3 + reach, CLAWD_LIFT[step] ?? null)], C.body)
   stampFace(s.px, CLAWD_EYES[eyes][0], 4, 1)
   stampFace(s.px, CLAWD_EYES[eyes][1], 10, 1)
   const mouth = CLAWD_MOUTHS[mood]

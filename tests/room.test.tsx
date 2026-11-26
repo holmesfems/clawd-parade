@@ -470,6 +470,48 @@ test('テーマ表示中の帯（#75）：背景なしの Clawd と仲間がカ�
   expect(await textOf(ui, /なかまもよろこんでる/)).toBeDefined()
 })
 
+test('テーマ表示中の帯（#76）：仲間を押すと Clawd の頭に乗り、Clawd は「> <」。2 匹まで、20 秒で降りる', async ($, on) => {
+  themes(on)
+  const { clock } = boot(on, { store: veteran({}, { theme: true }) })
+  await startSession($, 'desktop')
+  await $.turn.start({ text: 'しらべて', turnId: 't1' })
+  await spawnFriend($, 'Explore', 'a')
+  await spawnFriend($, 'Plan', 'b')
+  await spawnFriend($, 'general-purpose', 'c')
+  await clock.advance(400)
+
+  const svgOf = async (ui: Awaited<ReturnType<typeof mountBand>>) => (await ui.find({ type: 'Svg' }))?.props as { source: string; alt: string }
+  // 仲間 3 匹：2 + 36 + 18 + 22 = 78 ドット × 17 ドット。いちばん古い仲間がドット 2〜12（マス 1〜5）
+  const ui = await mountBand($, 'desktop')
+  expect((await svgOf(ui)).source).toContain('viewBox="0 0 78 17"')
+  await ui.resize({ columns: 39, rows: 3, in: 'touch' })
+  await ui.pointer({ in: 'touch', type: 'down', x: 2, y: 1, button: 'left' })
+  await ui.pointer({ in: 'touch', type: 'up', x: 2, y: 1, button: 'left' })
+  await clock.advance(200)
+
+  // 1 匹乗ると地面は 2 匹（66 ドット）で、絵は 7 ドット高くなる
+  const one = await svgOf(ui)
+  expect(one.source).toContain('viewBox="0 0 66 24"')
+  expect(one.alt).toContain('頭の上に 1 匹')
+
+  // もう 2 匹押しても、乗れるのは 2 匹まで
+  for (let k = 0; k < 2; k++) {
+    await ui.resize({ columns: 33, rows: 4, in: 'touch' })
+    await ui.pointer({ in: 'touch', type: 'down', x: 2, y: 1, button: 'left' })
+    await ui.pointer({ in: 'touch', type: 'up', x: 2, y: 1, button: 'left' })
+    await clock.advance(200)
+  }
+  const two = await svgOf(ui)
+  expect(two.alt).toContain('頭の上に 2 匹')
+  expect(two.source).toContain('viewBox="0 0 54 31"')
+
+  // 20 秒たつと降りる
+  await clock.advance(21_000)
+  const down = await svgOf(ui)
+  expect(down.alt).not.toContain('頭の上')
+  expect(down.source).toContain('viewBox="0 0 78 17"')
+})
+
 test('場面が変わらないあいだは描き直さない。しごとは 10 秒続けてから変え、おへんじ待ちにはすぐ変える', async ($, on) => {
   const calls = themes(on)
   on('tool.call', async () => ({ result: {} }))
