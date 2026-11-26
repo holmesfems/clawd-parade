@@ -793,7 +793,7 @@ export const register: Register = on => {
       maxRows: e.props.maxRows,
       character: who,
       isDebug,
-      // 背景におへやを描いている間は、デスクトップの帯はセリフと「なでる」ボタンだけ
+      // 背景におへやを描いている間は、デスクトップの帯は夜空をやめ、背景なしの Clawd とセリフだけ
       isCompact: await read($, backdrop),
       onPet: () => void pet($, 'pet'),
       onGift: id => void giveTreat($, id),

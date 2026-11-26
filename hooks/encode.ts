@@ -68,7 +68,8 @@ export function pathsOf(g: Grid): string {
 }
 
 // palette は drawScene に渡したものと同じにする（背景の空の色）
-export function toSvg(g: Grid, pixel: number, palette: Palette): { source: string; width: number; height: number } {
+// isClear なら空の色を塗らず、背景を透かす（背景なしの絵）
+export function toSvg(g: Grid, pixel: number, palette: Palette, isClear = false): { source: string; width: number; height: number } {
   const w = g[0]?.length ?? 0
   const h = g.length
   const body = pathsOf(g)
@@ -76,7 +77,7 @@ export function toSvg(g: Grid, pixel: number, palette: Palette): { source: strin
   const height = h * pixel
   const source =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${width}" height="${height}" shape-rendering="crispEdges">` +
-    `<rect width="${w}" height="${h}" rx="1.5" fill="${hex(palette.sky)}"/>${body}</svg>`
+    `${isClear ? '' : `<rect width="${w}" height="${h}" rx="1.5" fill="${hex(palette.sky)}"/>`}${body}</svg>`
   return { source, width, height }
 }
 
